@@ -3,30 +3,66 @@ set -e
 
 ADDON_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(dirname "$ADDON_DIR")"
-SKILLS_DIR="$PROJECT_ROOT/.claude/skills"
-WORKTREES_DIR="$PROJECT_ROOT/.claude/worktrees"
+
+# Same tool registry as install.sh (Bash 3.2 compatible)
+get_tool_dir() {
+  case "$1" in
+    claude-code)     echo ".claude" ;;
+    cursor)          echo ".cursor" ;;
+    windsurf)        echo ".windsurf" ;;
+    cline)           echo ".cline" ;;
+    roo)             echo ".roo" ;;
+    trae)            echo ".trae" ;;
+    kiro)            echo ".kiro" ;;
+    github-copilot)  echo ".github/copilot" ;;
+    *)               echo "" ;;
+  esac
+}
+
+ALL_TOOLS="claude-code cursor windsurf cline roo trae kiro github-copilot"
 
 echo "=== BMAD Autopilot Add-On Uninstaller ==="
 echo ""
 
-# --- 1. Remove add-on skills ---
-removed=0
-for skill in "$ADDON_DIR/skills"/*/; do
-  [ -d "$skill" ] || continue
-  skill_name=$(basename "$skill")
-  target="$SKILLS_DIR/$skill_name"
-  if [ -d "$target" ]; then
-    rm -rf "$target"
-    echo "Removed: $skill_name"
-    removed=$((removed + 1))
+# --- 1. Find and remove add-on skills from ALL tool directories ---
+total_removed=0
+
+for tool in $ALL_TOOLS; do
+  TOOL_DIR=$(get_tool_dir "$tool")
+  SKILLS_DIR="$PROJECT_ROOT/$TOOL_DIR/skills"
+
+  [ -d "$SKILLS_DIR" ] || continue
+
+  removed=0
+  for skill in "$ADDON_DIR/skills"/*/; do
+    [ -d "$skill" ] || continue
+    skill_name=$(basename "$skill")
+    target="$SKILLS_DIR/$skill_name"
+    if [ -d "$target" ]; then
+      rm -rf "$target"
+      removed=$((removed + 1))
+    fi
+  done
+
+  if [ "$removed" -gt 0 ]; then
+    echo "$tool: removed $removed skills from $TOOL_DIR/skills/"
+    total_removed=$((total_removed + removed))
+  fi
+
+  # Remove backups for this tool
+  BACKUP_DIR="$PROJECT_ROOT/$TOOL_DIR/.addon-backups"
+  if [ -d "$BACKUP_DIR" ]; then
+    rm -rf "$BACKUP_DIR"
+    echo "$tool: removed backup directory"
   fi
 done
 
-if [ "$removed" -eq 0 ]; then
-  echo "No add-on skills found to remove."
+if [ "$total_removed" -eq 0 ]; then
+  echo "No add-on skills found in any tool directory."
 fi
 
 # --- 2. Clean up worktrees (check dirty first) ---
+WORKTREES_DIR="$PROJECT_ROOT/.claude/worktrees"
 if [ -d "$WORKTREES_DIR" ]; then
   echo ""
   echo "Cleaning worktrees..."
@@ -35,10 +71,8 @@ if [ -d "$WORKTREES_DIR" ]; then
   for wt in "$WORKTREES_DIR"/*/; do
     [ -d "$wt" ] || continue
     wt_name=$(basename "$wt")
-    # Normalize path for git worktree remove
     wt_abs="$(cd "$wt" 2>/dev/null && pwd)" || wt_abs="$wt"
 
-    # Check for uncommitted changes
     if git -C "$wt" status --porcelain 2>/dev/null | grep -q .; then
       echo "  SKIPPED: $wt_name (has uncommitted changes)"
       skipped=$((skipped + 1))
@@ -64,11 +98,5 @@ if [ -f "$PROJECT_ROOT/.autopilot.lock" ]; then
   echo "Removed .autopilot.lock"
 fi
 
-# --- 4. Remove backups ---
-if [ -d "$PROJECT_ROOT/.claude/.addon-backups" ]; then
-  rm -rf "$PROJECT_ROOT/.claude/.addon-backups"
-  echo "Removed backup directory"
-fi
-
 echo ""
-echo "Add-on uninstalled. BMAD skills are unaffected."
+echo "Add-on uninstalled ($total_removed skills removed). BMAD skills are unaffected."

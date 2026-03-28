@@ -21,40 +21,79 @@ npx bmad-method install --modules bmm,tea --tools claude-code --yes
 
 ## Install the Add-On
 
-### Standard Install
+### Interactive Install (recommended)
 
 ```bash
 bash _bmad-addons/install.sh
 ```
 
-This will:
+The installer will:
 1. Verify BMAD is installed
-2. Back up existing `bmad-autopilot-on/off` skills
-3. Copy enhanced skills to `.claude/skills/`
-4. Copy all `bmad-ma-*` skills
-5. Add `.autopilot.lock` and `.claude/.addon-backups/` to `.gitignore`
+2. Auto-detect which tools have BMAD configured
+3. Prompt you to select target tools (or press Enter to use detected ones)
+4. Install 9 skills to each selected tool's skills directory
+5. Back up any existing skills before overwriting
+6. Add artifact entries to `.gitignore`
+
+### Specify Tools Directly
+
+```bash
+# Single tool
+bash _bmad-addons/install.sh --tools claude-code
+
+# Multiple tools
+bash _bmad-addons/install.sh --tools claude-code,cursor,windsurf
+
+# All supported tools
+bash _bmad-addons/install.sh --tools all
+```
+
+### Non-Interactive (CI/CD)
+
+```bash
+bash _bmad-addons/install.sh --tools claude-code,cursor --yes
+```
 
 ### Dry Run (preview without changes)
 
 ```bash
-bash _bmad-addons/install.sh --dry-run
+bash _bmad-addons/install.sh --tools claude-code,cursor --dry-run
 ```
 
 ### Force Install (skip backups)
 
 ```bash
-bash _bmad-addons/install.sh --force
+bash _bmad-addons/install.sh --tools claude-code --force
 ```
+
+### Supported Tools
+
+| Tool | Skills Directory | Notes |
+|------|-----------------|-------|
+| `claude-code` | `.claude/skills/` | CLI, desktop, web, IDE extensions |
+| `cursor` | `.cursor/skills/` | Cursor IDE |
+| `windsurf` | `.windsurf/skills/` | Windsurf IDE |
+| `cline` | `.cline/skills/` | VS Code extension |
+| `roo` | `.roo/skills/` | VS Code extension |
+| `trae` | `.trae/skills/` | Trae IDE |
+| `kiro` | `.kiro/skills/` | Kiro IDE |
+| `github-copilot` | `.github/copilot/skills/` | GitHub Copilot |
+
+All tools use the same universal SKILL.md format.
 
 ## Verify Installation
 
-After install, check that skills are available:
+After install, check that skills are available in your tool's directory:
 
 ```bash
+# For Claude Code
 ls .claude/skills/bmad-autopilot-* .claude/skills/bmad-ma-*
+
+# For Cursor
+ls .cursor/skills/bmad-autopilot-* .cursor/skills/bmad-ma-*
 ```
 
-You should see 9 skill directories:
+You should see 9 skill directories per tool:
 - `bmad-autopilot-on`, `bmad-autopilot-off`
 - `bmad-ma-code-review`, `bmad-ma-codebase-map`, `bmad-ma-assess`
 - `bmad-ma-reverse-architect`, `bmad-ma-migrate`

@@ -16,10 +16,16 @@ This add-on enhances BMAD's autopilot with two capabilities:
 # 1. Install BMAD (if not already)
 npx bmad-method install --modules bmm --tools claude-code --yes
 
-# 2. Install the add-on
+# 2. Install the add-on (interactive tool selection)
 bash _bmad-addons/install.sh
 
-# 3. Start the autopilot in Claude Code
+# Or specify tools directly:
+bash _bmad-addons/install.sh --tools claude-code,cursor
+
+# Or install for all supported tools:
+bash _bmad-addons/install.sh --tools all
+
+# 3. Start the autopilot in your IDE
 /bmad-autopilot-on
 ```
 
@@ -83,10 +89,28 @@ bmad-ma-codebase-map  →  bmad-ma-assess  →  bmad-ma-reverse-architect
                            migration-epics.md
 ```
 
+## Supported Tools
+
+| Tool | Directory | Status |
+|------|-----------|--------|
+| Claude Code | `.claude/skills/` | Primary |
+| Cursor | `.cursor/skills/` | Supported |
+| Windsurf | `.windsurf/skills/` | Supported |
+| Cline | `.cline/skills/` | Supported |
+| Roo Code | `.roo/skills/` | Supported |
+| Trae | `.trae/skills/` | Supported |
+| Kiro | `.kiro/skills/` | Supported |
+| GitHub Copilot | `.github/copilot/skills/` | Supported |
+
+All tools use the same SKILL.md format. Install for multiple tools simultaneously:
+```bash
+bash _bmad-addons/install.sh --tools claude-code,cursor,windsurf
+```
+
 ## Requirements
 
 - [BMAD Method](https://github.com/bmad-code-org/BMAD-METHOD) v6.2.0+
-- Claude Code (CLI, desktop, or IDE extension)
+- A supported AI code agent (see table above)
 - Git repository with at least one commit
 - `gh` (GitHub CLI) or `glab` (GitLab CLI) for PR creation (optional)
 
