@@ -2,7 +2,8 @@
 # Enable in v1.1 for parallel code review
 
 multi_agent:
-  enabled: false
-  max_parallel_review_layers: 3
-  max_parallel_research: 3
+  enabled: true
+  max_parallel_review_layers: 3 # Always 3: blind, edge-case, acceptance
+  max_parallel_research: 3 # Max concurrent research agents per batch
+  max_parallel_analysis: 5 # Max concurrent codebase analysis agents
   # session_story_limit NOT duplicated here — uses autopilot's single authoritative limit
