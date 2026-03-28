@@ -31,6 +31,115 @@ get_tool_dir() {
 
 ALL_TOOLS="claude-code cursor windsurf gemini-cli cline roo trae kiro github-copilot"
 
+# System prompt file per tool (for BMAD workflow enforcement)
+get_system_prompt_file() {
+  case "$1" in
+    claude-code)     echo "AGENTS.md" ;;
+    cursor)          echo ".cursor/rules/bmad.md" ;;
+    windsurf)        echo ".windsurfrules" ;;
+    cline)           echo ".clinerules" ;;
+    roo)             echo ".roo/rules/bmad.md" ;;
+    gemini-cli)      echo "GEMINI.md" ;;
+    github-copilot)  echo ".github/copilot-instructions.md" ;;
+    kiro)            echo ".kiro/rules/bmad.md" ;;
+    trae)            echo ".trae/rules/bmad.md" ;;
+    *)               echo "" ;;
+  esac
+}
+
+# "claude-code" = special CLAUDE.md + AGENTS.md pattern
+# "own-file"    = tool has rules directory, BMAD gets its own file (overwrite ok)
+# "append"      = shared file, use marker-based append/replace
+get_system_prompt_mode() {
+  case "$1" in
+    claude-code)                      echo "claude-code" ;;
+    cursor|roo|kiro|trae)             echo "own-file" ;;
+    windsurf|cline|gemini-cli|github-copilot) echo "append" ;;
+    *)                                echo "" ;;
+  esac
+}
+
+# Install system prompt for a tool (marker-based, idempotent)
+install_system_prompt() {
+  local tool="$1"
+  local mode
+  mode=$(get_system_prompt_mode "$tool")
+  local rules_content
+  rules_content=$(cat "$ADDON_DIR/templates/agent-rules.md")
+  local prompt_file="$PROJECT_ROOT/$(get_system_prompt_file "$tool")"
+
+  if [ "$DRY_RUN" = true ]; then
+    echo "  [DRY RUN] Would install system prompt for $tool ($mode)"
+    return
+  fi
+
+  case "$mode" in
+    claude-code)
+      # 1. AGENTS.md: marker-based append/replace
+      local agents_file="$PROJECT_ROOT/AGENTS.md"
+      if [ -f "$agents_file" ] && grep -q '<!-- BEGIN:bmad-workflow-rules -->' "$agents_file" 2>/dev/null; then
+        # Replace existing BMAD section
+        local tmp
+        tmp=$(mktemp)
+        awk '/<!-- BEGIN:bmad-workflow-rules -->/{skip=1; next} /<!-- END:bmad-workflow-rules -->/{skip=0; next} !skip{print}' "$agents_file" > "$tmp"
+        printf '\n%s\n' "$rules_content" >> "$tmp"
+        mv "$tmp" "$agents_file"
+        echo "  System prompt: AGENTS.md (updated BMAD section)"
+      elif [ -f "$agents_file" ]; then
+        # Append to existing
+        printf '\n%s\n' "$rules_content" >> "$agents_file"
+        echo "  System prompt: AGENTS.md (appended BMAD section)"
+      else
+        # Create new
+        printf '%s\n' "$rules_content" > "$agents_file"
+        echo "  System prompt: AGENTS.md (created)"
+      fi
+
+      # 2. CLAUDE.md: ensure @AGENTS.md line exists
+      local claude_file="$PROJECT_ROOT/CLAUDE.md"
+      if [ -f "$claude_file" ] && grep -q '@AGENTS.md' "$claude_file" 2>/dev/null; then
+        echo "  System prompt: CLAUDE.md (already has @AGENTS.md)"
+      elif [ -f "$claude_file" ]; then
+        printf '\n@AGENTS.md\n' >> "$claude_file"
+        echo "  System prompt: CLAUDE.md (appended @AGENTS.md)"
+      else
+        printf '@AGENTS.md\n' > "$claude_file"
+        echo "  System prompt: CLAUDE.md (created with @AGENTS.md)"
+      fi
+      ;;
+
+    own-file)
+      # Write directly — this file is fully owned by the addon
+      local dir
+      dir=$(dirname "$prompt_file")
+      mkdir -p "$dir"
+      printf '%s\n' "$rules_content" > "$prompt_file"
+      echo "  System prompt: $(get_system_prompt_file "$tool") (created)"
+      ;;
+
+    append)
+      # Marker-based append/replace in shared file
+      if [ -f "$prompt_file" ] && grep -q '<!-- BEGIN:bmad-workflow-rules -->' "$prompt_file" 2>/dev/null; then
+        local tmp
+        tmp=$(mktemp)
+        awk '/<!-- BEGIN:bmad-workflow-rules -->/{skip=1; next} /<!-- END:bmad-workflow-rules -->/{skip=0; next} !skip{print}' "$prompt_file" > "$tmp"
+        printf '\n%s\n' "$rules_content" >> "$tmp"
+        mv "$tmp" "$prompt_file"
+        echo "  System prompt: $(get_system_prompt_file "$tool") (updated BMAD section)"
+      elif [ -f "$prompt_file" ]; then
+        printf '\n%s\n' "$rules_content" >> "$prompt_file"
+        echo "  System prompt: $(get_system_prompt_file "$tool") (appended BMAD section)"
+      else
+        local dir
+        dir=$(dirname "$prompt_file")
+        mkdir -p "$dir"
+        printf '%s\n' "$rules_content" > "$prompt_file"
+        echo "  System prompt: $(get_system_prompt_file "$tool") (created)"
+      fi
+      ;;
+  esac
+}
+
 # --- Parse flags ---
 while [ "$#" -gt 0 ]; do
   case $1 in
@@ -339,6 +448,10 @@ for tool in $SELECTED_TOOLS; do
     echo "  Installed $TOOL_INSTALLED skills"
     TOTAL_INSTALLED=$((TOTAL_INSTALLED + TOOL_INSTALLED))
   fi
+
+  # Install system prompt for BMAD workflow enforcement
+  install_system_prompt "$tool"
+
   echo ""
 done
 

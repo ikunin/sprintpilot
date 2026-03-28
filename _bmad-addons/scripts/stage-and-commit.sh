@@ -103,7 +103,7 @@ done <<< "$ALL_FILES"
 while IFS= read -r file; do
   [ -z "$file" ] && continue
   [ -f "$file" ] || continue
-  SIZE=$(stat -f%z "$file" 2>/dev/null || stat -c%s "$file" 2>/dev/null || echo "0")
+  SIZE=$(stat -f%z "$file" 2>/dev/null || stat -c%s "$file" 2>/dev/null || wc -c < "$file" 2>/dev/null | tr -d ' ' || echo "0")
   if [ "$SIZE" -gt "$MAX_SIZE_BYTES" ]; then
     SIZE_MB=$(( SIZE / 1024 / 1024 ))
     WARNINGS="${WARNINGS}WARN: large file $file (${SIZE_MB}MB > ${MAX_SIZE_MB}MB limit)\n"
@@ -114,7 +114,7 @@ done <<< "$ALL_FILES"
 while IFS= read -r file; do
   [ -z "$file" ] && continue
   [ -f "$file" ] || continue
-  if file --mime-encoding "$file" 2>/dev/null | grep -q 'binary'; then
+  if command -v file >/dev/null 2>&1 && file --mime-encoding "$file" 2>/dev/null | grep -q 'binary'; then
     WARNINGS="${WARNINGS}WARN: binary file detected: $file (will be staged but verify it's intended)\n"
   fi
 done <<< "$ALL_FILES"

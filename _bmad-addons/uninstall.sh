@@ -22,6 +22,95 @@ get_tool_dir() {
 
 ALL_TOOLS="claude-code cursor windsurf gemini-cli cline roo trae kiro github-copilot"
 
+# System prompt file per tool (mirrors install.sh)
+get_system_prompt_file() {
+  case "$1" in
+    claude-code)     echo "AGENTS.md" ;;
+    cursor)          echo ".cursor/rules/bmad.md" ;;
+    windsurf)        echo ".windsurfrules" ;;
+    cline)           echo ".clinerules" ;;
+    roo)             echo ".roo/rules/bmad.md" ;;
+    gemini-cli)      echo "GEMINI.md" ;;
+    github-copilot)  echo ".github/copilot-instructions.md" ;;
+    kiro)            echo ".kiro/rules/bmad.md" ;;
+    trae)            echo ".trae/rules/bmad.md" ;;
+    *)               echo "" ;;
+  esac
+}
+
+get_system_prompt_mode() {
+  case "$1" in
+    claude-code)                      echo "claude-code" ;;
+    cursor|roo|kiro|trae)             echo "own-file" ;;
+    windsurf|cline|gemini-cli|github-copilot) echo "append" ;;
+    *)                                echo "" ;;
+  esac
+}
+
+# Remove system prompt for a tool (preserves user content)
+remove_system_prompt() {
+  local tool="$1"
+  local mode
+  mode=$(get_system_prompt_mode "$tool")
+  local prompt_file="$PROJECT_ROOT/$(get_system_prompt_file "$tool")"
+
+  case "$mode" in
+    claude-code)
+      # Remove BMAD block from AGENTS.md
+      local agents_file="$PROJECT_ROOT/AGENTS.md"
+      if [ -f "$agents_file" ] && grep -q '<!-- BEGIN:bmad-workflow-rules -->' "$agents_file" 2>/dev/null; then
+        local tmp
+        tmp=$(mktemp)
+        awk '/<!-- BEGIN:bmad-workflow-rules -->/{skip=1; next} /<!-- END:bmad-workflow-rules -->/{skip=0; next} !skip{print}' "$agents_file" > "$tmp"
+        if [ -z "$(tr -d '[:space:]' < "$tmp")" ]; then
+          rm -f "$agents_file" "$tmp"
+          echo "$tool: removed AGENTS.md (was BMAD-only)"
+        else
+          mv "$tmp" "$agents_file"
+          echo "$tool: removed BMAD section from AGENTS.md"
+        fi
+      fi
+
+      # Remove @AGENTS.md line from CLAUDE.md
+      local claude_file="$PROJECT_ROOT/CLAUDE.md"
+      if [ -f "$claude_file" ] && grep -q '@AGENTS.md' "$claude_file" 2>/dev/null; then
+        local tmp
+        tmp=$(mktemp)
+        grep -v '@AGENTS.md' "$claude_file" > "$tmp" || true
+        if [ -z "$(tr -d '[:space:]' < "$tmp")" ]; then
+          rm -f "$claude_file" "$tmp"
+          echo "$tool: removed CLAUDE.md (was BMAD-only)"
+        else
+          mv "$tmp" "$claude_file"
+          echo "$tool: removed @AGENTS.md from CLAUDE.md"
+        fi
+      fi
+      ;;
+
+    own-file)
+      if [ -f "$prompt_file" ]; then
+        rm -f "$prompt_file"
+        echo "$tool: removed $(get_system_prompt_file "$tool")"
+      fi
+      ;;
+
+    append)
+      if [ -f "$prompt_file" ] && grep -q '<!-- BEGIN:bmad-workflow-rules -->' "$prompt_file" 2>/dev/null; then
+        local tmp
+        tmp=$(mktemp)
+        awk '/<!-- BEGIN:bmad-workflow-rules -->/{skip=1; next} /<!-- END:bmad-workflow-rules -->/{skip=0; next} !skip{print}' "$prompt_file" > "$tmp"
+        if [ -z "$(tr -d '[:space:]' < "$tmp")" ]; then
+          rm -f "$prompt_file" "$tmp"
+          echo "$tool: removed $(get_system_prompt_file "$tool") (was BMAD-only)"
+        else
+          mv "$tmp" "$prompt_file"
+          echo "$tool: removed BMAD section from $(get_system_prompt_file "$tool")"
+        fi
+      fi
+      ;;
+  esac
+}
+
 echo "=== BMAD Autopilot Add-On Uninstaller ==="
 echo ""
 
@@ -56,6 +145,9 @@ for tool in $ALL_TOOLS; do
     rm -rf "$BACKUP_DIR"
     echo "$tool: removed backup directory"
   fi
+
+  # Remove system prompt
+  remove_system_prompt "$tool"
 done
 
 if [ "$total_removed" -eq 0 ]; then
