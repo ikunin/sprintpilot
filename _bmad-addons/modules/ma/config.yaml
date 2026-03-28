@@ -1,0 +1,8 @@
+# Multi-Agent Configuration — disabled in v1.0
+# Enable in v1.1 for parallel code review
+
+multi_agent:
+  enabled: false
+  max_parallel_review_layers: 3
+  max_parallel_research: 3
+  # session_story_limit NOT duplicated here — uses autopilot's single authoritative limit

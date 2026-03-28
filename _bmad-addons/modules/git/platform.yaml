@@ -1,0 +1,47 @@
+# Git Platform Abstraction
+# YAML | (literal block) preserves newlines for HEREDOC commands.
+# HEREDOC delimiters are intentionally long/unique to avoid collision with PR body content.
+
+platforms:
+  github:
+    detect_cli: "gh --version"
+    detect_remote: "github\\.com[:/]"
+    pr_create: |
+      gh pr create --base {base_branch} --head {branch} --title "{title}" --body "$(cat <<'__BMAD_PR_EOF__'
+      {body}
+      __BMAD_PR_EOF__
+      )"
+    pr_merge: "gh pr merge {pr_url} --merge --delete-branch"
+    pr_list: "gh pr list --json number,title,url"
+    pr_term: "PR"
+
+  gitlab:
+    detect_cli: "glab --version"
+    detect_remote: "gitlab\\."
+    pr_create: |
+      glab mr create --source-branch {branch} --target-branch {base_branch} --title "{title}" --description "$(cat <<'__BMAD_MR_EOF__'
+      {body}
+      __BMAD_MR_EOF__
+      )" --remove-source-branch
+    pr_merge: "glab mr merge {mr_id} --yes --remove-source-branch"
+    pr_list: "glab mr list --output json"
+    pr_term: "MR"
+
+  git_only:
+    pr_create: null # Skip — print manual instructions
+    pr_merge: null
+    pr_term: "PR"
+
+# Auto-detection flow (runs once at autopilot boot, cached for session):
+#   1. If platform.provider explicitly set (not "auto"), use it
+#   2. Check installed CLIs: gh --version, glab --version
+#      - Exactly one found -> use it
+#      - Both found -> parse remote URL to break tie
+#      - None found -> git_only
+#   3. Cache detected platform in autopilot session state
+#   4. Re-detect only if a platform command fails
+#
+# Known limitations:
+#   - GitHub Enterprise with custom domains requires explicit provider: github
+#   - Bitbucket is not supported
+#   - Gitea is not supported (no stable CLI)

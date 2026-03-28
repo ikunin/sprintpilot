@@ -1,0 +1,15 @@
+addon:
+  name: bmad-ma-git
+  version: 1.0.0
+  description: Git workflow integration for BMAD via EnterWorktree/ExitWorktree
+  bmad_compatibility: ">=6.2.0"
+  modules:
+    git:
+      enabled: true
+      config: modules/git/config.yaml
+    ma:
+      enabled: false # v1.1+
+      config: modules/ma/config.yaml
+  installed_skills:
+    - bmad-autopilot-on
+    - bmad-autopilot-off
