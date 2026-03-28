@@ -100,11 +100,12 @@ bmad-ma-codebase-map  →  bmad-ma-assess  →  bmad-ma-reverse-architect
 | Roo Code | `.roo/skills/` | Supported |
 | Trae | `.trae/skills/` | Supported |
 | Kiro | `.kiro/skills/` | Supported |
+| Gemini CLI | `.gemini/skills/` | Supported |
 | GitHub Copilot | `.github/copilot/skills/` | Supported |
 
 All tools use the same SKILL.md format. Install for multiple tools simultaneously:
 ```bash
-bash _bmad-addons/install.sh --tools claude-code,cursor,windsurf
+bash _bmad-addons/install.sh --tools claude-code,cursor,gemini-cli
 ```
 
 ## Requirements

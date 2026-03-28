@@ -77,6 +77,7 @@ bash _bmad-addons/install.sh --tools claude-code --force
 | `roo` | `.roo/skills/` | VS Code extension |
 | `trae` | `.trae/skills/` | Trae IDE |
 | `kiro` | `.kiro/skills/` | Kiro IDE |
+| `gemini-cli` | `.gemini/skills/` | Gemini CLI (Google) |
 | `github-copilot` | `.github/copilot/skills/` | GitHub Copilot |
 
 All tools use the same universal SKILL.md format.

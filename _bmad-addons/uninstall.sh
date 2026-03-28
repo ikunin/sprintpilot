@@ -15,11 +15,12 @@ get_tool_dir() {
     trae)            echo ".trae" ;;
     kiro)            echo ".kiro" ;;
     github-copilot)  echo ".github/copilot" ;;
+    gemini-cli)      echo ".gemini" ;;
     *)               echo "" ;;
   esac
 }
 
-ALL_TOOLS="claude-code cursor windsurf cline roo trae kiro github-copilot"
+ALL_TOOLS="claude-code cursor windsurf gemini-cli cline roo trae kiro github-copilot"
 
 echo "=== BMAD Autopilot Add-On Uninstaller ==="
 echo ""

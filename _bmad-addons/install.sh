@@ -24,11 +24,12 @@ get_tool_dir() {
     trae)            echo ".trae" ;;
     kiro)            echo ".kiro" ;;
     github-copilot)  echo ".github/copilot" ;;
+    gemini-cli)      echo ".gemini" ;;
     *)               echo "" ;;
   esac
 }
 
-ALL_TOOLS="claude-code cursor windsurf cline roo trae kiro github-copilot"
+ALL_TOOLS="claude-code cursor windsurf gemini-cli cline roo trae kiro github-copilot"
 
 # --- Parse flags ---
 while [ "$#" -gt 0 ]; do
@@ -58,6 +59,7 @@ Supported tools:
   roo              Roo Code (VS Code extension)
   trae             Trae IDE
   kiro             Kiro IDE
+  gemini-cli       Gemini CLI (Google)
   github-copilot   GitHub Copilot
 
 Examples:
