@@ -36,6 +36,9 @@ if [ ! -d "$WORKTREES_DIR" ]; then
   exit 0
 fi
 
+# Fetch remote refs to ensure accurate commit comparison
+git fetch origin 2>/dev/null || echo "WARN: git fetch failed (no remote?)" >&2
+
 TOTAL=0
 CLEAN_DONE=0
 COMMITTED=0

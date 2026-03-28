@@ -119,7 +119,18 @@ while IFS= read -r file; do
   fi
 done <<< "$ALL_FILES"
 
-# 2d. File List cross-reference (if --file-list provided)
+# 2d. Verify .gitignore covers addon artifacts
+if [ -f .gitignore ]; then
+  for entry in ".autopilot.lock" ".claude/.addon-backups/"; do
+    if ! grep -qF "$entry" .gitignore 2>/dev/null; then
+      WARNINGS="${WARNINGS}WARN: .gitignore missing entry '$entry' — run install.sh to fix\n"
+    fi
+  done
+else
+  WARNINGS="${WARNINGS}WARN: no .gitignore found — addon artifacts may be committed\n"
+fi
+
+# 2e. File List cross-reference (if --file-list provided)
 if [ -n "$FILE_LIST" ] && [ -f "$FILE_LIST" ]; then
   # Extract file paths from the File List (lines starting with - or *)
   EXPECTED_FILES=$(grep -E '^\s*[-*]\s+' "$FILE_LIST" | sed 's/^[[:space:]]*[-*][[:space:]]*//' | sed 's/[[:space:]]*$//' || true)

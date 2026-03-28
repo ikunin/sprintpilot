@@ -1,0 +1,93 @@
+# Changelog
+
+## [2.0.0] - 2026-03-28
+
+### Added
+
+#### Multi-Agent Skills (7 new skills, 19 subagent prompts)
+
+- **bmad-ma-code-review** — Parallel 3-layer code review
+  - Blind Hunter (adversarial, diff-only)
+  - Edge Case Hunter (boundary conditions, full project access)
+  - Acceptance Auditor (AC verification)
+  - Triage with deduplication and contradiction handling
+
+- **bmad-ma-codebase-map** — 5-stream parallel codebase analysis
+  - Stack Analyzer, Architecture Mapper, Quality Assessor
+  - Concerns Hunter, Integration Mapper
+  - Outputs to `_bmad-output/codebase-analysis/`
+
+- **bmad-ma-assess** — Tech debt and migration assessment
+  - Dependency Auditor (CVEs, outdated packages)
+  - Debt Classifier (prioritized with effort estimates)
+  - Migration Analyzer (upgrade paths and roadmap)
+  - Produces `brownfield-assessment.md`
+
+- **bmad-ma-reverse-architect** — Bottom-up architecture extraction
+  - Component Mapper, Data Flow Tracer, Pattern Extractor
+  - Produces BMAD-compatible `architecture.md`
+
+- **bmad-ma-migrate** — 12-step migration planning
+  - 4 subagent fan-outs (Stack Mapper, Dependency Analyzer, Test Parity, Risk Assessor)
+  - Templates: migration plan, epics, component cards
+  - Resources: strategy reference, coexistence patterns
+  - Produces `migration-plan.md`, `migration-epics.md`, `migration-tracking.yaml`
+
+- **bmad-ma-research** — Parallel research fan-out with WebSearch/WebFetch
+
+- **bmad-ma-party-mode** — Real parallel multi-persona discussions
+
+#### Documentation
+- README.md with quick start and skill overview
+- Installation guide, usage guide, architecture docs
+- Configuration reference, contributing guide
+
+### Changed
+- Manifest bumped to v2.0.0
+- Multi-agent module enabled (`ma.enabled: true`)
+
+## [1.0.1] - 2026-03-28
+
+### Fixed (Adversarial Review)
+- `stage-and-commit.sh`: Added binary file detection
+- `stage-and-commit.sh`: Added `--file-list` for story File List cross-reference
+- `stage-and-commit.sh`: Added `.gitignore` coverage verification
+- `lint-changed.sh`: Multi-language support for monorepo projects
+- `sync-status.sh`: Added `--worktree-status-file` parameter
+- `health-check.sh`: Added `git fetch` before commit comparison
+- `create-pr.sh`: Added remote existence pre-check
+- `workflow.md`: Added `EnterWorktree` failure fallback (regular branch)
+- Populated migration templates and resources (were empty directories)
+- Removed empty `steps/` directory
+
+## [1.0.0] - 2026-03-28
+
+### Added
+
+#### Git Workflow Integration
+- Enhanced `bmad-autopilot-on` with git operations between skill invocations
+- Enhanced `bmad-autopilot-off` with git status report and lock release
+- Worktree isolation via `EnterWorktree`/`ExitWorktree`
+- Sprint-status.yaml sync from worktree to project root
+
+#### Helper Scripts (8)
+- `detect-platform.sh` — GitHub/GitLab/git_only auto-detection
+- `sanitize-branch.sh` — Story key to valid branch name
+- `lock.sh` — Session lock (epoch + UUID, 30m stale timeout)
+- `stage-and-commit.sh` — Explicit staging with pre-commit checks
+- `sync-status.sh` — Atomic status merge
+- `lint-changed.sh` — Language-aware linting of changed files
+- `health-check.sh` — Orphaned worktree classification
+- `create-pr.sh` — PR/MR creation with graceful fallback
+
+#### Configuration
+- Git workflow config (`modules/git/config.yaml`)
+- Platform commands (`modules/git/platform.yaml`)
+- Commit and PR templates
+- Secrets allowlist
+- Multi-agent config placeholder (disabled)
+
+#### Infrastructure
+- `install.sh` with `--dry-run`, `--force`, backup with retention
+- `uninstall.sh` with dirty-check worktree cleanup
+- `manifest.yaml` with BMAD compatibility tracking

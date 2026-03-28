@@ -1,7 +1,6 @@
 # BMAD installation (managed by npx bmad-method)
 _bmad/
 _bmad-output/
-docs/
 
 # Claude Code
 .claude/skills/

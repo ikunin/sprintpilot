@@ -31,6 +31,7 @@ git:
       - verify_no_secrets
       - verify_gitignore_covers_addon
       - verify_file_size
+      - verify_no_binaries
     secrets_scan:
       patterns:
         - API_KEY
@@ -41,7 +42,10 @@ git:
         - private_key
       severity: WARN # WARN (not BLOCK) — surfaces finding, doesn't halt
       allowlist_file: .secrets-allowlist
-    max_file_size_mb: 1
+    max_file_size_mb: 1 # Reject files larger than this (configurable)
+    verify_gitignore_entries: # Entries that must be in .gitignore
+      - .autopilot.lock
+      - .claude/.addon-backups/
 
   # Linting
   lint:

@@ -35,6 +35,15 @@ if [ -z "$PLATFORM" ] || [ -z "$BRANCH" ] || [ -z "$TITLE" ]; then
   exit 1
 fi
 
+# Pre-check: verify remote exists
+if ! git remote get-url origin &>/dev/null; then
+  echo "SKIPPED"
+  echo "INFO: No git remote configured. Push and create PR manually:" >&2
+  echo "  git remote add origin <url>" >&2
+  echo "  git push -u origin $BRANCH" >&2
+  exit 2
+fi
+
 case "$PLATFORM" in
   github)
     if ! command -v gh &>/dev/null; then

@@ -1,0 +1,161 @@
+# Configuration Reference
+
+All configuration lives in `_bmad-addons/modules/`. Changes take effect on the next `/bmad-autopilot-on` invocation.
+
+## Git Configuration (`modules/git/config.yaml`)
+
+### Core Settings
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `git.enabled` | `true` | Master switch. `false` disables all git operations. |
+| `git.base_branch` | `main` | Base branch for worktrees and PRs. |
+| `git.branch_prefix` | `story/` | Prefix for story branches (e.g., `story/1-3-add-auth`). |
+| `git.max_branch_length` | `60` | Max chars before truncation + 6-char hash suffix. |
+
+### Commit Templates
+
+| Key | Default | Placeholders |
+|-----|---------|-------------|
+| `commit_templates.story` | `feat({epic}): {story-title} ({story-key})` | `{epic}`, `{story-title}`, `{story-key}` |
+| `commit_templates.patch` | `fix({story-key}): {patch-title}` | `{story-key}`, `{patch-title}` |
+
+Placeholder resolution chain: sprint-status.yaml → story file → fallback value.
+
+### Staging
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `staging.strategy` | `explicit` | Always explicit file names. Cannot be changed to `git add -A`. |
+| `staging.source` | `git-diff-primary` | Primary source: `git diff --name-only HEAD` |
+| `staging.cross_reference` | `story-file-list` | Cross-reference with story's File List section |
+| `staging.max_file_size_mb` | `1` | Reject files larger than this with warning |
+
+### Pre-Commit Checks
+
+| Check | Behavior |
+|-------|----------|
+| `verify_no_secrets` | Grep for API_KEY, SECRET, TOKEN, PASSWORD, aws_access, private_key. WARN severity. |
+| `verify_gitignore_covers_addon` | Verify .gitignore has .autopilot.lock and .claude/.addon-backups/ |
+| `verify_file_size` | Reject files > `max_file_size_mb` |
+| `verify_no_binaries` | Warn on binary files detected via `file --mime-encoding` |
+
+### Secrets Scanning
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `secrets_scan.patterns` | `[API_KEY, SECRET, TOKEN, ...]` | Patterns to search for |
+| `secrets_scan.severity` | `WARN` | WARN = surface and continue. Does not block commit. |
+| `secrets_scan.allowlist_file` | `.secrets-allowlist` | File with glob patterns exempt from scanning |
+
+### Linting
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `lint.enabled` | `true` | Enable/disable linting |
+| `lint.auto_detect` | `true` | Detect language from manifest files |
+| `lint.scope` | `changed-files` | Only lint files changed in the story |
+| `lint.blocking` | `false` | Lint findings never halt the autopilot |
+| `lint.output_limit` | `100` | Max lines injected into context |
+| `lint.output_strategy` | `errors-first` | Show errors before warnings |
+| `lint.full_output_file` | `true` | Save full output to file |
+
+Supported linters per language:
+
+| Language | Linters (first found wins) |
+|----------|---------------------------|
+| Python | ruff, flake8, pylint |
+| JavaScript/TypeScript | eslint, biome |
+| Rust | cargo clippy |
+| Go | golangci-lint |
+| Ruby | rubocop |
+
+### Push & PR
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `push.auto` | `true` | Auto-push after commit |
+| `push.create_pr` | `true` | Auto-create PR/MR after push |
+| `push.pr_body` | `heredoc` | Use shell HEREDOC for PR body |
+
+### Merge
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `merge.timing` | `epic-retrospective` | Suggest merge after epic retrospective |
+| `merge.require_user_confirm` | `true` | Always ask before merging |
+
+### Worktree
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `worktree.submodule_init` | `auto` | `auto` = only if `.gitmodules` exists |
+| `worktree.submodule_timeout` | `30` | Seconds before timeout on submodule init |
+| `worktree.cleanup_on_merge` | `true` | Remove worktree after story is merged |
+| `worktree.health_check_on_boot` | `true` | Check for orphaned worktrees at startup |
+
+### Lock File
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `lock.enabled` | `true` | Prevent concurrent autopilot sessions |
+| `lock.file` | `.autopilot.lock` | Lock file path (in project root) |
+| `lock.stale_timeout_minutes` | `30` | Auto-remove locks older than this |
+
+### Platform Detection
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `platform.provider` | `auto` | `auto`, `github`, `gitlab`, or `git_only` |
+
+Auto-detection priority: explicit config > CLI detection > remote URL regex.
+
+For self-hosted instances:
+```yaml
+platform:
+  provider: gitlab
+  # base_url: https://gitlab.example.com  # future support
+```
+
+## Multi-Agent Configuration (`modules/ma/config.yaml`)
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `multi_agent.enabled` | `true` | Enable multi-agent skills |
+| `multi_agent.max_parallel_review_layers` | `3` | Always 3 (blind, edge-case, acceptance) |
+| `multi_agent.max_parallel_research` | `3` | Max concurrent research agents per batch |
+| `multi_agent.max_parallel_analysis` | `5` | Max concurrent codebase analysis agents |
+
+## Secrets Allowlist (`.secrets-allowlist`)
+
+One glob pattern per line. Files matching these patterns are skipped during secrets scanning.
+
+```
+# Test files
+test/**
+tests/**
+**/test_*
+
+# Example files
+*.example
+*.sample
+.env.example
+
+# Documentation
+docs/**
+*.md
+
+# Fixtures
+**/fixtures/**
+**/mocks/**
+```
+
+## Platform Commands (`modules/git/platform.yaml`)
+
+Defines CLI commands for each platform. Uses `{placeholders}` filled at runtime:
+- `{base_branch}` — from config
+- `{branch}` — story branch name
+- `{title}` — PR title
+- `{body}` — PR body content
+
+Commands use YAML `|` literal blocks to preserve HEREDOC formatting.
