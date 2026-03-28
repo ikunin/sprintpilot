@@ -73,11 +73,7 @@ Extract the recommended next skill and any important context.
 ### Step 6 — Release lock
 
 <check if="{{git_enabled}}">
-  <action>Remove `.autopilot.lock` if it exists:
-  ```bash
-  rm -f .autopilot.lock
-  ```
-  </action>
+  <action>Release lock: `bash {{project_root}}/_bmad-addons/scripts/lock.sh release`</action>
 </check>
 
 ### Step 7 — Produce status report

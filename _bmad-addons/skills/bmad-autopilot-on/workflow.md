@@ -122,54 +122,34 @@ Resolve:
     <action>STOP</action>
   </check>
 
-  <action>**Lock file check** — run as a SINGLE Bash command:
-  ```bash
-  if [ -f .autopilot.lock ]; then
-    lock_time=$(head -1 .autopilot.lock)
-    now=$(date +%s)
-    age=$(( now - lock_time ))
-    if [ "$age" -lt 1800 ]; then
-      lock_id=$(tail -1 .autopilot.lock)
-      echo "LOCKED:session=$lock_id:age=$(( age / 60 ))m"
-    else
-      echo "STALE:age=$(( age / 60 ))m"
-      rm .autopilot.lock
-    fi
-  else
-    echo "FREE"
-  fi
-  ```
+  <action>**Lock file** — run: `bash {{project_root}}/_bmad-addons/scripts/lock.sh acquire`
+  Output will be one of:
+  - `ACQUIRED:<session-id>` → proceed
+  - `ACQUIRED_STALE:<session-id>` → stale lock removed, proceed
+  - `LOCKED:<session-id>:<age>` → another session active
   </action>
   <check if="LOCKED">
     <action>HALT: "Another autopilot session is active. Close it first or delete .autopilot.lock"</action>
     <action>STOP</action>
   </check>
-  <check if="STALE">
-    <action>Log: "Stale lock removed (from previous crashed session)"</action>
-  </check>
-  <action>**Acquire lock** — run:
-  ```bash
-  printf '%s\n%s\n' "$(date +%s)" "$(uuidgen)" > .autopilot.lock
-  ```
+
+  <action>**Detect platform** — run:
+  `bash {{project_root}}/_bmad-addons/scripts/detect-platform.sh --provider {{git.platform.provider}}`
+  Output: `github`, `gitlab`, or `git_only`. Set `{{platform}}` to the output.
+  Log: "Platform detected: {{platform}}"
   </action>
 
-  <action>**Detect platform** (once per session):
-  1. Read `git.platform.provider` from config
-  2. If not "auto" → use that value as `{{platform}}`
-  3. If "auto":
-     a. Run `gh --version 2>/dev/null` and `glab --version 2>/dev/null`
-     b. If exactly one CLI found → that's `{{platform}}`
-     c. If both found → run `git remote get-url origin 2>/dev/null`, match against `github\.com` or `gitlab\.` regex → use matched platform
-     d. If none found → `{{platform}}` = "git_only"
-  4. Log: "Platform detected: {{platform}}"
-  </action>
-
-  <action>**Worktree health check** — run `git worktree list --porcelain` and check `.claude/worktrees/` for orphaned worktrees from previous sessions:
-  For each worktree found:
-  - If story is `done` in sprint-status AND worktree is clean → `git worktree remove` + prune
-  - If story branch has commits beyond base branch → log: "Recoverable work found for {story}"
-  - If story branch has no commits beyond base → remove stale worktree + prune
-  - If worktree has uncommitted changes → warn user, ask how to proceed
+  <action>**Worktree health check** — run:
+  `bash {{project_root}}/_bmad-addons/scripts/health-check.sh --base-branch {{base_branch}} --status-file {{status_file}}`
+  Output classifies each worktree as CLEAN_DONE, COMMITTED, STALE, DIRTY, or ORPHAN.
+  - CLEAN_DONE: `git worktree remove .claude/worktrees/<name>` + `git worktree prune`
+  - COMMITTED: log "Recoverable work found for <name> — will push via git -C"
+    Push the branch: `git -C .claude/worktrees/<name> push -u origin <branch> 2>&1`
+    Then create PR via: `bash {{project_root}}/_bmad-addons/scripts/create-pr.sh ...`
+    Then remove worktree.
+  - STALE: `git worktree remove .claude/worktrees/<name> --force` + prune
+  - DIRTY: warn user, ask how to proceed (stash/commit/discard)
+  - ORPHAN: `rm -rf .claude/worktrees/<name>` + `git worktree prune`
   </action>
 
   <action>Set `{{git_enabled}}` = true, `{{platform}}` = detected value</action>
@@ -324,16 +304,10 @@ Resolve:
 
 <!-- GIT: Enter worktree before dev-story -->
 <check if="{{git_enabled}} AND {{next_skill}} is bmad-dev-story">
-  <action>**Sanitize branch name** from `{{current_story}}`:
-  1. Lowercase the entire string
-  2. Strip invalid git ref chars: ~ ^ : ? * [ \ space control chars
-  3. Replace & ( ) with hyphens
-  4. Collapse consecutive hyphens
-  5. Strip leading/trailing hyphens and dots
-  6. If length > 60: truncate and append `-` + first 6 chars of SHA-256 hash of full name
-  7. Verify: run `git check-ref-format --branch "story/{{branch_name}}" && echo OK || echo FAIL`
-  8. Check collision: `git branch --list "story/{{branch_name}}"` — if exists, append -2, -3, etc.
-  Set `{{branch_name}}` = sanitized result
+  <action>**Sanitize branch name** — run:
+  `bash {{project_root}}/_bmad-addons/scripts/sanitize-branch.sh "{{current_story}}" --prefix "story/" --max-length 60`
+  Output: sanitized name (without prefix). Set `{{branch_name}}` = output.
+  Full branch ref will be `story/{{branch_name}}`.
   </action>
 
   <action>**Check if branch already registered** in `{status_file}` for this story.
@@ -342,11 +316,9 @@ Resolve:
   If no → proceed with creation.
   </action>
 
-  <action>**Prepare for worktree** — ensure HEAD is at the latest remote base branch:
-  ```bash
-  git fetch origin && git checkout origin/{{base_branch}}
-  ```
-  (detached HEAD is fine — EnterWorktree branches from HEAD)
+  <action>**Prepare for worktree** — ensure HEAD is at the latest remote base branch.
+  Run: `git fetch origin && git checkout origin/{{base_branch}}`
+  (Detached HEAD is fine — EnterWorktree branches from HEAD)
   </action>
 
   <action>**Enter worktree** using the EnterWorktree tool:
@@ -355,18 +327,12 @@ Resolve:
   ALL subsequent tool calls now operate in this worktree directory.
   </action>
 
-  <action>**Rename branch** to our naming convention:
-  ```bash
-  git branch -m "$(git branch --show-current)" "story/{{branch_name}}"
-  ```
+  <action>**Rename branch** to our naming convention.
+  Run: `git branch -m "$(git branch --show-current)" "story/{{branch_name}}"`
   </action>
 
-  <action>**Init submodules** if needed:
-  ```bash
-  if [ -f .gitmodules ]; then
-    timeout 30 git submodule update --init --recursive 2>&1 || echo "SUBMODULE_TIMEOUT"
-  fi
-  ```
+  <action>**Init submodules** if needed.
+  Run: `if [ -f .gitmodules ]; then timeout 30 git submodule update --init --recursive 2>&1 || echo "SUBMODULE_TIMEOUT"; fi`
   If SUBMODULE_TIMEOUT: warn "Submodule init timed out (may need auth). Continuing without."
   </action>
 
@@ -411,45 +377,19 @@ NEVER wait for user at a menu.
 
   <!-- GIT: Lint, stage, and commit after dev-story -->
   <check if="{{git_enabled}} AND {{in_worktree}}">
-    <action>**Lint changed files** (scope: changed files only):
-    1. Detect project language from manifest files (package.json → JS/TS, pyproject.toml → Python, etc.)
-    2. Find first available linter for that language from config
-    3. Get changed files: `git diff --name-only HEAD`
-    4. Run linter only on those files
-    5. Capture output: all errors first, then warnings, capped at 100 lines
-    6. Save full output to `lint-output.txt` in worktree
-    7. Log lint summary (non-blocking)
+    <action>**Lint changed files** — run:
+    `bash {{project_root}}/_bmad-addons/scripts/lint-changed.sh --limit 100 --output-file lint-output.txt`
+    Log the output summary (non-blocking — lint never halts the autopilot).
+    Set `{{lint_result}}` from the summary line.
     </action>
 
-    <action>**Explicit file staging** — NEVER use `git add -A` or `git add .`:
-    1. Get all changes: `git diff --name-only HEAD` + `git ls-files --others --exclude-standard`
-    2. If story file has a "File List" section, cross-reference:
-       - Unexpected files (in diff but not in File List) → log WARN but still stage
-       - Missing files (in File List but not in diff) → note as "not modified"
-    3. Handle deletions: if tracked file deleted → `git rm`
-    4. **Pre-commit checks**:
-       a. Secrets scan: `grep -rn -E 'API_KEY|SECRET|TOKEN|PASSWORD|aws_access|private_key' <files>`
-          - Skip files matching patterns in `_bmad-addons/.secrets-allowlist` (if file exists)
-          - If secrets found → WARN with file:line, ask user whether to proceed
-       b. Check for files > 1MB → WARN
-    5. Stage files with quoted paths: `git add -- "file1" "file2" ...`
-    </action>
-
-    <action>**Resolve commit placeholders** from sprint-status and story file:
-    - `{story-key}` → `{{current_story}}`
-    - `{epic}` → from story file epic header, fallback to story-key prefix
+    <action>**Stage and commit** — resolve commit message placeholders first:
+    - `{epic}` → from story file epic header, fallback to story-key prefix (e.g., "1" from "1-3")
     - `{story-title}` → from story file title, fallback to story-key
-    All must resolve or use fallback. Never commit with literal `{placeholder}`.
-    </action>
-
-    <action>**Commit**:
-    ```bash
-    git commit -m "$(cat <<'__BMAD_COMMIT_EOF__'
-    feat({{epic}}): {{story-title}} ({{current_story}})
-    __BMAD_COMMIT_EOF__
-    )"
-    ```
-    Record `{{story_commit}}` = output commit SHA
+    Then run:
+    `bash {{project_root}}/_bmad-addons/scripts/stage-and-commit.sh --message "feat({{epic}}): {{story-title}} ({{current_story}})" --allowlist {{project_root}}/_bmad-addons/.secrets-allowlist`
+    Output: commit SHA. Set `{{story_commit}}` = output.
+    Warnings (secrets, large files) printed to stderr — review but don't halt unless user says to.
     </action>
   </check>
 
@@ -561,20 +501,18 @@ Apply ALL patch and bugfix findings automatically. For each:
 
 <!-- GIT: Push, PR, exit worktree -->
 <check if="{{git_enabled}} AND {{in_worktree}}">
-  <action>**Push branch**:
-  ```bash
-  git push -u origin story/{{branch_name}} 2>&1
-  ```
-  If push fails → set `{{push_status}}` = "failed", log warning, continue
-  If push succeeds → set `{{push_status}}` = "pushed"
+  <action>**Push branch**.
+  Run: `git push -u origin story/{{branch_name}} 2>&1`
+  If push fails → set `{{push_status}}` = "failed", log warning, continue.
+  If push succeeds → set `{{push_status}}` = "pushed".
   </action>
 
   <action>**Create PR/MR** (if push succeeded and platform != git_only):
-  Read PR body template from `_bmad-addons/modules/git/templates/pr-body.md` (via the project root — use `{{project_root}}` absolute path).
-  Fill placeholders with actual values.
-  Execute the PR creation command from platform.yaml for `{{platform}}`.
-  Record `{{pr_url}}` from command output.
-  If PR creation fails → log warning, set `{{pr_url}}` = null, continue.
+  1. Read PR body template from `{{project_root}}/_bmad-addons/modules/git/templates/pr-body.md`
+  2. Fill placeholders with actual values (story-key, title, change summary, test results)
+  3. Run: `bash {{project_root}}/_bmad-addons/scripts/create-pr.sh --platform {{platform}} --branch story/{{branch_name}} --base {{base_branch}} --title "{{story-title}} ({{current_story}})" --body "<filled template>"`
+  4. Output: PR URL or "SKIPPED". Set `{{pr_url}}` = output.
+  If creation fails → log warning, set `{{pr_url}}` = null, continue.
   </action>
 
   <action>**Exit worktree** — use ExitWorktree tool:
@@ -583,28 +521,9 @@ Apply ALL patch and bugfix findings automatically. For each:
   Set `{{in_worktree}}` = false.
   </action>
 
-  <action>**Sync sprint-status.yaml** from worktree to project root:
-  1. Read worktree sprint-status at `{{project_root}}/.claude/worktrees/{{current_story}}/{relative_path_to_status_file}`
-  2. Extract `{{current_story}}` status field value
-  3. Read project root `{status_file}`
-  4. Update `{{current_story}}` entry with:
-     - `status`: synced from worktree copy
-     - `branch`: story/{{branch_name}}
-     - `worktree`: .claude/worktrees/{{current_story}}
-     - `story_commit`: {{story_commit}}
-     - `patch_commits`: [{{patch_commits}}]
-     - `lint_result`: summary from lint step
-     - `push_status`: {{push_status}}
-     - `pr_url`: {{pr_url}}
-     - `worktree_cleaned`: false
-  5. Write atomically via Bash:
-     ```bash
-     # Write to temp file in same directory, then atomic rename
-     cat > "{status_file}.tmp" <<'__BMAD_STATUS_EOF__'
-     {full yaml content}
-     __BMAD_STATUS_EOF__
-     mv "{status_file}.tmp" "{status_file}"
-     ```
+  <action>**Sync sprint-status.yaml** — run:
+  `bash {{project_root}}/_bmad-addons/scripts/sync-status.sh --story "{{current_story}}" --worktree "{{project_root}}/.claude/worktrees/{{current_story}}" --status-file "{{status_file}}" --branch "story/{{branch_name}}" --commit "{{story_commit}}" --patch-commits "{{patch_commits_csv}}" --push-status "{{push_status}}" --pr-url "{{pr_url}}" --lint-result "{{lint_result}}"`
+  This reads status from worktree copy, merges git fields into project root copy, writes atomically.
   </action>
 </check>
 
@@ -745,7 +664,7 @@ No work will be repeated.
 
 <!-- GIT: Release lock -->
 <check if="{{git_enabled}}">
-  <action>Remove `.autopilot.lock`</action>
+  <action>Release lock: `bash {{project_root}}/_bmad-addons/scripts/lock.sh release`</action>
 </check>
 
 <action>Delete `{state_file}` — sprint complete</action>
