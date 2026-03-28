@@ -1,122 +1,119 @@
 #!/bin/bash
-# Sync sprint-status.yaml git fields from worktree to project root.
-# Reads story status from worktree copy, merges git fields into project root copy.
-# Uses atomic write (same-dir tmp + mv).
+# Write git metadata to git-status.yaml (addon-owned file).
+# NEVER modifies sprint-status.yaml (BMAD-owned).
 #
-# Usage: sync-status.sh --story <key> --worktree <path> --status-file <path> \
-#          [--worktree-status-file <path>] \
+# Usage: sync-status.sh --story <key> --git-status-file <path> \
 #          [--branch <name>] [--commit <sha>] [--patch-commits <sha,...>] \
-#          [--push-status <status>] [--pr-url <url>] [--lint-result <text>]
+#          [--push-status <status>] [--pr-url <url>] [--lint-result <text>] \
+#          [--worktree <path>] [--platform <name>] [--base-branch <name>]
 #
-# If --worktree-status-file is not provided, searches common locations in the worktree.
-# This script uses simple text manipulation (not a YAML parser) to inject fields.
-# It appends git fields under the story's entry in development_status.
+# Reads existing git-status.yaml and updates the story entry.
+# Creates the file if it doesn't exist.
+# Uses atomic write (same-dir tmp + mv).
 set -e
 
 STORY=""
-WORKTREE=""
-STATUS_FILE=""
-WORKTREE_STATUS_FILE=""
+GIT_STATUS_FILE=""
 BRANCH=""
+WORKTREE=""
 STORY_COMMIT=""
 PATCH_COMMITS=""
 PUSH_STATUS="pending"
 PR_URL=""
 LINT_RESULT=""
+PLATFORM=""
+BASE_BRANCH="main"
+WORKTREE_CLEANED="false"
 
-while [[ "$#" -gt 0 ]]; do
+while [ "$#" -gt 0 ]; do
   case $1 in
     --story) STORY="$2"; shift ;;
-    --worktree) WORKTREE="$2"; shift ;;
-    --status-file) STATUS_FILE="$2"; shift ;;
-    --worktree-status-file) WORKTREE_STATUS_FILE="$2"; shift ;;
+    --git-status-file) GIT_STATUS_FILE="$2"; shift ;;
     --branch) BRANCH="$2"; shift ;;
+    --worktree) WORKTREE="$2"; shift ;;
     --commit) STORY_COMMIT="$2"; shift ;;
     --patch-commits) PATCH_COMMITS="$2"; shift ;;
     --push-status) PUSH_STATUS="$2"; shift ;;
     --pr-url) PR_URL="$2"; shift ;;
     --lint-result) LINT_RESULT="$2"; shift ;;
+    --platform) PLATFORM="$2"; shift ;;
+    --base-branch) BASE_BRANCH="$2"; shift ;;
+    --worktree-cleaned) WORKTREE_CLEANED="$2"; shift ;;
     -h|--help)
-      echo "Usage: sync-status.sh --story <key> --status-file <path> [--worktree <path>] [--worktree-status-file <path>] [git fields...]"
+      echo "Usage: sync-status.sh --story <key> --git-status-file <path> [git fields...]"
       exit 0
       ;;
+    *) shift ;;
   esac
   shift
 done
 
-if [ -z "$STORY" ] || [ -z "$STATUS_FILE" ]; then
-  echo "ERROR: --story and --status-file required" >&2
+if [ -z "$STORY" ] || [ -z "$GIT_STATUS_FILE" ]; then
+  echo "ERROR: --story and --git-status-file required" >&2
   exit 1
 fi
 
-if [ ! -f "$STATUS_FILE" ]; then
-  echo "ERROR: status file not found: $STATUS_FILE" >&2
-  exit 1
-fi
+# Ensure parent directory exists
+mkdir -p "$(dirname "$GIT_STATUS_FILE")"
 
-# Try to read story status from worktree copy
-WORKTREE_STATUS=""
-if [ -n "$WORKTREE_STATUS_FILE" ] && [ -f "$WORKTREE_STATUS_FILE" ]; then
-  # Use explicitly provided path
-  WORKTREE_STATUS=$(grep -A1 "^  ${STORY}:" "$WORKTREE_STATUS_FILE" 2>/dev/null | grep 'status:' | awk '{print $2}' || true)
-elif [ -n "$WORKTREE" ]; then
-  # Search common locations in the worktree
-  for candidate in \
-    "$WORKTREE/_bmad-output/implementation-artifacts/sprint-status.yaml" \
-    "$WORKTREE/_bmad-output/sprint-status.yaml"; do
-    if [ -f "$candidate" ]; then
-      WORKTREE_STATUS=$(grep -A1 "^  ${STORY}:" "$candidate" 2>/dev/null | grep 'status:' | awk '{print $2}' || true)
-      break
-    fi
-  done
-fi
-
-# Build the git fields block to inject
-GIT_FIELDS=""
-[ -n "$BRANCH" ] && GIT_FIELDS="${GIT_FIELDS}    branch: ${BRANCH}\n"
-[ -n "$WORKTREE" ] && GIT_FIELDS="${GIT_FIELDS}    worktree: ${WORKTREE}\n"
-[ -n "$STORY_COMMIT" ] && GIT_FIELDS="${GIT_FIELDS}    story_commit: ${STORY_COMMIT}\n"
-[ -n "$PATCH_COMMITS" ] && GIT_FIELDS="${GIT_FIELDS}    patch_commits: [${PATCH_COMMITS}]\n"
-[ -n "$LINT_RESULT" ] && GIT_FIELDS="${GIT_FIELDS}    lint_result: \"${LINT_RESULT}\"\n"
-GIT_FIELDS="${GIT_FIELDS}    push_status: ${PUSH_STATUS}\n"
-[ -n "$PR_URL" ] && GIT_FIELDS="${GIT_FIELDS}    pr_url: ${PR_URL}\n"
-GIT_FIELDS="${GIT_FIELDS}    worktree_cleaned: false\n"
-
-# Read current status file
-CONTENT=$(cat "$STATUS_FILE")
-
-# Update story status if we got it from worktree
-if [ -n "$WORKTREE_STATUS" ]; then
-  # Replace the status line for this story
-  CONTENT=$(echo "$CONTENT" | sed "/^  ${STORY}:/,/^  [^ ]/{s/    status: .*/    status: ${WORKTREE_STATUS}/;}")
-fi
-
-# Check if git fields already exist for this story (look for branch: under the story key)
-if echo "$CONTENT" | grep -A5 "^  ${STORY}:" | grep -q "branch:"; then
-  # Update existing git fields — remove old ones and re-inject
-  # This is a simplified approach: we remove lines between status and the next story key
-  TMP_CONTENT=$(echo "$CONTENT" | awk -v story="  ${STORY}:" -v fields="$(printf '%b' "$GIT_FIELDS")" '
-    BEGIN { in_story=0; printed_fields=0 }
-    $0 ~ "^" story { in_story=1; print; next }
-    in_story && /^    status:/ { print; printf "%s", fields; printed_fields=1; next }
-    in_story && /^    (branch|worktree|story_commit|patch_commits|lint_result|push_status|pr_url|worktree_cleaned):/ { next }
-    in_story && /^  [^ ]/ { in_story=0 }
-    { print }
-  ')
-  CONTENT="$TMP_CONTENT"
+# Read existing file or start fresh
+if [ -f "$GIT_STATUS_FILE" ]; then
+  EXISTING=$(cat "$GIT_STATUS_FILE")
 else
-  # Inject git fields after the status line for this story
-  CONTENT=$(echo "$CONTENT" | awk -v story="  ${STORY}:" -v fields="$(printf '%b' "$GIT_FIELDS")" '
-    BEGIN { in_story=0 }
-    $0 ~ "^" story { in_story=1; print; next }
-    in_story && /^    status:/ { print; printf "%s", fields; in_story=0; next }
-    { print }
-  ')
+  EXISTING=""
 fi
 
-# Atomic write: same-directory temp file + mv
-TMP_FILE="${STATUS_FILE}.tmp"
-echo "$CONTENT" > "$TMP_FILE"
-mv "$TMP_FILE" "$STATUS_FILE"
+# Build the story entry
+STORY_BLOCK="  ${STORY}:"
+[ -n "$BRANCH" ] && STORY_BLOCK="$STORY_BLOCK
+    branch: ${BRANCH}"
+[ -n "$WORKTREE" ] && STORY_BLOCK="$STORY_BLOCK
+    worktree: ${WORKTREE}"
+[ -n "$STORY_COMMIT" ] && STORY_BLOCK="$STORY_BLOCK
+    story_commit: ${STORY_COMMIT}"
+[ -n "$PATCH_COMMITS" ] && STORY_BLOCK="$STORY_BLOCK
+    patch_commits: [${PATCH_COMMITS}]"
+[ -n "$LINT_RESULT" ] && STORY_BLOCK="$STORY_BLOCK
+    lint_result: \"${LINT_RESULT}\""
+STORY_BLOCK="$STORY_BLOCK
+    push_status: ${PUSH_STATUS}"
+[ -n "$PR_URL" ] && STORY_BLOCK="$STORY_BLOCK
+    pr_url: ${PR_URL}"
+STORY_BLOCK="$STORY_BLOCK
+    worktree_cleaned: ${WORKTREE_CLEANED}"
 
-echo "OK:${STORY}:status=${WORKTREE_STATUS:-unchanged}:push=${PUSH_STATUS}"
+# If file exists and has this story, replace that story's block
+# If file exists without this story, append under stories:
+# If file doesn't exist, create fresh
+TMP_FILE="${GIT_STATUS_FILE}.tmp"
+
+if [ -z "$EXISTING" ]; then
+  # Create new file
+  cat > "$TMP_FILE" <<EOF
+# BMAD Autopilot Add-On — Git Status
+# Tracks git metadata per story. Do not edit manually.
+git_integration:
+  enabled: true
+  base_branch: ${BASE_BRANCH}
+  platform: ${PLATFORM}
+
+stories:
+${STORY_BLOCK}
+EOF
+elif echo "$EXISTING" | grep -q "^  ${STORY}:"; then
+  # Replace existing story block
+  awk -v story="  ${STORY}:" -v block="$STORY_BLOCK" '
+    $0 == story { skip=1; print block; next }
+    skip && /^  [^ ]/ { skip=0 }
+    skip { next }
+    { print }
+  ' "$GIT_STATUS_FILE" > "$TMP_FILE"
+else
+  # Append new story
+  printf '%s\n%s\n' "$EXISTING" "$STORY_BLOCK" > "$TMP_FILE"
+fi
+
+# Atomic rename
+mv "$TMP_FILE" "$GIT_STATUS_FILE"
+
+echo "OK:${STORY}:push=${PUSH_STATUS}"

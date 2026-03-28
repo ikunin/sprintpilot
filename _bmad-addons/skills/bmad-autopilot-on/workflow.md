@@ -90,7 +90,8 @@ Load config: `{project-root}/_bmad/bmm/config.yaml`
 Resolve:
 - `project_name`, `user_name` (user)
 - `planning_artifacts`, `implementation_artifacts`
-- `status_file` = `{implementation_artifacts}/sprint-status.yaml`
+- `status_file` = `{implementation_artifacts}/sprint-status.yaml` (BMAD-owned, READ ONLY)
+- `git_status_file` = `{implementation_artifacts}/git-status.yaml` (addon-owned, write git fields here)
 - `state_file` = `{implementation_artifacts}/autopilot-state.yaml`
 - `session_story_limit` = 3
 - `project_root` = absolute path of current working directory (store for later use)
@@ -200,13 +201,17 @@ Resolve:
 
   <check if="{{git_enabled}} AND status_file did not exist (sprint-planning just ran)">
     <action>Run `git fetch origin` to ensure remote refs are current</action>
-    <action>Write `git_integration` block to `{status_file}` (additive):
+    <action>Initialize `{git_status_file}` with git_integration block:
     ```yaml
+    # BMAD Autopilot Add-On — Git Status
     git_integration:
       enabled: true
       base_branch: {git.base_branch from config}
       platform: {{platform}}
+
+    stories:
     ```
+    Note: this is the addon's own file — NEVER write git fields to sprint-status.yaml.
     </action>
   </check>
 
@@ -420,18 +425,14 @@ NEVER wait for user at a menu.
 
 <check if="{{completed_skill}} was bmad-sprint-planning AND {{git_enabled}}">
   <action>Run `git fetch origin`</action>
-  <action>Write `git_integration` block to `{status_file}` if not already present</action>
+  <action>Initialize `{git_status_file}` if it doesn't exist (with git_integration block)</action>
 </check>
 
 <check if="{{completed_skill}} was bmad-create-story AND {{git_enabled}}">
   <action>Sanitize branch name for `{{current_story}}` (same logic as step 3)</action>
-  <action>Check if branch already registered in `{status_file}` for this story → skip if so</action>
-  <action>Register branch name in `{status_file}`:
-  ```yaml
-  development_status:
-    {{current_story}}:
-      branch: story/{{branch_name}}
-  ```
+  <action>Check if branch already registered in `{git_status_file}` for this story → skip if so</action>
+  <action>Register branch in `{git_status_file}`:
+  `bash {{project_root}}/_bmad-addons/scripts/sync-status.sh --story "{{current_story}}" --git-status-file "{git_status_file}" --branch "story/{{branch_name}}" --platform "{{platform}}" --base-branch "{{base_branch}}"`
   </action>
 </check>
 
@@ -530,9 +531,9 @@ Apply ALL patch and bugfix findings automatically. For each:
   Set `{{in_worktree}}` = false.
   </action>
 
-  <action>**Sync sprint-status.yaml** — run:
-  `bash {{project_root}}/_bmad-addons/scripts/sync-status.sh --story "{{current_story}}" --worktree "{{project_root}}/.claude/worktrees/{{current_story}}" --status-file "{{status_file}}" --branch "story/{{branch_name}}" --commit "{{story_commit}}" --patch-commits "{{patch_commits_csv}}" --push-status "{{push_status}}" --pr-url "{{pr_url}}" --lint-result "{{lint_result}}"`
-  This reads status from worktree copy, merges git fields into project root copy, writes atomically.
+  <action>**Write git status** to addon's own file (NEVER modify sprint-status.yaml):
+  `bash {{project_root}}/_bmad-addons/scripts/sync-status.sh --story "{{current_story}}" --git-status-file "{git_status_file}" --branch "story/{{branch_name}}" --commit "{{story_commit}}" --patch-commits "{{patch_commits_csv}}" --push-status "{{push_status}}" --pr-url "{{pr_url}}" --lint-result "{{lint_result}}" --worktree "{{project_root}}/.claude/worktrees/{{current_story}}" --platform "{{platform}}" --base-branch "{{base_branch}}"`
+  This writes to `git-status.yaml` (addon-owned). Sprint-status.yaml is BMAD-owned and read-only.
   </action>
 </check>
 
@@ -571,7 +572,7 @@ Apply ALL patch and bugfix findings automatically. For each:
       1. Check if worktree at `.claude/worktrees/{{story-key}}` exists
       2. Check if clean: `git -C .claude/worktrees/{{story-key}} status --porcelain`
       3. If clean → `git worktree remove .claude/worktrees/{{story-key}}` + `git worktree prune`
-         Update `{status_file}`: `worktree_cleaned: true`
+         Update `{git_status_file}` for this story: `worktree_cleaned: true`
       4. If dirty → warn user, skip cleanup
     </action>
   </check>

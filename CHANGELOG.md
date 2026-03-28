@@ -1,5 +1,15 @@
 # Changelog
 
+## [2.0.1] - 2026-03-28
+
+### Changed
+- **Git status separated from sprint-status.yaml** — addon now writes git metadata
+  (branch, commit, PR URL, push status, lint result) to its own `git-status.yaml`
+  instead of injecting fields into BMAD's `sprint-status.yaml`
+- `sync-status.sh` rewritten: simple YAML write instead of complex awk injection
+- `sprint-status.yaml` is now READ ONLY for the addon
+- Updated all workflow files and documentation
+
 ## [2.0.0] - 2026-03-28
 
 ### Added

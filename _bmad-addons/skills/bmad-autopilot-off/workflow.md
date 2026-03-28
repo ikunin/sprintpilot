@@ -12,7 +12,8 @@ Load config: `{project-root}/_bmad/bmm/config.yaml`
 
 Resolve:
 - `implementation_artifacts`
-- `status_file` = `{implementation_artifacts}/sprint-status.yaml`
+- `status_file` = `{implementation_artifacts}/sprint-status.yaml` (BMAD-owned, read only)
+- `git_status_file` = `{implementation_artifacts}/git-status.yaml` (addon-owned git fields)
 - `planning_artifacts`
 - `project_root` = absolute path of current working directory
 
@@ -56,9 +57,10 @@ Scan all entries in sprint-status:
 ### Step 4 — Collect git status (if enabled)
 
 <check if="{{git_enabled}}">
-  <action>Read `git_integration` block from `{status_file}` if present</action>
-  <action>For each story in development_status:
-    - Note `branch`, `push_status`, `pr_url`, `worktree_cleaned` if present
+  <action>Read `{git_status_file}` (addon's git-status.yaml) if it exists</action>
+  <action>Extract `git_integration` block (platform, base_branch)</action>
+  <action>For each story in `stories:` section:
+    - Note `branch`, `push_status`, `pr_url`, `worktree_cleaned`
   </action>
   <action>Check for active worktrees: `git worktree list --porcelain 2>/dev/null`</action>
   <action>Check current branch: `git branch --show-current 2>/dev/null`</action>

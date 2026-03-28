@@ -94,17 +94,24 @@ ExitWorktree(action: "keep")
 
 **Fallback**: If `EnterWorktree` fails, the workflow creates a regular branch (`git checkout -b`) and continues without isolation.
 
-### Sprint-Status Sync
+### File Ownership: sprint-status.yaml vs git-status.yaml
 
-Skills invoked in a worktree update the **worktree's** copy of `sprint-status.yaml`. After `ExitWorktree`, the autopilot syncs status changes back to the **project root** copy using `sync-status.sh`.
+The addon **never modifies** `sprint-status.yaml` — that file is owned by BMAD. Instead, the addon tracks git metadata in its own `git-status.yaml`:
+
+| File | Owner | Contains |
+|------|-------|----------|
+| `sprint-status.yaml` | BMAD | Story status, phase, epic structure |
+| `git-status.yaml` | Addon | Branch, commit SHA, PR URL, push status, lint result, worktree path |
+
+Both live in `_bmad-output/implementation-artifacts/`. The autopilot reads `sprint-status.yaml` for story selection and writes git fields to `git-status.yaml`.
 
 ```
-[In worktree] bmad-dev-story updates sprint-status.yaml
+[In worktree] bmad-dev-story updates sprint-status.yaml (BMAD-owned)
                      ↓
 [ExitWorktree] returns to project root
                      ↓
-[sync-status.sh] reads worktree copy, merges into project root copy
-                 writes atomically (tmp + mv)
+[sync-status.sh] writes git fields to git-status.yaml (addon-owned)
+                 atomic write (tmp + mv), never touches sprint-status
 ```
 
 ### Lock File

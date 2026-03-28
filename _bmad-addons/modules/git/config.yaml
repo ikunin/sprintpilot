@@ -4,6 +4,8 @@
 git:
   enabled: true # false = all git ops silently skip
   base_branch: main
+  # Git status is tracked in git-status.yaml (addon-owned), NOT sprint-status.yaml (BMAD-owned)
+  # git_status_file resolves to: {implementation_artifacts}/git-status.yaml
 
   # Branch naming
   branch_prefix: "story/"
