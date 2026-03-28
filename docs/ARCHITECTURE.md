@@ -12,8 +12,12 @@
 ```
 _bmad-addons/
 ├── manifest.yaml              # Version, BMAD compatibility, module flags
-├── install.sh / uninstall.sh   # Lifecycle scripts
+├── BMAD.md                    # Comprehensive skill reference (permanent home)
+├── install.sh / uninstall.sh   # Lifecycle scripts (multi-tool, system prompts)
 ├── .secrets-allowlist          # Patterns exempt from secrets scanning
+│
+├── templates/
+│   └── agent-rules.md         # Enforcement block template (with markers)
 │
 ├── modules/
 │   ├── git/
@@ -46,6 +50,32 @@ _bmad-addons/
 ```
 
 ## Key Mechanisms
+
+### System Prompt Enforcement
+
+The add-on installs **system prompt files** that make every AI agent session aware of BMAD from the first message. Without this, agents would only learn about BMAD when explicitly told.
+
+**Three-file architecture:**
+
+```
+CLAUDE.md          →  @AGENTS.md (include directive)
+AGENTS.md          →  enforcement block (self-sufficient, ~40 lines)
+                       "NEVER write code without the 7-step sequence"
+                       References _bmad-addons/BMAD.md for full catalog
+_bmad-addons/
+  BMAD.md          ←  comprehensive skill reference (permanent, not copied)
+  templates/
+    agent-rules.md ←  source template for the enforcement block
+```
+
+**Why self-sufficient:** Tools other than Claude Code can't `@include` files. The enforcement block inlines all critical rules (mandatory 7-step sequence, git rules, autopilot commands) so it works even if the agent never reads `BMAD.md`.
+
+**Marker-based updates:** The block is wrapped in `<!-- BEGIN:bmad-workflow-rules -->` / `<!-- END:bmad-workflow-rules -->` HTML comment markers. The installer can replace it without touching user content. The uninstaller removes only the BMAD section.
+
+**Per-tool strategies:**
+- **Claude Code**: `CLAUDE.md` → `@AGENTS.md` include → `AGENTS.md` has the rules block
+- **Own-file tools** (Cursor, Roo, Kiro, Trae): dedicated `bmad.md` in the tool's rules directory
+- **Append tools** (Windsurf, Cline, Gemini CLI, Copilot): rules block appended to shared system prompt file
 
 ### EnterWorktree / ExitWorktree
 

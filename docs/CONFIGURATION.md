@@ -159,3 +159,34 @@ Defines CLI commands for each platform. Uses `{placeholders}` filled at runtime:
 - `{body}` — PR body content
 
 Commands use YAML `|` literal blocks to preserve HEREDOC formatting.
+
+## System Prompt Files
+
+These are created by `install.sh` and enforce BMAD workflows from the first agent message.
+
+### Source Files (in `_bmad-addons/`)
+
+| File | Purpose | Editable? |
+|------|---------|-----------|
+| `BMAD.md` | Comprehensive skill reference by lifecycle phase | Yes — add skills, update descriptions |
+| `templates/agent-rules.md` | Enforcement block injected into system prompts | Yes — add constraints, update rules |
+
+### Generated Files (per tool)
+
+| Tool | Generated File | Strategy |
+|------|---------------|----------|
+| Claude Code | `CLAUDE.md` + `AGENTS.md` | `@AGENTS.md` include |
+| Cursor | `.cursor/rules/bmad.md` | Own file |
+| Windsurf | `.windsurfrules` | Append with markers |
+| Cline | `.clinerules` | Append with markers |
+| Roo | `.roo/rules/bmad.md` | Own file |
+| Gemini CLI | `GEMINI.md` | Append with markers |
+| GitHub Copilot | `.github/copilot-instructions.md` | Append with markers |
+| Kiro | `.kiro/rules/bmad.md` | Own file |
+| Trae | `.trae/rules/bmad.md` | Own file |
+
+### Customizing Rules
+
+Edit `_bmad-addons/templates/agent-rules.md` to change enforcement rules. Keep the `<!-- BEGIN:bmad-workflow-rules -->` and `<!-- END:bmad-workflow-rules -->` markers — they are required for idempotent updates and clean uninstall.
+
+After editing, re-run `install.sh` to propagate changes to all tool system prompts.

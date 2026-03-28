@@ -2,11 +2,12 @@
 
 ## Project Structure
 
-The add-on consists of three layers:
+The add-on consists of four layers:
 
-1. **Skills** (`skills/`) — Markdown prompts that instruct Claude. These are the user-facing interface.
+1. **Skills** (`skills/`) — Markdown prompts that instruct the AI agent. User-facing interface.
 2. **Scripts** (`scripts/`) — Bash helpers for complex operations. Called by skills via the Bash tool.
 3. **Config** (`modules/`) — YAML configuration read by skills at runtime.
+4. **System Prompts** (`BMAD.md` + `templates/agent-rules.md`) — Enforce BMAD workflows from session start.
 
 ## Adding a New Skill
 
@@ -15,7 +16,9 @@ The add-on consists of three layers:
 3. Add `workflow.md` with the full workflow instructions
 4. If the skill uses subagents, add agent prompts to `agents/`
 5. Add the skill name to `manifest.yaml` under `installed_skills`
-6. Run `install.sh` to deploy
+6. If the skill is part of the mandatory workflow, add it to `_bmad-addons/BMAD.md`
+7. If it introduces new constraints, add rules to `templates/agent-rules.md`
+8. Run `install.sh` to deploy
 
 ### SKILL.md Template
 

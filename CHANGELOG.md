@@ -42,9 +42,25 @@
 - Installation guide, usage guide, architecture docs
 - Configuration reference, contributing guide
 
+#### System Prompt Enforcement
+- `BMAD.md` in `_bmad-addons/`: comprehensive skill reference by lifecycle phase
+- `templates/agent-rules.md`: self-sufficient enforcement block with `<!-- BEGIN/END -->` markers
+- Installer creates per-tool system prompt files:
+  - Claude Code: `CLAUDE.md` + `AGENTS.md` (via `@include`)
+  - Cursor/Roo/Kiro/Trae: dedicated `bmad.md` in rules directory
+  - Windsurf/Cline/Gemini CLI/Copilot: marker-based append to shared rules file
+- Marker-based idempotent updates (re-run install safely, user content preserved)
+- Uninstaller surgically removes BMAD blocks only
+
+#### Windows Compatibility
+- `sanitize-branch.sh`: `sha256sum` before `shasum` fallback
+- `stage-and-commit.sh`: `wc -c` fallback for `stat`, guard `file` command
+- All scripts now work on macOS, Linux, and Git Bash/WSL
+
 ### Changed
 - Manifest bumped to v2.0.0
 - Multi-agent module enabled (`ma.enabled: true`)
+- 9 supported tools (added Gemini CLI)
 
 ## [1.0.1] - 2026-03-28
 

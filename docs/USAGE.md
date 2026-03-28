@@ -1,5 +1,20 @@
 # Usage Guide
 
+## System Prompt Enforcement
+
+After installation, every AI agent session starts with BMAD awareness. The installer creates system prompt files (e.g., `CLAUDE.md` + `AGENTS.md` for Claude Code) that tell the agent:
+
+- This project uses the BMAD Method
+- The 7-step story sequence is **mandatory** — no skipping steps
+- Git safety rules are enforced (no `git add -A`, no secrets)
+- Available skills and how to get started
+
+This means you don't need to tell the agent about BMAD — it already knows. If you ask the agent to "implement feature X", it will follow the BMAD story sequence automatically.
+
+The full skill reference lives at `_bmad-addons/BMAD.md`. The enforcement rules are in `_bmad-addons/templates/agent-rules.md`.
+
+---
+
 ## Git-Enhanced Autopilot
 
 ### Starting the Autopilot

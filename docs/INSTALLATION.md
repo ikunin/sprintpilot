@@ -100,6 +100,19 @@ You should see 9 skill directories per tool:
 - `bmad-ma-reverse-architect`, `bmad-ma-migrate`
 - `bmad-ma-research`, `bmad-ma-party-mode`
 
+The installer also creates **system prompt files** that enforce BMAD workflows:
+
+| Tool | File Created |
+|------|-------------|
+| Claude Code | `CLAUDE.md` (with `@AGENTS.md`) + `AGENTS.md` |
+| Cursor | `.cursor/rules/bmad.md` |
+| Windsurf | Appends to `.windsurfrules` |
+| Cline | Appends to `.clinerules` |
+| Gemini CLI | Appends to `GEMINI.md` |
+| Others | Tool-specific rules file |
+
+These files tell the AI agent about BMAD's mandatory workflow, preventing it from skipping steps or writing code without a story.
+
 ## After a BMAD Update
 
 BMAD updates may regenerate `.claude/skills/`. The add-on's skills use prefixes not in BMAD's manifest, so they typically survive. If any are lost:
