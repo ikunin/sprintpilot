@@ -43,6 +43,12 @@ NAME=$(echo "$NAME" | sed 's/-\{2,\}/-/g')
 # 5. Strip leading/trailing hyphens and dots
 NAME=$(echo "$NAME" | sed 's/^[-.]*//' | sed 's/[-.]*$//')
 
+# 5b. Validate non-empty after sanitization
+if [ -z "$NAME" ]; then
+  echo "ERROR: story key '$STORY_KEY' produced empty branch name after sanitization" >&2
+  exit 1
+fi
+
 # 6. Truncate + hash if too long
 if [ "${#NAME}" -gt "$MAX_LENGTH" ]; then
   # Hash of the FULL pre-truncation name (6 chars)
@@ -55,8 +61,13 @@ fi
 FULL_NAME="${PREFIX}${NAME}"
 if git rev-parse --verify "$FULL_NAME" &>/dev/null; then
   COUNTER=2
+  MAX_ATTEMPTS=100
   while git rev-parse --verify "${PREFIX}${NAME}-${COUNTER}" &>/dev/null; do
     COUNTER=$((COUNTER + 1))
+    if [ "$COUNTER" -gt "$MAX_ATTEMPTS" ]; then
+      echo "ERROR: branch collision limit ($MAX_ATTEMPTS) exceeded for '$NAME'" >&2
+      exit 1
+    fi
   done
   NAME="${NAME}-${COUNTER}"
   FULL_NAME="${PREFIX}${NAME}"

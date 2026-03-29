@@ -153,7 +153,9 @@ done <<< "$ALL_FILES"
 # 3b. Stage deletions
 while IFS= read -r file; do
   [ -z "$file" ] && continue
-  git rm --quiet -- "$file" 2>/dev/null || true
+  if ! git rm --quiet -- "$file" 2>/dev/null; then
+    WARNINGS="${WARNINGS}WARN: could not remove '$file' from index (may not be tracked)\n"
+  fi
 done <<< "$DELETED"
 
 # 4. Commit

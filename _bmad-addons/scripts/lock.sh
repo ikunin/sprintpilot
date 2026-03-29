@@ -67,12 +67,12 @@ case "$ACTION" in
     STATE=$(echo "$INFO" | cut -d: -f1)
     case "$STATE" in
       FREE)
-        printf '%s\n%s\n' "$(date +%s)" "$(uuidgen 2>/dev/null || cat /proc/sys/kernel/random/uuid 2>/dev/null || echo "session-$$-$(date +%s)")" > "$LOCK_FILE"
+        printf '%s\n%s\n' "$(date +%s)" "$(uuidgen 2>/dev/null || cat /proc/sys/kernel/random/uuid 2>/dev/null || openssl rand -hex 8 2>/dev/null || echo "session-$(date +%s)-$RANDOM")" > "$LOCK_FILE"
         echo "ACQUIRED:$(tail -1 "$LOCK_FILE")"
         ;;
       STALE)
         rm -f "$LOCK_FILE"
-        printf '%s\n%s\n' "$(date +%s)" "$(uuidgen 2>/dev/null || cat /proc/sys/kernel/random/uuid 2>/dev/null || echo "session-$$-$(date +%s)")" > "$LOCK_FILE"
+        printf '%s\n%s\n' "$(date +%s)" "$(uuidgen 2>/dev/null || cat /proc/sys/kernel/random/uuid 2>/dev/null || openssl rand -hex 8 2>/dev/null || echo "session-$(date +%s)-$RANDOM")" > "$LOCK_FILE"
         echo "ACQUIRED_STALE:$(tail -1 "$LOCK_FILE")"
         ;;
       LOCKED)

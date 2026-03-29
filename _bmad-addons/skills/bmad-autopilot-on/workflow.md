@@ -104,6 +104,7 @@ Resolve:
   <action>Read `{project-root}/_bmad-addons/manifest.yaml`</action>
   <action>Read `{project-root}/_bmad-addons/modules/git/config.yaml`</action>
   <action>Set `{{git_enabled}}` from `git.enabled` field</action>
+  <action>Set `{{base_branch}}` from `git.base_branch` field. If missing or empty, default to `main` and warn: "base_branch not configured, defaulting to main"</action>
 </check>
 
 <check if="manifest does NOT exist">
@@ -335,6 +336,8 @@ Resolve:
   - Log: "WARN: EnterWorktree failed — continuing without worktree isolation"
   - Set `{{in_worktree}}` = false
   - Create branch manually: `git checkout -b story/{{branch_name}}`
+    If checkout also fails (branch already exists): `git checkout story/{{branch_name}}`
+    If both fail: HALT — "Could not create or switch to branch story/{{branch_name}}"
   - Continue with the skill invocation in PROJECT_ROOT (no isolation)
   - Git operations (commit, push, PR) still work on the branch
   </action>
@@ -397,9 +400,12 @@ NEVER wait for user at a menu.
     Set `{{lint_result}}` from the summary line.
     </action>
 
-    <action>**Stage and commit** — resolve commit message placeholders first:
+    <action>**Stage and commit** — resolve commit message placeholders using `commit_placeholder_resolution` chain from config:
+    - `{story-key}` → from sprint-status.yaml development_status key (= `{{current_story}}`)
     - `{epic}` → from story file epic header, fallback to story-key prefix (e.g., "1" from "1-3")
     - `{story-title}` → from story file title, fallback to story-key
+    - `{patch-title}` → from review finding title, fallback to "code review fix"
+    Read the commit template from `git.commit_templates.story` in config (default: `feat({epic}): {story-title} ({story-key})`).
     Then run:
     `bash {{project_root}}/_bmad-addons/scripts/stage-and-commit.sh --message "feat({{epic}}): {{story-title}} ({{current_story}})" --allowlist {{project_root}}/_bmad-addons/.secrets-allowlist`
     Output: commit SHA. Set `{{story_commit}}` = output.
@@ -518,8 +524,17 @@ Apply ALL patch and bugfix findings automatically. For each:
   </action>
 
   <action>**Create PR/MR** (if push succeeded and platform != git_only):
-  1. Read PR body template from `{{project_root}}/_bmad-addons/modules/git/templates/pr-body.md`
-  2. Fill placeholders with actual values (story-key, title, change summary, test results)
+  1. Read PR body template: `{{project_root}}/_bmad-addons/modules/git/templates/pr-body.md`
+     If template file doesn't exist, use a simple default: "## Story: {{current_story}}\n\n{{story-title}}"
+  2. Fill template placeholders using the `commit_placeholder_resolution` chain from config:
+     - `{story-key}` → `{{current_story}}` (from sprint-status)
+     - `{story-title}` → from story file title, fallback to story-key
+     - `{epic}` → from story file epic header, fallback to story-key prefix
+     - `{change-summary}` → list of changed files from `git diff --stat`
+     - `{acceptance-criteria}` → from story file AC section
+     - `{lint-result}` → `{{lint_result}}`
+     - `{test-result}` → from last test run output
+     - `{patch-count}` → number of patch commits
   3. Run: `bash {{project_root}}/_bmad-addons/scripts/create-pr.sh --platform {{platform}} --branch story/{{branch_name}} --base {{base_branch}} --title "{{story-title}} ({{current_story}})" --body "<filled template>"`
   4. Output: PR URL or "SKIPPED". Set `{{pr_url}}` = output.
   If creation fails → log warning, set `{{pr_url}}` = null, continue.

@@ -36,7 +36,11 @@ if [ ! -d "$WORKTREES_DIR" ]; then
 fi
 
 # Fetch remote refs to ensure accurate commit comparison
-git fetch origin 2>/dev/null || echo "WARN: git fetch failed (no remote?)" >&2
+if git remote get-url origin &>/dev/null; then
+  git fetch origin 2>/dev/null || echo "WARN: git fetch failed" >&2
+else
+  echo "WARN: no 'origin' remote configured — commit comparison may be inaccurate" >&2
+fi
 
 TOTAL=0
 CLEAN_DONE=0

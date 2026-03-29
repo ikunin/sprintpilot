@@ -179,3 +179,15 @@ rm .autopilot.lock
 ```
 
 Or wait 30 minutes for automatic stale lock removal.
+
+### Windows (Git Bash / WSL)
+
+On Windows, always invoke scripts with `bash` explicitly:
+
+```bash
+bash _bmad-addons/install.sh --tools claude-code
+```
+
+Not `./install.sh` (which may fail if the script has CRLF line endings or `/bin/bash` doesn't resolve).
+
+The repo includes `.gitattributes` that forces LF line endings for all scripts and YAML files, preventing CRLF issues on clone.

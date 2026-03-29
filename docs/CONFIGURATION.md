@@ -199,3 +199,42 @@ These are created by `install.sh` and enforce BMAD workflows from the first agen
 Edit `_bmad-addons/templates/agent-rules.md` to change enforcement rules. Keep the `<!-- BEGIN:bmad-workflow-rules -->` and `<!-- END:bmad-workflow-rules -->` markers — they are required for idempotent updates and clean uninstall.
 
 After editing, re-run `install.sh` to propagate changes to all tool system prompts.
+
+## Git Status File (`git-status.yaml`)
+
+The addon tracks git metadata in its own file at `_bmad-output/implementation-artifacts/git-status.yaml`. It never modifies BMAD's `sprint-status.yaml`.
+
+Example schema:
+
+```yaml
+# BMAD Autopilot Add-On — Git Status
+git_integration:
+  enabled: true
+  base_branch: main
+  platform: github
+
+stories:
+  1-1-add-login:
+    branch: story/1-1-add-login
+    worktree: .claude/worktrees/1-1-add-login
+    story_commit: abc1234
+    patch_commits: [def5678, ghi9012]
+    lint_result: "2 warnings — non-blocking"
+    push_status: pushed
+    pr_url: https://github.com/user/repo/pull/42
+    worktree_cleaned: false
+  1-2-user-profile:
+    branch: story/1-2-user-profile
+    push_status: pending
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `branch` | string | Git branch name (`story/<key>`) |
+| `worktree` | string | Worktree path (`.claude/worktrees/<key>`) |
+| `story_commit` | string | SHA of the main story commit |
+| `patch_commits` | list | SHAs of code review patch commits |
+| `lint_result` | string | Lint summary (non-blocking) |
+| `push_status` | string | `pushed`, `failed`, `skipped`, `pending` |
+| `pr_url` | string | PR/MR URL (if created) |
+| `worktree_cleaned` | boolean | Whether worktree has been removed |

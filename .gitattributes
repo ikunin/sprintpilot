@@ -1,0 +1,5 @@
+# Ensure scripts always use LF line endings (prevents CRLF failures on Windows)
+*.sh text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+*.md text eol=lf

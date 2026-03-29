@@ -15,6 +15,7 @@ BASE_BRANCH="main"
 TITLE=""
 BODY=""
 BASE_URL=""
+DRY_RUN=false
 
 while [ "$#" -gt 0 ]; do
   case $1 in
@@ -24,6 +25,7 @@ while [ "$#" -gt 0 ]; do
     --title) TITLE="$2"; shift 2 ;;
     --body) BODY="$2"; shift 2 ;;
     --base-url) BASE_URL="$2"; shift 2 ;;
+    --dry-run) DRY_RUN=true; shift ;;
     -h|--help)
       echo "Usage: create-pr.sh --platform <github|gitlab|bitbucket|gitea|git_only> --branch <name> --base <branch> --title 'title' --body 'body' [--base-url <url>]"
       exit 0
@@ -54,6 +56,14 @@ extract_owner_repo() {
   # Handle HTTPS: https://host/owner/repo.git
   echo "$url" | sed -E 's|.*[:/]([^/]+)/([^/]+?)(\.git)?$|\1/\2|'
 }
+
+if [ "$DRY_RUN" = true ]; then
+  echo "DRY RUN: would create $PLATFORM PR/MR"
+  echo "  Branch: $BRANCH → $BASE_BRANCH"
+  echo "  Title: $TITLE"
+  echo "  Body: $(echo "$BODY" | head -3)..."
+  exit 0
+fi
 
 case "$PLATFORM" in
   github)
@@ -120,7 +130,8 @@ case "$PLATFORM" in
       HTTP_CODE=$(echo "$RESULT" | tail -1)
       RESPONSE=$(echo "$RESULT" | sed '$d')
       if [ "$HTTP_CODE" = "201" ]; then
-        echo "$RESPONSE" | grep -oE '"html"[[:space:]]*:[[:space:]]*\{[^}]*"href"[[:space:]]*:[[:space:]]*"[^"]*"' | grep -oE 'https?://[^"]+' | head -1 || echo "CREATED"
+        PR_EXTRACTED=$(echo "$RESPONSE" | grep -oE '"html"[[:space:]]*:[[:space:]]*\{[^}]*"href"[[:space:]]*:[[:space:]]*"[^"]*"' | grep -oE 'https?://[^"]+' | head -1 || true)
+        if [ -n "$PR_EXTRACTED" ]; then echo "$PR_EXTRACTED"; else echo "CREATED (URL not extracted from response)"; fi
       else
         echo "ERROR: Bitbucket API returned $HTTP_CODE: $RESPONSE" >&2
         exit 1
@@ -159,7 +170,8 @@ case "$PLATFORM" in
       HTTP_CODE=$(echo "$RESULT" | tail -1)
       RESPONSE=$(echo "$RESULT" | sed '$d')
       if [ "$HTTP_CODE" = "201" ]; then
-        echo "$RESPONSE" | grep -oE '"html_url"[[:space:]]*:[[:space:]]*"[^"]*"' | grep -oE 'https?://[^"]+' | head -1 || echo "CREATED"
+        PR_EXTRACTED=$(echo "$RESPONSE" | grep -oE '"html_url"[[:space:]]*:[[:space:]]*"[^"]*"' | grep -oE 'https?://[^"]+' | head -1 || true)
+        if [ -n "$PR_EXTRACTED" ]; then echo "$PR_EXTRACTED"; else echo "CREATED (URL not extracted from response)"; fi
       else
         echo "ERROR: Gitea API returned $HTTP_CODE: $RESPONSE" >&2
         exit 1

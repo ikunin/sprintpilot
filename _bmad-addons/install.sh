@@ -80,7 +80,7 @@ install_system_prompt() {
       if [ -f "$agents_file" ] && grep -q '<!-- BEGIN:bmad-workflow-rules -->' "$agents_file" 2>/dev/null; then
         # Replace existing BMAD section
         local tmp
-        tmp=$(mktemp)
+        tmp=$(mktemp "${prompt_file}.XXXXXX" 2>/dev/null || mktemp)
         awk '/<!-- BEGIN:bmad-workflow-rules -->/{skip=1; next} /<!-- END:bmad-workflow-rules -->/{skip=0; next} !skip{print}' "$agents_file" > "$tmp"
         printf '\n%s\n' "$rules_content" >> "$tmp"
         mv "$tmp" "$agents_file"
@@ -121,7 +121,7 @@ install_system_prompt() {
       # Marker-based append/replace in shared file
       if [ -f "$prompt_file" ] && grep -q '<!-- BEGIN:bmad-workflow-rules -->' "$prompt_file" 2>/dev/null; then
         local tmp
-        tmp=$(mktemp)
+        tmp=$(mktemp "${prompt_file}.XXXXXX" 2>/dev/null || mktemp)
         awk '/<!-- BEGIN:bmad-workflow-rules -->/{skip=1; next} /<!-- END:bmad-workflow-rules -->/{skip=0; next} !skip{print}' "$prompt_file" > "$tmp"
         printf '\n%s\n' "$rules_content" >> "$tmp"
         mv "$tmp" "$prompt_file"

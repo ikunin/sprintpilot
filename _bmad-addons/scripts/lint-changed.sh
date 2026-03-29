@@ -40,10 +40,20 @@ run_linter() {
 
   echo "LINTER:$linter_name" >&2
   local output=""
+  local exit_code=0
   if [ -n "$lint_files" ]; then
-    output=$(echo "$lint_files" | tr '\n' '\0' | xargs -0 $lint_cmd 2>&1 || true)
+    # Build file list as arguments (handles spaces in filenames)
+    local file_args=""
+    while IFS= read -r f; do
+      [ -n "$f" ] && file_args="$file_args \"$f\""
+    done <<< "$lint_files"
+    output=$(eval $lint_cmd $file_args 2>&1) || exit_code=$?
   else
-    output=$($lint_cmd 2>&1 || true)
+    output=$($lint_cmd 2>&1) || exit_code=$?
+  fi
+  # exit_code > 2 typically means linter crashed (not just "found issues")
+  if [ "$exit_code" -gt 2 ]; then
+    echo "WARN: $linter_name exited with code $exit_code (may have crashed)" >&2
   fi
   echo "$output"
 }
@@ -115,7 +125,9 @@ detect_and_lint() {
   JAVA_FILES=$(echo "$files" | grep -E '\.java$' || true)
   if [ -n "$JAVA_FILES" ]; then
     if command -v checkstyle &>/dev/null; then
-      combined_output="${combined_output}$(run_linter "checkstyle" "checkstyle -c /google_checks.xml" "$JAVA_FILES")\n"
+      local cs_config="/google_checks.xml"
+      [ -f "checkstyle.xml" ] && cs_config="checkstyle.xml"
+      combined_output="${combined_output}$(run_linter "checkstyle" "checkstyle -c $cs_config" "$JAVA_FILES")\n"
       found_any=true
     elif command -v pmd &>/dev/null; then
       combined_output="${combined_output}$(run_linter "pmd" "pmd check -d" "$JAVA_FILES")\n"
@@ -213,8 +225,11 @@ FULL_OUTPUT=$(detect_and_lint "$ALL_CHANGED") || {
 
 # Save full output to file if requested
 if [ -n "$OUTPUT_FILE" ]; then
-  echo "$FULL_OUTPUT" > "$OUTPUT_FILE"
-  echo "Full output saved to: $OUTPUT_FILE" >&2
+  if echo "$FULL_OUTPUT" > "$OUTPUT_FILE"; then
+    echo "Full output saved to: $OUTPUT_FILE" >&2
+  else
+    echo "WARN: could not write lint output to $OUTPUT_FILE" >&2
+  fi
 fi
 
 # Errors-first truncation

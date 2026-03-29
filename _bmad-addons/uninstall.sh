@@ -3,6 +3,15 @@ set -e
 
 ADDON_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(dirname "$ADDON_DIR")"
+FORCE=false
+
+while [ "$#" -gt 0 ]; do
+  case $1 in
+    --force) FORCE=true; shift ;;
+    -h|--help) echo "Usage: uninstall.sh [--force]"; echo "  --force  Remove dirty worktrees without prompting"; exit 0 ;;
+    *) shift ;;
+  esac
+done
 
 # Same tool registry as install.sh (Bash 3.2 compatible)
 get_tool_dir() {
@@ -60,7 +69,7 @@ remove_system_prompt() {
       local agents_file="$PROJECT_ROOT/AGENTS.md"
       if [ -f "$agents_file" ] && grep -q '<!-- BEGIN:bmad-workflow-rules -->' "$agents_file" 2>/dev/null; then
         local tmp
-        tmp=$(mktemp)
+        tmp=$(mktemp "${agents_file}.XXXXXX" 2>/dev/null || mktemp)
         awk '/<!-- BEGIN:bmad-workflow-rules -->/{skip=1; next} /<!-- END:bmad-workflow-rules -->/{skip=0; next} !skip{print}' "$agents_file" > "$tmp"
         if [ -z "$(tr -d '[:space:]' < "$tmp")" ]; then
           rm -f "$agents_file" "$tmp"
@@ -75,7 +84,7 @@ remove_system_prompt() {
       local claude_file="$PROJECT_ROOT/CLAUDE.md"
       if [ -f "$claude_file" ] && grep -q '@AGENTS.md' "$claude_file" 2>/dev/null; then
         local tmp
-        tmp=$(mktemp)
+        tmp=$(mktemp "${claude_file}.XXXXXX" 2>/dev/null || mktemp)
         grep -v '@AGENTS.md' "$claude_file" > "$tmp" || true
         if [ -z "$(tr -d '[:space:]' < "$tmp")" ]; then
           rm -f "$claude_file" "$tmp"
@@ -97,7 +106,7 @@ remove_system_prompt() {
     append)
       if [ -f "$prompt_file" ] && grep -q '<!-- BEGIN:bmad-workflow-rules -->' "$prompt_file" 2>/dev/null; then
         local tmp
-        tmp=$(mktemp)
+        tmp=$(mktemp "${prompt_file}.XXXXXX" 2>/dev/null || mktemp)
         awk '/<!-- BEGIN:bmad-workflow-rules -->/{skip=1; next} /<!-- END:bmad-workflow-rules -->/{skip=0; next} !skip{print}' "$prompt_file" > "$tmp"
         if [ -z "$(tr -d '[:space:]' < "$tmp")" ]; then
           rm -f "$prompt_file" "$tmp"
@@ -166,8 +175,8 @@ if [ -d "$WORKTREES_DIR" ]; then
     wt_name=$(basename "$wt")
     wt_abs="$(cd "$wt" 2>/dev/null && pwd)" || wt_abs="$wt"
 
-    if git -C "$wt" status --porcelain 2>/dev/null | grep -q .; then
-      echo "  SKIPPED: $wt_name (has uncommitted changes)"
+    if git -C "$wt" status --porcelain 2>/dev/null | grep -q . && [ "$FORCE" = false ]; then
+      echo "  SKIPPED: $wt_name (has uncommitted changes — use --force to override)"
       skipped=$((skipped + 1))
     else
       git worktree remove "$wt_abs" 2>/dev/null || rm -rf "$wt"

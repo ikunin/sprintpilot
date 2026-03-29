@@ -62,22 +62,33 @@ else
   EXISTING=""
 fi
 
+# YAML-safe quoting: wrap values that may contain special chars
+yaml_safe() {
+  local val="$1"
+  # Quote if contains : { } [ ] , & * # ? | - < > = ! % @ ` or newlines
+  case "$val" in
+    *[:\{\}\[\],\&\*\#\?\|\-\<\>\=\!\%\@\`]*|*"
+"*) printf '"%s"' "$(echo "$val" | sed 's/"/\\"/g')" ;;
+    *) printf '%s' "$val" ;;
+  esac
+}
+
 # Build the story entry
 STORY_BLOCK="  ${STORY}:"
 [ -n "$BRANCH" ] && STORY_BLOCK="$STORY_BLOCK
-    branch: ${BRANCH}"
+    branch: $(yaml_safe "$BRANCH")"
 [ -n "$WORKTREE" ] && STORY_BLOCK="$STORY_BLOCK
-    worktree: ${WORKTREE}"
+    worktree: $(yaml_safe "$WORKTREE")"
 [ -n "$STORY_COMMIT" ] && STORY_BLOCK="$STORY_BLOCK
-    story_commit: ${STORY_COMMIT}"
+    story_commit: $(yaml_safe "$STORY_COMMIT")"
 [ -n "$PATCH_COMMITS" ] && STORY_BLOCK="$STORY_BLOCK
     patch_commits: [${PATCH_COMMITS}]"
 [ -n "$LINT_RESULT" ] && STORY_BLOCK="$STORY_BLOCK
-    lint_result: \"${LINT_RESULT}\""
+    lint_result: $(yaml_safe "$LINT_RESULT")"
 STORY_BLOCK="$STORY_BLOCK
-    push_status: ${PUSH_STATUS}"
+    push_status: $(yaml_safe "$PUSH_STATUS")"
 [ -n "$PR_URL" ] && STORY_BLOCK="$STORY_BLOCK
-    pr_url: ${PR_URL}"
+    pr_url: $(yaml_safe "$PR_URL")"
 STORY_BLOCK="$STORY_BLOCK
     worktree_cleaned: ${WORKTREE_CLEANED}"
 

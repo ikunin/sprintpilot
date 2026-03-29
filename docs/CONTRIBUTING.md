@@ -48,6 +48,22 @@ Scripts should be:
 - Write warnings to stderr, primary output to stdout
 - Handle edge cases gracefully (missing files, empty input)
 
+## Shell Compatibility
+
+All scripts require **Bash 3.2+** (stock macOS). They also work on:
+- Linux (Bash 4+/5+)
+- Windows Git Bash
+- WSL (Windows Subsystem for Linux)
+
+No associative arrays (Bash 4+ only). No `set -u` (some variables are intentionally unset). Use `#!/bin/bash` shebang. The repo has `.gitattributes` enforcing LF line endings for scripts.
+
+## Exit Code Convention
+
+All scripts should follow this convention:
+- `0` — success
+- `1` — expected failure (e.g., nothing to commit, lock held, no linter found)
+- `2` — error (e.g., missing required argument, infrastructure failure)
+
 ## Testing
 
 ### Scripts

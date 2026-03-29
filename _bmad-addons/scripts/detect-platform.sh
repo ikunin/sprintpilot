@@ -47,17 +47,17 @@ fi
 # 3. Remote URL regex (also used as tiebreaker when multiple CLIs present)
 REMOTE_URL=$(git remote get-url origin 2>/dev/null || echo "")
 
-if echo "$REMOTE_URL" | grep -qE 'github\.com[:/]'; then
+if echo "$REMOTE_URL" | grep -qiE 'github\.com[:/]'; then
   echo "github"
   exit 0
 fi
 
-if echo "$REMOTE_URL" | grep -qE 'gitlab\.'; then
+if echo "$REMOTE_URL" | grep -qiE 'gitlab\.'; then
   echo "gitlab"
   exit 0
 fi
 
-if echo "$REMOTE_URL" | grep -qE 'bitbucket\.org[:/]'; then
+if echo "$REMOTE_URL" | grep -qiE 'bitbucket\.org[:/]'; then
   echo "bitbucket"
   exit 0
 fi
@@ -85,4 +85,5 @@ if [ "$HAS_BB" = true ]; then
 fi
 
 # 5. No CLI, no match
+echo "WARN: no platform CLI found (gh, glab, bb, tea) and remote URL didn't match known platforms" >&2
 echo "git_only"
