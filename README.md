@@ -99,6 +99,8 @@ Results are triaged: duplicates merged, contradictions flagged, findings classif
 
 ### Brownfield Analysis Pipeline
 
+> Codebase mapping inspired by [GSD's map-codebase](https://github.com/gsd-build/get-shit-done). Adapted with distinct output format, enriched agent prompts, and BMAD-specific downstream integration.
+
 For existing codebases, three skills chain together:
 
 **`/bmad-ma-codebase-map`** — 5 parallel agents scan the codebase simultaneously:

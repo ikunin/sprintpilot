@@ -17,9 +17,9 @@ Run `bmad-ma-codebase-map` first. This skill reads from `_bmad-output/codebase-a
 ## Step 1 — Verify Prerequisites
 
 <action>Check that codebase analysis outputs exist:
-- `_bmad-output/codebase-analysis/STACK.md`
-- `_bmad-output/codebase-analysis/CONCERNS.md`
-- `_bmad-output/codebase-analysis/QUALITY.md`
+- `_bmad-output/codebase-analysis/stack-analysis.md`
+- `_bmad-output/codebase-analysis/concerns-analysis.md`
+- `_bmad-output/codebase-analysis/quality-analysis.md`
 If missing, suggest running `bmad-ma-codebase-map` first.
 </action>
 
@@ -40,7 +40,7 @@ Each agent has Bash access for running audit tools.
 ```
 Agent(
   description: "Dependency audit and vulnerability scan",
-  prompt: <read from ./agents/dependency-auditor.md, append STACK.md content>
+  prompt: <read from ./agents/dependency-auditor.md, append stack-analysis.md content>
 )
 ```
 
@@ -49,7 +49,7 @@ Agent(
 ```
 Agent(
   description: "Tech debt classification and prioritization",
-  prompt: <read from ./agents/debt-classifier.md, append CONCERNS.md content>
+  prompt: <read from ./agents/debt-classifier.md, append concerns-analysis.md content>
 )
 ```
 
@@ -58,7 +58,7 @@ Agent(
 ```
 Agent(
   description: "Framework upgrade and migration path analysis",
-  prompt: <read from ./agents/migration-analyzer.md, append STACK.md + CONCERNS.md content>
+  prompt: <read from ./agents/migration-analyzer.md, append stack-analysis.md + concerns-analysis.md content>
 )
 ```
 

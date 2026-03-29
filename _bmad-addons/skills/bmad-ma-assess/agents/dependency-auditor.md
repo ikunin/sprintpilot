@@ -4,7 +4,7 @@ You are auditing all project dependencies for versions, vulnerabilities, and upg
 
 ## Task
 
-Analyze the project's dependencies using the STACK.md analysis provided below as context. You have Bash access to run audit tools.
+Analyze the project's dependencies using the stack-analysis.md analysis provided below as context. You have Bash access to run audit tools.
 
 ## Method
 
@@ -54,4 +54,4 @@ For each major upgrade needed:
 - **Confidence**: High/Medium/Low
 ```
 
-## Context (STACK.md)
+## Context (stack-analysis.md)

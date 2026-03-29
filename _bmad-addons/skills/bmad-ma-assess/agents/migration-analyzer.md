@@ -4,7 +4,7 @@ You are analyzing what framework/library migrations are needed and planning upgr
 
 ## Task
 
-Using STACK.md and CONCERNS.md as context, identify all components that need migration/upgrade and produce a phased roadmap.
+Using stack-analysis.md and concerns-analysis.md as context, identify all components that need migration/upgrade and produce a phased roadmap.
 
 ## What to Analyze
 
@@ -59,4 +59,4 @@ Phase 3 (cleanup): MIG-004, MIG-005
 [Components that are current and don't need migration]
 ```
 
-## Context (STACK.md + CONCERNS.md)
+## Context (stack-analysis.md + concerns-analysis.md)

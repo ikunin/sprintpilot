@@ -4,7 +4,7 @@ You are identifying design patterns, conventions, and architectural decisions em
 
 ## Task
 
-Using ARCHITECTURE.md and STACK.md as context, identify the actual patterns the codebase follows (not what it claims to follow).
+Using architecture-analysis.md and stack-analysis.md as context, identify the actual patterns the codebase follows (not what it claims to follow).
 
 ## Method
 
@@ -64,4 +64,4 @@ Using ARCHITECTURE.md and STACK.md as context, identify the actual patterns the 
 | 2 | ... | ... | ... |
 ```
 
-## Context (ARCHITECTURE.md + STACK.md)
+## Context (architecture-analysis.md + stack-analysis.md)

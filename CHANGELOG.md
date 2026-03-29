@@ -1,5 +1,18 @@
 # Changelog
 
+## [2.0.3] - 2026-03-29
+
+### Changed
+- **GSD attribution** — credited [GSD map-codebase](https://github.com/gsd-build/get-shit-done) as inspiration for `bmad-ma-codebase-map` in SKILL.md, workflow.md, README
+- **Renamed output files** — distinct from GSD: `stack-analysis.md`, `architecture-analysis.md`, `quality-analysis.md`, `concerns-analysis.md`, `integrations-analysis.md`
+- **Enriched agent prompts** — all 5 codebase-map agents expanded from ~50 to ~120 lines each with:
+  - Specific bash/grep exploration commands
+  - Forbidden files list (security)
+  - Quality bar ("patterns matter more than lists", "be prescriptive")
+  - Downstream consumers table
+  - Richer output templates with evidence requirements
+- Updated all downstream skills (assess, reverse-architect, migrate) to use new file names
+
 ## [2.0.2] - 2026-03-28
 
 ### Added

@@ -17,9 +17,9 @@ Run `bmad-ma-codebase-map` first. This skill reads from `_bmad-output/codebase-a
 ## Step 1 — Load Context
 
 <action>Read codebase analysis files:
-- `_bmad-output/codebase-analysis/STACK.md`
-- `_bmad-output/codebase-analysis/ARCHITECTURE.md`
-- `_bmad-output/codebase-analysis/INTEGRATIONS.md`
+- `_bmad-output/codebase-analysis/stack-analysis.md`
+- `_bmad-output/codebase-analysis/architecture-analysis.md`
+- `_bmad-output/codebase-analysis/integrations-analysis.md`
 These provide the foundation for deeper extraction.
 </action>
 
@@ -34,7 +34,7 @@ These provide the foundation for deeper extraction.
 ```
 Agent(
   description: "Module boundary and API extraction",
-  prompt: <read ./agents/component-mapper.md, append ARCHITECTURE.md content>
+  prompt: <read ./agents/component-mapper.md, append architecture-analysis.md content>
 )
 ```
 Focus: module boundaries, public APIs, internal dependency graph, component contracts.
@@ -44,7 +44,7 @@ Focus: module boundaries, public APIs, internal dependency graph, component cont
 ```
 Agent(
   description: "Request path and data flow tracing",
-  prompt: <read ./agents/data-flow-tracer.md, append ARCHITECTURE.md + INTEGRATIONS.md content>
+  prompt: <read ./agents/data-flow-tracer.md, append architecture-analysis.md + integrations-analysis.md content>
 )
 ```
 Focus: request lifecycle, data transformations, state management, async flows.
@@ -54,7 +54,7 @@ Focus: request lifecycle, data transformations, state management, async flows.
 ```
 Agent(
   description: "Design pattern and convention extraction",
-  prompt: <read ./agents/pattern-extractor.md, append ARCHITECTURE.md + STACK.md content>
+  prompt: <read ./agents/pattern-extractor.md, append architecture-analysis.md + stack-analysis.md content>
 )
 ```
 Focus: design patterns in use, naming conventions, error handling strategy, testing patterns.
@@ -69,7 +69,7 @@ Focus: design patterns in use, naming conventions, error handling strategy, test
 # Architecture Document
 
 ## Technology Stack
-[From STACK.md — summarize key decisions]
+[From stack-analysis.md — summarize key decisions]
 
 ## System Architecture
 [Overall pattern: monolith/microservices/serverless/hybrid]
@@ -82,7 +82,7 @@ Focus: design patterns in use, naming conventions, error handling strategy, test
 [From Data Flow Tracer — primary request/data flows]
 
 ### Integration Architecture
-[From INTEGRATIONS.md — external service connections]
+[From integrations-analysis.md — external service connections]
 
 ## Component Details
 

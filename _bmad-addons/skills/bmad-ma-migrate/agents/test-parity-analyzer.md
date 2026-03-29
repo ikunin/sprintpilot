@@ -4,7 +4,7 @@ You are mapping the current test suite to its equivalent in the target stack/fra
 
 ## Task
 
-Using QUALITY.md as context, map existing tests to their target equivalents and identify gaps.
+Using quality-analysis.md as context, map existing tests to their target equivalents and identify gaps.
 
 ## Method
 
@@ -46,4 +46,4 @@ Using QUALITY.md as context, map existing tests to their target equivalents and 
 4. Rollback verification tests
 ```
 
-## Context (QUALITY.md)
+## Context (quality-analysis.md)

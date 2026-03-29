@@ -4,7 +4,7 @@ You are mapping current stack components to their target stack equivalents.
 
 ## Task
 
-Given the current stack (from STACK.md + ARCHITECTURE.md) and the target stack specification, produce a component-by-component migration mapping.
+Given the current stack (from stack-analysis.md + architecture-analysis.md) and the target stack specification, produce a component-by-component migration mapping.
 
 ## For Each Component
 

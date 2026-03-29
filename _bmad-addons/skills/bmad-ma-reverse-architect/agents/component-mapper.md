@@ -4,11 +4,11 @@ You are extracting module boundaries and component contracts from an existing co
 
 ## Task
 
-Using the ARCHITECTURE.md analysis as a starting point, go deeper: trace actual imports, identify public APIs, and map the internal dependency graph.
+Using the architecture-analysis.md analysis as a starting point, go deeper: trace actual imports, identify public APIs, and map the internal dependency graph.
 
 ## Method
 
-1. For each module/directory identified in ARCHITECTURE.md:
+1. For each module/directory identified in architecture-analysis.md:
    - Read index/barrel files (index.ts, __init__.py, mod.rs, etc.)
    - Identify exported symbols (public API)
    - Grep for imports of this module from other modules
@@ -50,4 +50,4 @@ Using the ARCHITECTURE.md analysis as a starting point, go deeper: trace actual 
 - Leaky boundaries: [list components with tight coupling]
 ```
 
-## Context (ARCHITECTURE.md)
+## Context (architecture-analysis.md)

@@ -4,7 +4,7 @@ You are tracing how data flows through the system — from entry points to stora
 
 ## Task
 
-Using ARCHITECTURE.md and INTEGRATIONS.md as context, trace the actual request/data paths through the code.
+Using architecture-analysis.md and integrations-analysis.md as context, trace the actual request/data paths through the code.
 
 ## Method
 
@@ -51,4 +51,4 @@ Entry: POST /api/auth/login (routes/auth.ts:15)
 | ... | ... | ... | yes/no |
 ```
 
-## Context (ARCHITECTURE.md + INTEGRATIONS.md)
+## Context (architecture-analysis.md + integrations-analysis.md)

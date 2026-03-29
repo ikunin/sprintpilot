@@ -21,7 +21,7 @@ Plan a full-lifecycle migration from current stack to a target stack. Produces a
 
 ## Step 1 — Validate Prerequisites and Get Target
 
-<action>Verify codebase analysis exists. Read STACK.md, ARCHITECTURE.md, CONCERNS.md.</action>
+<action>Verify codebase analysis exists. Read stack-analysis.md, architecture-analysis.md, concerns-analysis.md.</action>
 <action>Read brownfield-assessment.md if available.</action>
 <action>Ask user for:
 - **Target stack** (required): what to migrate to
@@ -56,7 +56,7 @@ Present recommendation with rationale. User confirms or overrides.
 ```
 Agent(
   description: "Stack compatibility mapping",
-  prompt: <read ./agents/stack-mapper.md, append STACK.md + ARCHITECTURE.md + target spec>
+  prompt: <read ./agents/stack-mapper.md, append stack-analysis.md + architecture-analysis.md + target spec>
 )
 ```
 Output: old→new component mapping, direct replacements vs rewrites needed.
@@ -65,7 +65,7 @@ Output: old→new component mapping, direct replacements vs rewrites needed.
 ```
 Agent(
   description: "Dependency graph and migration order",
-  prompt: <read ./agents/dependency-analyzer.md, append brownfield-assessment.md + CONCERNS.md>
+  prompt: <read ./agents/dependency-analyzer.md, append brownfield-assessment.md + concerns-analysis.md>
 )
 ```
 Output: dependency graph, migration order, critical path.
@@ -147,7 +147,7 @@ Each phase has: scope, deliverable, verification criteria, rollback plan.
 ```
 Agent(
   description: "Test parity analysis for migration",
-  prompt: <read ./agents/test-parity-analyzer.md, append QUALITY.md + target test framework>
+  prompt: <read ./agents/test-parity-analyzer.md, append quality-analysis.md + target test framework>
 )
 ```
 Output: old test → new test mapping, gaps, comparison testing strategy.
@@ -160,7 +160,7 @@ Output: old test → new test mapping, gaps, comparison testing strategy.
 ```
 Agent(
   description: "Migration risk assessment",
-  prompt: <read ./agents/risk-assessor.md, append full plan draft + CONCERNS.md>
+  prompt: <read ./agents/risk-assessor.md, append full plan draft + concerns-analysis.md>
 )
 ```
 Output: per-phase risk matrix, mitigation strategies, rollback triggers, canary deployment plan.

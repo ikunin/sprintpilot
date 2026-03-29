@@ -4,55 +4,120 @@ You are analyzing a codebase to produce a complete technology inventory.
 
 ## Task
 
-Scan the project at `{{project_root}}` and produce `{{output_file}}`.
+Scan the project at `{{project_root}}` and write your findings to `{{output_file}}`.
 
-## What to Find
+## Quality Bar
 
-1. **Languages** — scan file extensions, count files per language
-2. **Frameworks** — read package manifests (package.json, pyproject.toml, Cargo.toml, go.mod, Gemfile, pom.xml, *.csproj)
-3. **Package versions** — list major dependencies with versions
-4. **Build tools** — webpack, vite, esbuild, setuptools, cargo, maven, gradle
-5. **Runtime** — Node.js version (.nvmrc, .node-version, engines), Python version, Rust edition
-6. **Database** — ORMs, drivers, connection strings (redact credentials)
-7. **Infrastructure** — Docker, docker-compose, Kubernetes manifests, Terraform, CDK
+- **Patterns matter more than lists.** Don't just list packages — explain what they're used for and how they fit together.
+- **Be prescriptive, not descriptive.** Say "uses React 18 with Server Components" not "appears to use React".
+- **Every finding needs a file path.** No claims without evidence (e.g., `package.json:15`).
+- **Version numbers are critical.** Always include the exact version, not "latest" or "recent".
 
-## Method
+## Forbidden Files — NEVER Read
 
-Use Glob to find manifest files, Read to parse them, Grep to search for patterns.
+- `.env`, `.env.*` (secrets)
+- `*.key`, `*.pem`, `*.p12` (private keys)
+- `credentials.json`, `service-account.json`
+- `*.secret`, `*password*`, `*token*` (in filenames)
+
+## Exploration Commands
+
+Run these to gather data (adapt paths as needed):
+
+```bash
+# Package manifests
+cat package.json 2>/dev/null | head -100
+cat pyproject.toml 2>/dev/null
+cat Cargo.toml 2>/dev/null
+cat go.mod 2>/dev/null
+cat Gemfile 2>/dev/null
+cat pom.xml 2>/dev/null | head -100
+cat build.gradle 2>/dev/null | head -50
+cat *.csproj 2>/dev/null | head -50
+
+# Lockfiles (versions)
+head -100 package-lock.json 2>/dev/null || head -100 yarn.lock 2>/dev/null || head -100 pnpm-lock.yaml 2>/dev/null
+
+# Runtime versions
+cat .nvmrc .node-version .python-version .ruby-version .tool-versions 2>/dev/null
+cat rust-toolchain.toml 2>/dev/null
+
+# File type distribution
+find . -type f -not -path '*/node_modules/*' -not -path '*/.git/*' -not -path '*/vendor/*' -not -path '*/target/*' | sed 's/.*\.//' | sort | uniq -c | sort -rn | head -20
+
+# Build tools
+ls -la webpack.config* vite.config* rollup.config* tsconfig* babel.config* .babelrc Makefile CMakeLists.txt build.gradle* pom.xml *.sln 2>/dev/null
+
+# Infrastructure
+ls -la Dockerfile* docker-compose* .dockerignore 2>/dev/null
+ls -la terraform/ cdk.json serverless.yml k8s/ kubernetes/ helm/ 2>/dev/null
+```
+
+Also use Glob and Grep to find patterns not covered above.
+
+## Downstream Consumers
+
+| Consumer | What they need from this doc |
+|----------|----------------------------|
+| `bmad-ma-assess` | Package versions for vulnerability scanning, framework versions for upgrade analysis |
+| `bmad-ma-reverse-architect` | Technology choices to understand architectural decisions |
+| `bmad-create-architecture` | Stack context for new architecture decisions |
+| `bmad-sprint-planning` | Technology constraints for story estimation |
 
 ## Output Format
 
 Write to `{{output_file}}`:
 
 ```markdown
-# Technology Stack
+# Stack Analysis
 
 ## Languages
-| Language | Files | Percentage |
-|----------|-------|-----------|
-| ... | ... | ... |
+| Language | Files | Percentage | Primary Use |
+|----------|-------|-----------|-------------|
+| TypeScript | 142 | 65% | Application code |
+| ... | ... | ... | ... |
 
-## Frameworks & Libraries
-| Name | Version | Purpose | Source |
-|------|---------|---------|--------|
-| ... | ... | ... | package.json:3 |
+Evidence: `find` command output showing file distribution
+
+## Frameworks & Core Libraries
+| Name | Version | Purpose | Evidence |
+|------|---------|---------|----------|
+| React | 18.2.0 | UI framework | package.json:5 |
+| Express | 4.18.2 | HTTP server | package.json:12 |
+| ... | ... | ... | ... |
 
 ## Build & Tooling
-- Build: ...
-- Bundler: ...
-- Task runner: ...
+| Tool | Version | Config File | Purpose |
+|------|---------|-------------|---------|
+| Vite | 5.0.0 | vite.config.ts | Bundler + dev server |
+| ... | ... | ... | ... |
 
 ## Runtime Requirements
-- ...
+| Runtime | Version | Source |
+|---------|---------|--------|
+| Node.js | 20.x | .nvmrc |
+| ... | ... | ... |
 
 ## Database & Storage
-- ...
+| Type | Technology | Version | Connection Config |
+|------|-----------|---------|------------------|
+| Primary DB | PostgreSQL | 15 | DATABASE_URL in .env.example |
+| ... | ... | ... | ... |
 
 ## Infrastructure
-- ...
+| Component | Technology | Config |
+|-----------|-----------|--------|
+| Container | Docker | Dockerfile:1 |
+| Orchestration | docker-compose | docker-compose.yml |
+| ... | ... | ... |
 
-## Evidence
-[List key files examined with paths]
+## Package Health Summary
+- Total dependencies: N (M direct, K dev)
+- Lockfile: present/missing
+- Dependency management: npm/yarn/pnpm/pip/cargo/...
+
+## Key Files Examined
+- package.json (lines X-Y)
+- tsconfig.json
+- [list all files read]
 ```
-
-Cite exact file paths (e.g., `package.json:15`) for every finding.

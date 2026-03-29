@@ -4,7 +4,7 @@ You are analyzing the dependency graph between components to determine safe migr
 
 ## Task
 
-Using brownfield-assessment.md and CONCERNS.md, build the dependency graph and compute the optimal migration order (topological sort by dependency + risk).
+Using brownfield-assessment.md and concerns-analysis.md, build the dependency graph and compute the optimal migration order (topological sort by dependency + risk).
 
 ## Method
 

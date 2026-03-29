@@ -1,5 +1,7 @@
 # Multi-Agent Codebase Map
 
+> Inspired by [GSD's map-codebase](https://github.com/gsd-build/get-shit-done). Adapted with distinct output format and enriched agent prompts.
+
 ## Purpose
 
 Analyze an existing codebase across 5 dimensions in parallel. Produces structured, evidence-based reports with exact file path citations, optimized for consumption by BMAD planning agents.
@@ -29,6 +31,7 @@ Launch ALL FIVE agents in a **single message** using the Agent tool.
 All 5 Agent calls MUST be in the same message to run in parallel.
 Each agent writes its output file directly.
 Each agent must cite exact file paths for every finding.
+Each agent has specific exploration commands to run — they are self-sufficient.
 </critical>
 
 ### Agent 1: Stack Analyzer
@@ -36,7 +39,7 @@ Each agent must cite exact file paths for every finding.
 ```
 Agent(
   description: "Technology stack analysis",
-  prompt: <read from ./agents/stack-analyzer.md, set project_root={{project_root}}, output_file={{project_root}}/_bmad-output/codebase-analysis/STACK.md>
+  prompt: <read from ./agents/stack-analyzer.md, set project_root={{project_root}}, output_file={{project_root}}/_bmad-output/codebase-analysis/stack-analysis.md>
 )
 ```
 
@@ -45,7 +48,7 @@ Agent(
 ```
 Agent(
   description: "Architecture pattern analysis",
-  prompt: <read from ./agents/architecture-mapper.md, set project_root and output_file>
+  prompt: <read from ./agents/architecture-mapper.md, set project_root and output_file=architecture-analysis.md>
 )
 ```
 
@@ -54,7 +57,7 @@ Agent(
 ```
 Agent(
   description: "Code quality assessment",
-  prompt: <read from ./agents/quality-assessor.md, set project_root and output_file>
+  prompt: <read from ./agents/quality-assessor.md, set project_root and output_file=quality-analysis.md>
 )
 ```
 
@@ -63,7 +66,7 @@ Agent(
 ```
 Agent(
   description: "Tech debt and concerns scan",
-  prompt: <read from ./agents/concerns-hunter.md, set project_root and output_file>
+  prompt: <read from ./agents/concerns-hunter.md, set project_root and output_file=concerns-analysis.md>
 )
 ```
 
@@ -72,7 +75,7 @@ Agent(
 ```
 Agent(
   description: "External integration mapping",
-  prompt: <read from ./agents/integration-mapper.md, set project_root and output_file>
+  prompt: <read from ./agents/integration-mapper.md, set project_root and output_file=integrations-analysis.md>
 )
 ```
 
@@ -81,11 +84,11 @@ Agent(
 ## Step 3 — Collect and Verify
 
 <action>Verify all 5 output files exist in `_bmad-output/codebase-analysis/`:
-- STACK.md
-- ARCHITECTURE.md
-- QUALITY.md
-- CONCERNS.md
-- INTEGRATIONS.md
+- `stack-analysis.md`
+- `architecture-analysis.md`
+- `quality-analysis.md`
+- `concerns-analysis.md`
+- `integrations-analysis.md`
 </action>
 
 <action>If any agent failed, log which one and note the gap. Do not re-run — present partial results.</action>
@@ -101,11 +104,11 @@ Agent(
 
 | Dimension | File | Key Findings |
 |-----------|------|-------------|
-| Stack | STACK.md | {languages}, {frameworks}, {package count} |
-| Architecture | ARCHITECTURE.md | {pattern}, {module count} |
-| Quality | QUALITY.md | {test coverage}, {lint status} |
-| Concerns | CONCERNS.md | {critical count}, {high count} |
-| Integrations | INTEGRATIONS.md | {external service count} |
+| Stack | stack-analysis.md | {languages}, {frameworks}, {package count} |
+| Architecture | architecture-analysis.md | {pattern}, {module count} |
+| Quality | quality-analysis.md | {test coverage}, {lint status} |
+| Concerns | concerns-analysis.md | {critical count}, {high count} |
+| Integrations | integrations-analysis.md | {external service count} |
 
 Outputs: `_bmad-output/codebase-analysis/`
 

@@ -4,7 +4,7 @@ You are classifying and prioritizing tech debt findings from the codebase analys
 
 ## Task
 
-Take the CONCERNS.md findings and classify each into actionable categories with effort estimates and confidence levels.
+Take the concerns-analysis.md findings and classify each into actionable categories with effort estimates and confidence levels.
 
 ## Categories
 
@@ -15,7 +15,7 @@ Take the CONCERNS.md findings and classify each into actionable categories with 
 
 ## Classification Criteria
 
-For each concern from CONCERNS.md:
+For each concern from concerns-analysis.md:
 1. **Impact** — what breaks or degrades if not addressed?
 2. **Urgency** — is it getting worse over time?
 3. **Effort** — S (< 1 story), M (1-2 stories), L (3-5 stories), XL (> 5 stories)
@@ -39,7 +39,7 @@ For each concern from CONCERNS.md:
 
 #### Critical
 1. **[DEBT-001]** Title
-   - Source: CONCERNS.md [C-NNN]
+   - Source: concerns-analysis.md [C-NNN]
    - Impact: ...
    - Effort: M
    - Confidence: High
@@ -61,4 +61,4 @@ For each concern from CONCERNS.md:
 [Ordered list considering dependencies and impact]
 ```
 
-## Context (CONCERNS.md)
+## Context (concerns-analysis.md)

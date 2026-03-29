@@ -4,7 +4,7 @@ You are assessing risks for each phase of the migration plan.
 
 ## Task
 
-Given the full migration plan draft and CONCERNS.md, produce a per-phase risk matrix with mitigation strategies and rollback triggers.
+Given the full migration plan draft and concerns-analysis.md, produce a per-phase risk matrix with mitigation strategies and rollback triggers.
 
 ## For Each Phase
 
@@ -52,4 +52,4 @@ Given the full migration plan draft and CONCERNS.md, produce a per-phase risk ma
 | 1 | ... | ... |
 ```
 
-## Context (Plan Draft + CONCERNS.md)
+## Context (Plan Draft + concerns-analysis.md)
