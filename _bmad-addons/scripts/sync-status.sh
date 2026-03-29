@@ -27,25 +27,24 @@ WORKTREE_CLEANED="false"
 
 while [ "$#" -gt 0 ]; do
   case $1 in
-    --story) STORY="$2"; shift ;;
-    --git-status-file) GIT_STATUS_FILE="$2"; shift ;;
-    --branch) BRANCH="$2"; shift ;;
-    --worktree) WORKTREE="$2"; shift ;;
-    --commit) STORY_COMMIT="$2"; shift ;;
-    --patch-commits) PATCH_COMMITS="$2"; shift ;;
-    --push-status) PUSH_STATUS="$2"; shift ;;
-    --pr-url) PR_URL="$2"; shift ;;
-    --lint-result) LINT_RESULT="$2"; shift ;;
-    --platform) PLATFORM="$2"; shift ;;
-    --base-branch) BASE_BRANCH="$2"; shift ;;
-    --worktree-cleaned) WORKTREE_CLEANED="$2"; shift ;;
+    --story) STORY="$2"; shift 2 ;;
+    --git-status-file) GIT_STATUS_FILE="$2"; shift 2 ;;
+    --branch) BRANCH="$2"; shift 2 ;;
+    --worktree) WORKTREE="$2"; shift 2 ;;
+    --commit) STORY_COMMIT="$2"; shift 2 ;;
+    --patch-commits) PATCH_COMMITS="$2"; shift 2 ;;
+    --push-status) PUSH_STATUS="$2"; shift 2 ;;
+    --pr-url) PR_URL="$2"; shift 2 ;;
+    --lint-result) LINT_RESULT="$2"; shift 2 ;;
+    --platform) PLATFORM="$2"; shift 2 ;;
+    --base-branch) BASE_BRANCH="$2"; shift 2 ;;
+    --worktree-cleaned) WORKTREE_CLEANED="$2"; shift 2 ;;
     -h|--help)
       echo "Usage: sync-status.sh --story <key> --git-status-file <path> [git fields...]"
       exit 0
       ;;
     *) shift ;;
   esac
-  shift
 done
 
 if [ -z "$STORY" ] || [ -z "$GIT_STATUS_FILE" ]; then

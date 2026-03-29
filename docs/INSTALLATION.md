@@ -5,7 +5,7 @@
 1. **BMAD Method v6.2.0+** installed in your project
 2. **Claude Code** (CLI, desktop app, or IDE extension)
 3. **Git** initialized with at least one commit
-4. **Platform CLI** (optional): `gh` for GitHub or `glab` for GitLab
+4. **Platform CLI** (optional): `gh` for GitHub, `glab` for GitLab, `bb` for Bitbucket, or `tea` for Gitea
 
 ## Install BMAD (if needed)
 

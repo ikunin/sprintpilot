@@ -13,14 +13,13 @@ OUTPUT_FILE=""
 
 while [[ "$#" -gt 0 ]]; do
   case $1 in
-    --limit) LIMIT="$2"; shift ;;
-    --output-file) OUTPUT_FILE="$2"; shift ;;
+    --limit) LIMIT="$2"; shift 2 ;;
+    --output-file) OUTPUT_FILE="$2"; shift 2 ;;
     -h|--help)
       echo "Usage: lint-changed.sh [--limit 100] [--output-file path]"
       exit 0
       ;;
   esac
-  shift
 done
 
 # Get changed files

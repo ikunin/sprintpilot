@@ -13,15 +13,14 @@ MAX_LENGTH=60
 
 while [[ "$#" -gt 0 ]]; do
   case $1 in
-    --prefix) PREFIX="$2"; shift ;;
-    --max-length) MAX_LENGTH="$2"; shift ;;
+    --prefix) PREFIX="$2"; shift 2 ;;
+    --max-length) MAX_LENGTH="$2"; shift 2 ;;
     -h|--help)
       echo "Usage: sanitize-branch.sh <story-key> [--prefix story/] [--max-length 60]"
       exit 0
       ;;
-    *) STORY_KEY="$1" ;;
+    *) STORY_KEY="$1"; shift ;;
   esac
-  shift
 done
 
 if [ -z "$STORY_KEY" ]; then

@@ -9,10 +9,9 @@ set -e
 PROVIDER="auto"
 while [ "$#" -gt 0 ]; do
   case $1 in
-    --provider) PROVIDER="$2"; shift ;;
+    --provider) PROVIDER="$2"; shift 2 ;;
     -h|--help) echo "Usage: detect-platform.sh [--provider <auto|github|gitlab|bitbucket|gitea|git_only>]"; exit 0 ;;
   esac
-  shift
 done
 
 # 1. Explicit provider

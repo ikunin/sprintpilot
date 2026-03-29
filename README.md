@@ -77,7 +77,7 @@ Everything else — it decides, documents the decision in one sentence, and move
                      → "Ready to merge: PR #42, #43, #44"
 ```
 
-Each story is fully isolated. No half-finished code on `main`. Every story has its own branch, its own commits, its own PR. The autopilot tracks everything in `sprint-status.yaml` with git fields (commit SHA, push status, PR URL, lint results).
+Each story is fully isolated. No half-finished code on `main`. Every story has its own branch, its own commits, its own PR. The autopilot tracks git metadata in its own `git-status.yaml` (commit SHA, push status, PR URL, lint results) — it never modifies BMAD's `sprint-status.yaml`.
 
 ---
 

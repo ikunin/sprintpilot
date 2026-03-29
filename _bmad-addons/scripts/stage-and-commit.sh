@@ -20,17 +20,16 @@ DRY_RUN=false
 
 while [[ "$#" -gt 0 ]]; do
   case $1 in
-    --message|-m) MESSAGE="$2"; shift ;;
-    --allowlist) ALLOWLIST="$2"; shift ;;
-    --max-size-mb) MAX_SIZE_MB="$2"; shift ;;
-    --file-list) FILE_LIST="$2"; shift ;;
-    --dry-run) DRY_RUN=true ;;
+    --message|-m) MESSAGE="$2"; shift 2 ;;
+    --allowlist) ALLOWLIST="$2"; shift 2 ;;
+    --max-size-mb) MAX_SIZE_MB="$2"; shift 2 ;;
+    --file-list) FILE_LIST="$2"; shift 2 ;;
+    --dry-run) DRY_RUN=true; shift ;;
     -h|--help)
       echo "Usage: stage-and-commit.sh --message 'msg' [--allowlist path] [--max-size-mb 1] [--file-list path]"
       exit 0
       ;;
   esac
-  shift
 done
 
 if [ -z "$MESSAGE" ]; then
@@ -60,19 +59,6 @@ if [ -n "$ALLOWLIST" ] && [ -f "$ALLOWLIST" ]; then
   # Convert glob patterns to grep-compatible patterns (basic)
   ALLOWLIST_FILTER=$(grep -v '^#' "$ALLOWLIST" | grep -v '^$' | sed 's/\*\*/.*/' | sed 's/\*/[^\/]*/' || true)
 fi
-
-is_allowed() {
-  local file="$1"
-  if [ -z "$ALLOWLIST_FILTER" ]; then
-    return 1 # not allowed (no allowlist)
-  fi
-  echo "$ALLOWLIST_FILTER" | while IFS= read -r pattern; do
-    if echo "$file" | grep -qE "$pattern"; then
-      return 0
-    fi
-  done
-  return 1
-}
 
 # 2a. Secrets scan (WARN only)
 SECRET_PATTERNS='API_KEY|SECRET_KEY|SECRET=|TOKEN=|PASSWORD=|aws_access|private_key|PRIVATE_KEY'

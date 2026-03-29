@@ -15,7 +15,7 @@ Use this instead of stock `bmad-code-review` when you want deeper coverage. The 
 <action>Identify the story being reviewed from sprint-status.yaml or user input.</action>
 <action>Generate the diff to review:
 ```bash
-git diff HEAD~1 --unified=5
+git diff origin/main...HEAD --unified=5
 ```
 If the diff exceeds 3000 lines, summarize by file and only pass relevant sections to agents.
 Save full diff to `review-diff.txt` for agent reference.

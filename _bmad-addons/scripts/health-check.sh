@@ -20,15 +20,14 @@ STATUS_FILE=""
 
 while [[ "$#" -gt 0 ]]; do
   case $1 in
-    --worktrees-dir) WORKTREES_DIR="$2"; shift ;;
-    --base-branch) BASE_BRANCH="$2"; shift ;;
-    --status-file) STATUS_FILE="$2"; shift ;;
+    --worktrees-dir) WORKTREES_DIR="$2"; shift 2 ;;
+    --base-branch) BASE_BRANCH="$2"; shift 2 ;;
+    --status-file) STATUS_FILE="$2"; shift 2 ;;
     -h|--help)
       echo "Usage: health-check.sh [--worktrees-dir path] [--base-branch main] [--status-file path]"
       exit 0
       ;;
   esac
-  shift
 done
 
 if [ ! -d "$WORKTREES_DIR" ]; then

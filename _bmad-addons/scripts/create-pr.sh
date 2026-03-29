@@ -18,19 +18,18 @@ BASE_URL=""
 
 while [ "$#" -gt 0 ]; do
   case $1 in
-    --platform) PLATFORM="$2"; shift ;;
-    --branch) BRANCH="$2"; shift ;;
-    --base) BASE_BRANCH="$2"; shift ;;
-    --title) TITLE="$2"; shift ;;
-    --body) BODY="$2"; shift ;;
-    --base-url) BASE_URL="$2"; shift ;;
+    --platform) PLATFORM="$2"; shift 2 ;;
+    --branch) BRANCH="$2"; shift 2 ;;
+    --base) BASE_BRANCH="$2"; shift 2 ;;
+    --title) TITLE="$2"; shift 2 ;;
+    --body) BODY="$2"; shift 2 ;;
+    --base-url) BASE_URL="$2"; shift 2 ;;
     -h|--help)
       echo "Usage: create-pr.sh --platform <github|gitlab|bitbucket|gitea|git_only> --branch <name> --base <branch> --title 'title' --body 'body' [--base-url <url>]"
       exit 0
       ;;
     *) shift ;;
   esac
-  shift
 done
 
 if [ -z "$PLATFORM" ] || [ -z "$BRANCH" ] || [ -z "$TITLE" ]; then

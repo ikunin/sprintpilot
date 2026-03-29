@@ -69,6 +69,15 @@ Supported linters per language:
 | Rust | cargo clippy |
 | Go | golangci-lint |
 | Ruby | rubocop |
+| Java | checkstyle, pmd |
+| C/C++ | cppcheck, clang-tidy |
+| C# | dotnet format |
+| Swift | swiftlint |
+| PL/SQL | sqlfluff |
+| Kotlin | ktlint, detekt |
+| PHP | phpstan, phpcs |
+
+See [Extending](EXTENDING.md) to add more languages.
 
 ### Push & PR
 
@@ -106,7 +115,7 @@ Supported linters per language:
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `platform.provider` | `auto` | `auto`, `github`, `gitlab`, or `git_only` |
+| `platform.provider` | `auto` | `auto`, `github`, `gitlab`, `bitbucket`, `gitea`, or `git_only` |
 
 Auto-detection priority: explicit config > CLI detection > remote URL regex.
 

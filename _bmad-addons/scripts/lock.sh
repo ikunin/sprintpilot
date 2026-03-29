@@ -19,15 +19,14 @@ STALE_MINUTES=30
 
 while [[ "$#" -gt 0 ]]; do
   case $1 in
-    check|acquire|release|status) ACTION="$1" ;;
-    --file) LOCK_FILE="$2"; shift ;;
-    --stale-minutes) STALE_MINUTES="$2"; shift ;;
+    check|acquire|release|status) ACTION="$1"; shift ;;
+    --file) LOCK_FILE="$2"; shift 2 ;;
+    --stale-minutes) STALE_MINUTES="$2"; shift 2 ;;
     -h|--help)
       echo "Usage: lock.sh <check|acquire|release|status> [--file path] [--stale-minutes n]"
       exit 0
       ;;
   esac
-  shift
 done
 
 if [ -z "$ACTION" ]; then
