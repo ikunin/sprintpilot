@@ -41,7 +41,7 @@ run_linter() {
   echo "LINTER:$linter_name" >&2
   local output=""
   if [ -n "$lint_files" ]; then
-    output=$(echo "$lint_files" | xargs $lint_cmd 2>&1 || true)
+    output=$(echo "$lint_files" | tr '\n' '\0' | xargs -0 $lint_cmd 2>&1 || true)
   else
     output=$($lint_cmd 2>&1 || true)
   fi
@@ -218,8 +218,8 @@ if [ -n "$OUTPUT_FILE" ]; then
 fi
 
 # Errors-first truncation
-ERRORS=$(echo "$FULL_OUTPUT" | grep -iE '(error|E[0-9]{3,}|fatal)' || true)
-WARNINGS=$(echo "$FULL_OUTPUT" | grep -ivE '(error|E[0-9]{3,}|fatal)' | grep -ivE '^$' || true)
+ERRORS=$(echo "$FULL_OUTPUT" | grep -E '(: error|: fatal|^ERROR|^FATAL|error:| E[0-9]{3,})' || true)
+WARNINGS=$(echo "$FULL_OUTPUT" | grep -vE '(: error|: fatal|^ERROR|^FATAL|error:| E[0-9]{3,})' | grep -vE '^$' || true)
 
 ERROR_COUNT=$(echo "$ERRORS" | grep -c . 2>/dev/null || echo "0")
 WARN_COUNT=$(echo "$WARNINGS" | grep -c . 2>/dev/null || echo "0")

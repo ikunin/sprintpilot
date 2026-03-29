@@ -615,7 +615,7 @@ in_worktree: {{in_worktree}}
 <check if="{{in_worktree}}">
   <action>Commit any uncommitted work in the worktree first</action>
   <action>`ExitWorktree(action: "keep")` — preserve worktree for next session</action>
-  <action>Sync sprint-status.yaml from worktree to project root (same as step 7)</action>
+  <action>Write git status to git-status.yaml (same sync as step 7)</action>
   <action>Set `{{in_worktree}}` = false</action>
 </check>
 

@@ -61,7 +61,7 @@ if [ -n "$ALLOWLIST" ] && [ -f "$ALLOWLIST" ]; then
 fi
 
 # 2a. Secrets scan (WARN only)
-SECRET_PATTERNS='API_KEY|SECRET_KEY|SECRET=|TOKEN=|PASSWORD=|aws_access|private_key|PRIVATE_KEY'
+SECRET_PATTERNS='API_KEY|SECRET|TOKEN|PASSWORD|aws_access|private_key'
 while IFS= read -r file; do
   [ -z "$file" ] && continue
   [ -f "$file" ] || continue
@@ -107,7 +107,7 @@ done <<< "$ALL_FILES"
 
 # 2d. Verify .gitignore covers addon artifacts
 if [ -f .gitignore ]; then
-  for entry in ".autopilot.lock" ".claude/.addon-backups/"; do
+  for entry in ".autopilot.lock"; do
     if ! grep -qF "$entry" .gitignore 2>/dev/null; then
       WARNINGS="${WARNINGS}WARN: .gitignore missing entry '$entry' — run install.sh to fix\n"
     fi

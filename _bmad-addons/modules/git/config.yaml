@@ -47,7 +47,7 @@ git:
     max_file_size_mb: 1 # Reject files larger than this (configurable)
     verify_gitignore_entries: # Entries that must be in .gitignore
       - .autopilot.lock
-      - .claude/.addon-backups/
+      # Tool-specific .addon-backups/ dirs are handled by install.sh per tool
 
   # Linting
   lint:
@@ -59,7 +59,7 @@ git:
       rust: [cargo clippy]
       go: [golangci-lint]
       ruby: [rubocop]
-      java: [checkstyle, spotbugs, pmd]
+      java: [checkstyle, pmd]
       c: [cppcheck, clang-tidy]
       cpp: [cppcheck, clang-tidy]
       csharp: [dotnet format]

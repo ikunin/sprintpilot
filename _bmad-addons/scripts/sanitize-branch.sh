@@ -46,7 +46,7 @@ NAME=$(echo "$NAME" | sed 's/^[-.]*//' | sed 's/[-.]*$//')
 # 6. Truncate + hash if too long
 if [ "${#NAME}" -gt "$MAX_LENGTH" ]; then
   # Hash of the FULL pre-truncation name (6 chars)
-  HASH=$(echo -n "$NAME" | sha256sum 2>/dev/null | cut -c1-6 || echo -n "$NAME" | shasum -a 256 2>/dev/null | cut -c1-6 || echo "000000")
+  HASH=$(echo -n "$NAME" | sha256sum 2>/dev/null | cut -c1-6 || echo -n "$NAME" | shasum -a 256 2>/dev/null | cut -c1-6 || echo -n "$NAME" | openssl dgst -sha256 2>/dev/null | sed 's/.*= //' | cut -c1-6 || echo "000000")
   TRUNC_LEN=$(( MAX_LENGTH - 7 )) # -6 for hash, -1 for separator
   NAME="${NAME:0:$TRUNC_LEN}-${HASH}"
 fi
