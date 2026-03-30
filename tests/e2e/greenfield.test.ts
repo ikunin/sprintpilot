@@ -29,6 +29,9 @@ import {
   assertFileNotEmpty,
   assertDirectoryExists,
   assertFileContains,
+  assertCleanWorkingTree,
+  assertNoOrphanedWorktrees,
+  readYaml,
 } from "./harness/assertions.js";
 import { costTracker } from "./harness/cost-tracker.js";
 
@@ -39,28 +42,37 @@ const MAX_SESSIONS = 8;
 const BUDGET_PER_SESSION = 20;
 const TIMEOUT_PER_SESSION = 900_000; // 15 min
 
+/** Remote URL for push testing — override via env to avoid using a personal repo */
+const REMOTE_URL = process.env.BMAD_TEST_REMOTE_URL ?? "git@github.com:ikunin/test-tictactoe.git";
+
 let project: TempProject;
 
 function git(cmd: string, dir: string): string {
   return execSync(`git -C "${dir}" ${cmd}`, {
     encoding: "utf-8",
     timeout: 30_000,
+    env: { ...process.env, GIT_WORK_TREE: dir },
   }).trim();
+}
+
+/** Force-checkout a branch, discarding local file changes that block checkout */
+function gitCheckout(branch: string, dir: string): void {
+  try { execSync(`rm -rf "${dir}/node_modules/.vite"`, { timeout: 5_000 }); } catch { /* */ }
+  git(`checkout -f ${branch}`, dir);
 }
 
 function findFiles(dir: string, pattern: RegExp, excludeDirs: string[]): string[] {
   const results: string[] = [];
-  try {
-    for (const entry of readdirSync(dir, { withFileTypes: true })) {
-      if (excludeDirs.includes(entry.name)) continue;
-      const fullPath = join(dir, entry.name);
-      if (entry.isDirectory()) {
-        results.push(...findFiles(fullPath, pattern, excludeDirs));
-      } else if (pattern.test(entry.name)) {
-        results.push(fullPath);
-      }
+  if (!existsSync(dir)) return results;
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    if (excludeDirs.includes(entry.name)) continue;
+    const fullPath = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      results.push(...findFiles(fullPath, pattern, excludeDirs));
+    } else if (pattern.test(entry.name)) {
+      results.push(fullPath);
     }
-  } catch { /* ignore */ }
+  }
   return results;
 }
 
@@ -74,7 +86,10 @@ function isGameComplete(dir: string): boolean {
 
   // Install deps if needed
   if (!existsSync(join(dir, "node_modules"))) {
-    try { execSync("npm install", { cwd: dir, timeout: 60_000, stdio: "pipe" }); } catch { /* */ }
+    try { execSync("npm install", { cwd: dir, timeout: 60_000, stdio: "pipe" }); } catch {
+      console.warn("[isGameComplete] npm install failed");
+      return false;
+    }
   }
 
   // Tests must pass
@@ -82,15 +97,15 @@ function isGameComplete(dir: string): boolean {
     execSync("npm test", { cwd: dir, encoding: "utf-8", timeout: 60_000, stdio: "pipe" });
   } catch { return false; }
 
-  // Must have core features in source
+  // Must have core features in source — use word-boundary patterns to avoid false positives
   const srcFiles = findFiles(dir, /\.(ts|js)$/, ["node_modules", ".git", "_bmad", "dist"]);
   const allSource = srcFiles.map((f) => readFileSync(f, "utf-8")).join("\n").toLowerCase();
 
   const features = {
-    hasWinDetection: /win|winner|check.?win|winning/.test(allSource),
-    hasDrawDetection: /draw|tie|stalemate/.test(allSource),
-    hasBoardDisplay: /board|display|render|print|grid/.test(allSource),
-    hasMoveLogic: /move|place|position/.test(allSource),
+    hasWinDetection: /\bwin(?:ner|ning)?\b|check.?win\b/.test(allSource),
+    hasDrawDetection: /\bdraw\b|\btie\b|\bstalemate\b/.test(allSource),
+    hasBoardDisplay: /\bboard\b|\bgrid\b|display.?board|print.?board|render.?board/.test(allSource),
+    hasMoveLogic: /\bmove\b|place.?mark|make.?move/.test(allSource),
   };
 
   const complete = Object.values(features).every(Boolean);
@@ -98,8 +113,42 @@ function isGameComplete(dir: string): boolean {
   return complete;
 }
 
+/** Get the latest story branch by commit date (for PR-based flow where main may not have code yet) */
+function getLatestStoryBranch(dir: string): string | null {
+  try {
+    const branches = execSync(
+      `git -C "${dir}" branch -a --sort=-committerdate --list '*story/*'`,
+      { encoding: "utf-8", timeout: 10_000 }
+    ).trim();
+    if (!branches) return null;
+    // Strip markers: * (current), + (worktree), whitespace; prefer remote tracking branches
+    // (local branches may be locked by worktrees and can't be checked out)
+    const parsed = branches.split("\n")
+      .map((b) => b.replace(/^\s*[*+]?\s*/, "").trim())
+      .filter(Boolean);
+    const remote = parsed.find((b) => b.startsWith("remotes/origin/story/"));
+    if (remote) return remote.replace("remotes/origin/", "origin/");
+    return parsed[0] || null;
+  } catch { return null; }
+}
+
+/** Get the worktree path for a story branch (if it exists) */
+function getWorktreePath(dir: string, branch: string): string | null {
+  try {
+    const list = execSync(`git -C "${dir}" worktree list --porcelain`, { encoding: "utf-8", timeout: 10_000 });
+    const blocks = list.split("\n\n");
+    for (const block of blocks) {
+      if (block.includes(`branch refs/heads/${branch}`)) {
+        const match = block.match(/^worktree (.+)$/m);
+        return match ? match[1] : null;
+      }
+    }
+  } catch { /* */ }
+  return null;
+}
+
 /** Get test count from vitest output */
-function getTestCount(dir: string): { files: number; tests: number } {
+function getTestCount(dir: string): { files: number; tests: number; error?: string } {
   try {
     const output = execSync("npx vitest run 2>&1", { cwd: dir, encoding: "utf-8", timeout: 60_000 });
     const testsMatch = output.match(/Tests\s+(\d+)\s+passed/);
@@ -108,13 +157,16 @@ function getTestCount(dir: string): { files: number; tests: number } {
       files: filesMatch ? parseInt(filesMatch[1], 10) : 0,
       tests: testsMatch ? parseInt(testsMatch[1], 10) : 0,
     };
-  } catch { return { files: 0, tests: 0 }; }
+  } catch (err) {
+    const msg = (err as Error).message?.slice(0, 300);
+    return { files: 0, tests: 0, error: msg };
+  }
 }
 
 describe("Greenfield: Tic Tac Toe via BMAD Autopilot", () => {
   beforeAll(() => {
     project = createTempProject({
-      remoteUrl: "git@github.com:ikunin/test-tictactoe.git",
+      remoteUrl: REMOTE_URL,
       installBmadCore: true,
       installAddon: true,
       platform: "github",
@@ -150,10 +202,12 @@ describe("Greenfield: Tic Tac Toe via BMAD Autopilot", () => {
     while (session < MAX_SESSIONS) {
       session++;
 
-      // Check if game is already complete on main
-      git("checkout main", project.dir);
+      // Check if game is already complete — check latest story branch first, then main
+      const latestBranch = getLatestStoryBranch(project.dir);
+      const checkBranch = latestBranch ?? "main";
+      gitCheckout(checkBranch, project.dir);
       if (isGameComplete(project.dir)) {
-        console.log(`[Session ${session}] Game complete on main — done`);
+        console.log(`[Session ${session}] Game complete on ${checkBranch} — done`);
         break;
       }
 
@@ -193,56 +247,101 @@ describe("Greenfield: Tic Tac Toe via BMAD Autopilot", () => {
       if (result.json?.is_error) {
         console.error(`[Session ${session}] Error: ${result.json.result}`);
         // Rate limit — stop retrying
-        if (result.json.result?.includes("limit")) break;
+        if (/rate.?limit/i.test(result.json.result ?? "")) break;
       }
     }
 
-    // Verify game is complete on main
-    git("checkout main", project.dir);
+    // Verify game is complete — check latest story branch (PRs may not be merged to main yet)
+    const finalBranch = getLatestStoryBranch(project.dir) ?? "main";
+    gitCheckout(finalBranch, project.dir);
     if (!existsSync(join(project.dir, "node_modules")) && existsSync(join(project.dir, "package.json"))) {
-      try { execSync("npm install", { cwd: project.dir, timeout: 60_000, stdio: "pipe" }); } catch { /* */ }
+      try { execSync("npm install", { cwd: project.dir, timeout: 60_000, stdio: "pipe" }); } catch {
+        console.warn("[Result] npm install failed before final check");
+      }
     }
     const complete = isGameComplete(project.dir);
-    console.log(`\n[Result] ${complete ? "SUCCESS" : "INCOMPLETE"} after ${session} sessions, $${totalCost.toFixed(4)}`);
+    console.log(`\n[Result] ${complete ? "SUCCESS" : "INCOMPLETE"} on ${finalBranch} after ${session} sessions, $${totalCost.toFixed(4)}`);
     expect(complete).toBe(true);
   }, MAX_SESSIONS * (TIMEOUT_PER_SESSION + 120_000));
 
   // ── Phase 2: Verify the autopilot did its job correctly ──
   //    These are pure assertions — no mutations.
+  //    NOTE: Phase 2 tests depend on Phase 1 succeeding (autopilot must have run).
 
-  it("story branches were merged to main by autopilot", () => {
+  it("story branches were pushed and contain working code", () => {
     const dir = project.dir;
-    git("checkout main", dir);
 
-    // Main should have more than just the initial commits
-    const commitCount = parseInt(git("rev-list --count main", dir), 10);
-    console.log(`[Merge] Commits on main: ${commitCount}`);
-    expect(commitCount).toBeGreaterThan(2); // initial + gitignore + at least one merge/artifact commit
+    // Story branches must exist on remote
+    const remoteBranches = execSync(
+      `git -C "${dir}" branch -r --list 'origin/story/*'`,
+      { encoding: "utf-8", timeout: 10_000 }
+    ).trim();
+    const storyBranches = remoteBranches.split("\n").map((b) => b.trim()).filter(Boolean);
+    console.log(`[Branches] Remote story branches: ${storyBranches.join(", ")}`);
+    expect(storyBranches.length, "at least one story branch must be pushed to remote").toBeGreaterThan(0);
 
-    // Source files must exist on main (not just on story branches)
-    const srcFiles = findFiles(dir, /\.(ts|js)$/, ["node_modules", ".git", "_bmad", "dist"]);
-    console.log(`[Merge] Source files on main: ${srcFiles.length}`);
+    // Check latest story branch for source files and passing tests
+    // Use worktree path if available (can't git checkout a branch used by a worktree)
+    const latestBranch = getLatestStoryBranch(dir);
+    expect(latestBranch, "latest story branch must be resolvable").toBeTruthy();
+    const localBranch = latestBranch!.replace("origin/", "");
+    const worktreePath = getWorktreePath(dir, localBranch);
+    const checkDir = worktreePath ?? dir;
+
+    if (!worktreePath) {
+      gitCheckout(latestBranch!, dir);
+    }
+    console.log(`[Branches] Checking ${localBranch} at: ${checkDir}`);
+
+    const srcFiles = findFiles(checkDir, /\.(ts|js)$/, ["node_modules", ".git", "_bmad", "dist"]);
+    console.log(`[Branches] Source files on ${localBranch}: ${srcFiles.length}`);
     expect(srcFiles.length).toBeGreaterThanOrEqual(4);
 
-    // Tests pass on main
-    const { tests } = getTestCount(dir);
-    console.log(`[Merge] Tests on main: ${tests} passed`);
-    expect(tests).toBeGreaterThan(0);
+    // Tests pass on the latest story branch
+    const testResult = getTestCount(checkDir);
+    console.log(`[Branches] Tests on ${localBranch}: ${testResult.tests} passed`);
+    if (testResult.error) {
+      console.error(`[Branches] Test runner error: ${testResult.error}`);
+    }
+    expect(testResult.tests, `project tests must pass on ${localBranch}`).toBeGreaterThan(0);
   }, 120_000);
 
   it("planning artifacts were committed to main by autopilot", () => {
     const dir = project.dir;
-    git("checkout main", dir);
+    gitCheckout("main", dir);
+    const planning = join(dir, "_bmad-output/planning-artifacts");
+    expect(existsSync(planning), "planning-artifacts directory must exist").toBe(true);
 
-    // Sprint status should exist on main
+    // Sprint status
     const sprintStatus = join(dir, "_bmad-output/implementation-artifacts/sprint-status.yaml");
-    if (existsSync(sprintStatus)) {
-      assertFileNotEmpty(sprintStatus);
-      assertFileContains(sprintStatus, /status:\s*done/);
-      console.log("[Artifacts] sprint-status.yaml on main ✓");
-    } else {
-      console.warn("[Artifacts] sprint-status.yaml not on main");
-    }
+    assertFileExists(sprintStatus);
+    assertFileNotEmpty(sprintStatus);
+    assertFileContains(sprintStatus, /status:\s*done/);
+    console.log("[Artifacts] sprint-status.yaml ✓");
+
+    // Epics — must exist with epic sections and BDD acceptance criteria
+    const epicsFiles = readdirSync(planning).filter((f) => /epic/i.test(f) && f.endsWith(".md"));
+    expect(epicsFiles.length, "epics markdown file must exist in planning-artifacts").toBeGreaterThan(0);
+    const epicsPath = join(planning, epicsFiles[0]);
+    assertFileNotEmpty(epicsPath);
+    assertFileContains(epicsPath, /## Epic \d/);
+    assertFileContains(epicsPath, /Story \d+[-\.]\d+/);
+    const epicsContent = readFileSync(epicsPath, "utf-8");
+    // Check for BDD keywords — may be bold, plain, or in various formats
+    expect(
+      /given\b/i.test(epicsContent) && /when\b/i.test(epicsContent) && /then\b/i.test(epicsContent),
+      `${epicsFiles[0]} must contain BDD keywords: Given, When, Then`
+    ).toBe(true);
+    console.log(`[Artifacts] ${epicsFiles[0]} ✓`);
+
+    // Architecture — must exist with meaningful content
+    const archFiles = readdirSync(planning).filter((f) => /architect/i.test(f) && f.endsWith(".md"));
+    expect(archFiles.length, "architecture markdown file must exist in planning-artifacts").toBeGreaterThan(0);
+    const archPath = join(planning, archFiles[0]);
+    assertFileNotEmpty(archPath);
+    const archContent = readFileSync(archPath, "utf-8");
+    expect(archContent.length, `${archFiles[0]} must have substantial content (not just a placeholder)`).toBeGreaterThan(200);
+    console.log(`[Artifacts] ${archFiles[0]} ✓`);
 
     // Git log should show artifact commits
     const log = git("log --oneline --all", dir);
@@ -251,13 +350,32 @@ describe("Greenfield: Tic Tac Toe via BMAD Autopilot", () => {
 
   it("story files have task checkboxes marked", () => {
     const dir = project.dir;
-    git("checkout main", dir);
+    // Story files may be on story branches (in worktree) or committed to main
+    const latestBranch = getLatestStoryBranch(dir);
+    const localBranch = latestBranch?.replace("origin/", "") ?? "";
+    const worktreePath = localBranch ? getWorktreePath(dir, localBranch) : null;
+    // Search both main tree and worktree for story files
+    const searchDirs = [dir];
+    if (worktreePath) searchDirs.push(worktreePath);
+    console.log(`[Tasks] Searching for story files in: ${searchDirs.join(", ")}`);
 
-    // Find story files
-    const storyFiles = findFiles(join(dir, "_bmad-output"), /story.*\.md$/, [".git"]);
-    console.log(`[Tasks] Found ${storyFiles.length} story files`);
+    // Find story files (BMAD puts them in implementation-artifacts or stories per config)
+    const storyFiles: string[] = [];
+    for (const searchDir of searchDirs) {
+      storyFiles.push(...findFiles(join(searchDir, "_bmad-output"), /^story-.*\.md$|^\d+-\d+.*\.md$/, [".git"]));
+    }
+    // Deduplicate by filename
+    const seen = new Set<string>();
+    const uniqueStoryFiles = storyFiles.filter((f) => {
+      const name = f.split("/").pop()!;
+      if (seen.has(name)) return false;
+      seen.add(name);
+      return true;
+    });
+    console.log(`[Tasks] Found ${uniqueStoryFiles.length} story files`);
+    expect(uniqueStoryFiles.length, "autopilot must produce at least one story file").toBeGreaterThan(0);
 
-    for (const sf of storyFiles) {
+    for (const sf of uniqueStoryFiles) {
       const content = readFileSync(sf, "utf-8");
       const name = sf.split("/").pop();
       const checked = (content.match(/\[x\]/gi) || []).length;
@@ -266,24 +384,87 @@ describe("Greenfield: Tic Tac Toe via BMAD Autopilot", () => {
 
       console.log(`[Tasks] ${name}: ${checked} checked, ${unchecked} unchecked, devRecord: ${hasDevRecord}`);
 
-      // At least some tasks should be checked
-      if (checked === 0 && unchecked > 0) {
-        console.warn(`[Tasks] WARNING: ${name} has ${unchecked} unchecked tasks`);
+      // Story must contain task checkboxes (create-story generates them, dev-story checks them off)
+      const totalCheckboxes = checked + unchecked;
+      expect(totalCheckboxes, `${name} must have task checkboxes (found 0) — create-story may have skipped Tasks/Subtasks section`).toBeGreaterThan(0);
+
+      // All tasks should be checked after dev-story completes
+      expect(unchecked, `${name} has ${unchecked} unchecked tasks — dev-story should mark all [x]`).toBe(0);
+      expect(checked, `${name} should have checked tasks`).toBeGreaterThan(0);
+    }
+  }, 30_000);
+
+  it("pull requests were created for story branches", () => {
+    const dir = project.dir;
+    gitCheckout("main", dir);
+    const gitStatusPath = join(dir, "_bmad-output/implementation-artifacts/git-status.yaml");
+
+    // Check if gh CLI is available — PRs require it
+    let ghAvailable = false;
+    try {
+      execSync("which gh", { timeout: 5_000, stdio: "pipe" });
+      ghAvailable = true;
+    } catch { /* gh not installed */ }
+
+    if (!existsSync(gitStatusPath)) {
+      console.warn("[PR] git-status.yaml not found — skipping PR check");
+      return;
+    }
+
+    const gitStatus = readYaml(gitStatusPath);
+    const stories = (gitStatus.stories ?? gitStatus.development_status ?? {}) as Record<string, Record<string, unknown>>;
+    const storyKeys = Object.keys(stories);
+    console.log(`[PR] Stories in git-status.yaml: ${storyKeys.join(", ")}`);
+    console.log(`[PR] gh CLI available: ${ghAvailable}`);
+    expect(storyKeys.length, "git-status.yaml must track at least one story").toBeGreaterThan(0);
+
+    for (const key of storyKeys) {
+      const story = stories[key];
+      const prUrl = story.pr_url ?? story.pr ?? null;
+      const pushStatus = story.push_status ?? story.push ?? null;
+      console.log(`[PR] ${key}: push=${pushStatus}, pr=${prUrl}`);
+
+      // Branch must have been pushed
+      expect(pushStatus, `${key} branch must be pushed`).toBe("pushed");
+
+      if (ghAvailable) {
+        // When gh is available, PRs must be created (not SKIPPED or null)
+        expect(prUrl, `${key} must have a PR URL (got ${prUrl})`).toBeTruthy();
+        expect(String(prUrl), `${key} PR should not be SKIPPED`).not.toBe("SKIPPED");
+      } else {
+        // Without gh, PRs are skipped — verify story was merged to main instead
+        console.warn(`[PR] ${key}: gh not available — expecting auto-merge fallback`);
+        const merged = execSync(
+          `git -C "${dir}" merge-base --is-ancestor story/${key.replace(/^\d+-\d+-/, (m) => m)} main 2>/dev/null && echo yes || echo no`,
+          { encoding: "utf-8", timeout: 5_000 }
+        ).trim();
+        // Don't hard-fail, but log the state
+        console.log(`[PR] ${key}: merged to main = ${merged}`);
       }
     }
   }, 30_000);
 
   it("lock is released and project is clean", () => {
     const dir = project.dir;
+    gitCheckout("main", dir);
 
     // Lock must be released
-    expect(existsSync(join(dir, ".autopilot.lock"))).toBe(false);
+    expect(existsSync(join(dir, ".autopilot.lock")), "autopilot lock must be released").toBe(false);
 
     // Autopilot state file should be deleted (sprint complete)
-    const statePath = join(dir, "_bmad-output/implementation-artifacts/autopilot-state.yaml");
-    if (existsSync(statePath)) {
+    if (existsSync(join(dir, "_bmad-output/implementation-artifacts/autopilot-state.yaml"))) {
       console.warn("[Clean] autopilot-state.yaml still exists — sprint may not have completed");
     }
+
+    // No modified tracked files (untracked BMAD setup files are expected)
+    const trackedChanges = execSync(`git -C "${dir}" diff --name-only HEAD`, { encoding: "utf-8", timeout: 10_000 }).trim();
+    if (trackedChanges) {
+      console.warn(`[Clean] Tracked files with changes: ${trackedChanges}`);
+    }
+    expect(trackedChanges, "no tracked files should be modified").toBe("");
+
+    // No orphaned worktrees
+    assertNoOrphanedWorktrees(dir);
 
     console.log(`[Clean] Project dir: ${dir}`);
   });

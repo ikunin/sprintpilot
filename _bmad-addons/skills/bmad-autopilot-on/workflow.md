@@ -322,8 +322,20 @@ Resolve:
   If no → proceed with creation.
   </action>
 
-  <action>**Prepare for worktree** — ensure HEAD is at the latest remote base branch.
-  Run: `git fetch origin && git checkout origin/{{base_branch}}`
+  <action>**Prepare for worktree** — determine the correct branch point.
+  Run: `git fetch origin`
+
+  Check if there is a previous story in this epic with a pushed but unmerged branch (PR pending):
+  - Read `{git_status_file}` for earlier stories in the same epic
+  - Find the latest story branch where `push_status` = "pushed" AND `pr_url` is a valid URL
+  - Check if that branch has been merged to `{{base_branch}}`: `git merge-base --is-ancestor origin/story/<prev-branch> origin/{{base_branch}}`
+
+  If an unmerged previous story branch exists:
+  - Branch from it: `git checkout origin/story/<prev-branch>`
+  - Log: "Branching from story/<prev-branch> (PR pending merge)"
+  Otherwise:
+  - Branch from base: `git checkout origin/{{base_branch}}`
+
   (Detached HEAD is fine — EnterWorktree branches from HEAD)
   </action>
 
@@ -432,6 +444,10 @@ NEVER wait for user at a menu.
 <check if="{{completed_skill}} was bmad-sprint-planning AND {{git_enabled}}">
   <action>Run `git fetch origin`</action>
   <action>Initialize `{git_status_file}` if it doesn't exist (with git_integration block)</action>
+</check>
+
+<check if="{{completed_skill}} was bmad-create-story">
+  <critical>**Validate task checkboxes exist** — read the story file and verify it contains a "## Tasks / Subtasks" section with at least one markdown checkbox (`- [ ]`). The dev-story workflow navigates by finding unchecked `[ ]` items and marks them `[x]` on completion. If the story has NO checkboxes, re-run create-story or manually add task checkboxes derived from the acceptance criteria before proceeding.</critical>
 </check>
 
 <check if="{{completed_skill}} was bmad-create-story AND {{git_enabled}}">
@@ -569,17 +585,23 @@ Apply ALL patch and bugfix findings automatically. For each:
   This writes to `git-status.yaml` (addon-owned). Sprint-status.yaml is BMAD-owned and read-only.
   </action>
 
-  <action>**Merge story branch to main** — integrate completed story into the base branch.
-  ```
-  git checkout {{base_branch}}
-  git merge story/{{branch_name}} --no-edit
-  git push origin {{base_branch}} 2>/dev/null || true
-  ```
-  If merge fails (conflict):
-  - Try `git merge --abort`
-  - Log warning: "Could not auto-merge story/{{branch_name}} to {{base_branch}} — manual merge required"
-  - Continue without halting (the story branch is pushed and PR exists)
-  </action>
+  <check if="{{platform}} is git_only OR {{pr_url}} is null or SKIPPED">
+    <action>**Merge story branch to main** — no PR workflow, merge locally.
+    ```
+    git checkout {{base_branch}}
+    git merge story/{{branch_name}} --no-edit
+    git push origin {{base_branch}} 2>/dev/null || true
+    ```
+    If merge fails (conflict):
+    - Try `git merge --abort`
+    - Log warning: "Could not auto-merge story/{{branch_name}} to {{base_branch}} — manual merge required"
+    - Continue without halting (the story branch is pushed)
+    </action>
+  </check>
+  <check if="{{pr_url}} is a valid URL (not null, not SKIPPED)">
+    <critical>**DO NOT merge** — a PR was created at {{pr_url}}. Merging requires PR approval. The branch will be merged through the PR workflow on the platform.</critical>
+    <action>Log: "Story {{current_story}} pushed — PR awaiting review: {{pr_url}}"</action>
+  </check>
 </check>
 
 <check if="NOT {{git_enabled}} OR NOT was in worktree">

@@ -2,9 +2,9 @@
  * Create and manage temporary project directories for e2e testing.
  * Each test gets an isolated git repo with BMAD installed.
  */
-import { mkdtempSync, rmSync, existsSync, mkdirSync, writeFileSync, cpSync } from "node:fs";
+import { mkdtempSync, rmSync, existsSync, mkdirSync, writeFileSync, readFileSync, cpSync } from "node:fs";
 import { execSync } from "node:child_process";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
 import { tmpdir } from "node:os";
 
 const ADDON_DIR = join(import.meta.dirname, "../../../_bmad-addons");
@@ -112,7 +112,7 @@ export function createTempProject(options: TempProjectOptions = {}): TempProject
     // Override platform config
     const gitConfig = join(destAddons, "modules/git/config.yaml");
     if (existsSync(gitConfig)) {
-      const content = execSync(`cat "${gitConfig}"`, { encoding: "utf-8" });
+      const content = readFileSync(gitConfig, "utf-8");
       const updated = content.replace(
         /provider:\s*auto/,
         `provider: ${platform}`
@@ -163,7 +163,6 @@ export function placeFixture(
   content: string
 ): void {
   const fullPath = join(projectDir, relativePath);
-  const dir = fullPath.substring(0, fullPath.lastIndexOf("/"));
-  mkdirSync(dir, { recursive: true });
+  mkdirSync(dirname(fullPath), { recursive: true });
   writeFileSync(fullPath, content);
 }

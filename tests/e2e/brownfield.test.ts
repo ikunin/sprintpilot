@@ -64,8 +64,8 @@ describe("Brownfield: json-server analysis + auth feature", () => {
     exec("git init --initial-branch=main");
     exec('git config user.email "test@bmad-e2e.com"');
     exec('git config user.name "BMAD E2E Test"');
-    exec("git add -A");
-    exec('git commit -m "import json-server v0.17.4"');
+    exec("git add .");
+    exec('git commit -m "import json-server v0.17.3"');
 
     // Create bare remote
     const { mkdtempSync: mkdtemp2 } = await import("node:fs");
@@ -119,7 +119,7 @@ describe("Brownfield: json-server analysis + auth feature", () => {
     // Install npm deps (ignore-scripts to skip postinstall which may fail)
     try {
       exec("npm install --ignore-scripts", projectDir);
-      exec("git add -A && git commit -m 'install deps' || true");
+      exec("git add . && git commit -m 'install deps' || true");
     } catch {
       console.warn("[Setup] npm install failed — tests may not pass");
     }
@@ -133,19 +133,18 @@ describe("Brownfield: json-server analysis + auth feature", () => {
       try {
         execSync(`rm -rf "${projectDir}"`, { timeout: 10_000 });
         if (remoteDir) execSync(`rm -rf "${remoteDir}"`, { timeout: 10_000 });
-      } catch { /* ignore */ }
+      } catch { /* ignore cleanup errors */ }
     } else {
       console.log(`[Brownfield] Preserving: ${projectDir}`);
     }
   });
 
-  it("B0: base project tests pass", () => {
-    try {
-      exec("npm test", projectDir);
-    } catch (e) {
-      console.warn("[B0] Base tests may have issues:", (e as Error).message?.slice(0, 200));
-      // Don't fail — json-server v0.17.4 tests may need specific node version
-    }
+  it("B0: base project has valid structure", () => {
+    // Validate the cloned project has expected structure (not that tests pass,
+    // since json-server v0.17.3 tests may need a specific node version)
+    assertFileExists(join(projectDir, "package.json"));
+    const pkg = JSON.parse(readFileSync(join(projectDir, "package.json"), "utf-8"));
+    expect(pkg.name, "cloned project should be json-server").toBe("json-server");
   }, 60_000);
 
   it("B1: codebase-map produces 5 analysis files", async () => {
@@ -171,7 +170,7 @@ describe("Brownfield: json-server analysis + auth feature", () => {
     console.log(
       `[B1] Exit: ${result.exitCode}, Cost: $${result.json?.total_cost_usd?.toFixed(4) ?? "?"}`
     );
-    expect(result.timedOut).toBe(false);
+    expect(result.timedOut, "codebase-map must not time out").toBe(false);
 
     const analysisDir = join(projectDir, "_bmad-output/codebase-analysis");
     const expectedFiles = [
@@ -220,17 +219,15 @@ describe("Brownfield: json-server analysis + auth feature", () => {
     console.log(
       `[B2] Exit: ${result.exitCode}, Cost: $${result.json?.total_cost_usd?.toFixed(4) ?? "?"}`
     );
-    expect(result.timedOut).toBe(false);
+    expect(result.timedOut, "assess must not time out").toBe(false);
 
     const assessmentPath = join(
       projectDir,
       "_bmad-output/codebase-analysis/brownfield-assessment.md"
     );
-    if (existsSync(assessmentPath)) {
-      assertFileNotEmpty(assessmentPath);
-    } else {
-      console.warn("[B2] brownfield-assessment.md not created");
-    }
+    assertFileExists(assessmentPath);
+    assertFileNotEmpty(assessmentPath);
+    console.log("[B2] brownfield-assessment.md ✓");
   }, 700_000);
 
   it("B3: reverse-architect produces architecture doc", async () => {
@@ -256,7 +253,7 @@ describe("Brownfield: json-server analysis + auth feature", () => {
     console.log(
       `[B3] Exit: ${result.exitCode}, Cost: $${result.json?.total_cost_usd?.toFixed(4) ?? "?"}`
     );
-    expect(result.timedOut).toBe(false);
+    expect(result.timedOut, "reverse-architect must not time out").toBe(false);
 
     // Look for architecture doc in likely locations
     const possiblePaths = [
@@ -265,12 +262,9 @@ describe("Brownfield: json-server analysis + auth feature", () => {
     ];
 
     const found = possiblePaths.find((p) => existsSync(p));
-    if (found) {
-      assertFileNotEmpty(found);
-      console.log(`[B3] Architecture doc at: ${found}`);
-    } else {
-      console.warn("[B3] No architecture doc found");
-    }
+    expect(found, `architecture doc must exist in one of: ${possiblePaths.join(", ")}`).toBeDefined();
+    assertFileNotEmpty(found!);
+    console.log(`[B3] Architecture doc at: ${found}`);
   }, 700_000);
 
   it("B4: migrate produces migration plan (optional)", async () => {
@@ -299,7 +293,7 @@ describe("Brownfield: json-server analysis + auth feature", () => {
     console.log(
       `[B4] Exit: ${result.exitCode}, Cost: $${result.json?.total_cost_usd?.toFixed(4) ?? "?"}`
     );
-    expect(result.timedOut).toBe(false);
+    expect(result.timedOut, "migrate must not time out").toBe(false);
 
     // Check for migration artifacts
     const planPath = join(
@@ -308,9 +302,10 @@ describe("Brownfield: json-server analysis + auth feature", () => {
     );
     if (existsSync(planPath)) {
       assertFileNotEmpty(planPath);
-      console.log("[B4] migration-plan.md created");
+      console.log("[B4] migration-plan.md created ✓");
     } else {
-      console.warn("[B4] migration-plan.md not created (may be expected)");
+      // Migration planning is the heaviest skill and may not always complete
+      console.warn("[B4] migration-plan.md not created — acceptable for optional step");
     }
   }, 1_000_000); // 16 min — migration is the heaviest skill
 });

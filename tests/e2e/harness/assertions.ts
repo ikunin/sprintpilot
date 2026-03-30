@@ -177,9 +177,11 @@ export function assertMarkdownHasSections(
 ): void {
   assertFileExists(filePath);
   const content = readFileSync(filePath, "utf-8");
-  const missing = sections.filter(
-    (s) => !content.includes(`# ${s}`) && !content.includes(`## ${s}`)
-  );
+  const missing = sections.filter((s) => {
+    // Match heading at any level (# through ####) at the start of a line
+    const pattern = new RegExp(`^#{1,4}\\s+${s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "m");
+    return !pattern.test(content);
+  });
   if (missing.length > 0) {
     throw new Error(
       `${filePath} missing sections: ${missing.join(", ")}`

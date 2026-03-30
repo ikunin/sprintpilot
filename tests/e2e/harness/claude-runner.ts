@@ -90,6 +90,14 @@ export async function runClaude(
   }
 
   return new Promise<ClaudeRunResult>((resolve) => {
+    let resolved = false;
+    const finish = (result: ClaudeRunResult) => {
+      if (resolved) return;
+      resolved = true;
+      clearTimeout(timer);
+      resolve(result);
+    };
+
     const proc: ChildProcess = spawn("claude", args, {
       cwd,
       env: { ...process.env },
@@ -108,13 +116,27 @@ export async function runClaude(
       stderr += data.toString();
     });
 
+    // Handle spawn failures (e.g., claude binary not found)
+    proc.on("error", (err) => {
+      finish({
+        exitCode: 1,
+        stdout,
+        stderr: `spawn error: ${err.message}`,
+        timedOut: false,
+      });
+    });
+
     const timer = setTimeout(() => {
       timedOut = true;
+      // Try SIGTERM first to allow graceful shutdown and JSON output
       proc.kill("SIGTERM");
+      // Force kill after 10s if SIGTERM is ignored
+      setTimeout(() => {
+        try { proc.kill("SIGKILL"); } catch { /* already dead */ }
+      }, 10_000);
     }, timeout);
 
     proc.on("close", (code) => {
-      clearTimeout(timer);
       let json: ClaudeRunResult["json"];
       try {
         json = JSON.parse(stdout);
@@ -127,7 +149,7 @@ export async function runClaude(
         console.error(`[claude-runner] ERROR: ${json.result}`);
       }
 
-      resolve({
+      finish({
         exitCode: code ?? 1,
         stdout,
         stderr,
