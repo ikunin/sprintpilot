@@ -642,8 +642,13 @@ Apply ALL patch and bugfix findings automatically. For each:
   </action>
 </check>
 
-<!-- Always update sprint status regardless of git mode -->
-<action>Update `{status_file}`: `{{current_story}}` → `done`</action>
+<!-- Track story completion — write to addon-owned git-status.yaml (sprint-status.yaml is BMAD-owned, updated by dev-story itself) -->
+<check if="{{git_enabled}}">
+  <action>Update `{git_status_file}` for `{{current_story}}`: set `status: done`</action>
+</check>
+<check if="NOT {{git_enabled}}">
+  <action>Update `{status_file}`: `{{current_story}}` → `done`</action>
+</check>
 
 <action>Mark all remaining tasks for this story → `completed`</action>
 <action>Increment `{{session_stories_done}}` by 1</action>
