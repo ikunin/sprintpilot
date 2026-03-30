@@ -103,9 +103,15 @@ Resolve:
 <check if="manifest exists">
   <action>Read `{project-root}/_bmad-addons/manifest.yaml`</action>
   <action>Read `{project-root}/_bmad-addons/modules/git/config.yaml`</action>
-  <action>Set `{{git_enabled}}` from `git.enabled` field</action>
-  <action>Set `{{base_branch}}` from `git.base_branch` field. If missing or empty, default to `main` and warn: "base_branch not configured, defaulting to main"</action>
-  <action>Set `{{create_pr}}` from `git.push.create_pr` field. If missing, default to `true`.</action>
+  <action>Set config variables from `git.*` fields (defaults in parentheses):
+  - `{{git_enabled}}` from `git.enabled` (true)
+  - `{{base_branch}}` from `git.base_branch` (main)
+  - `{{branch_prefix}}` from `git.branch_prefix` ("story/")
+  - `{{push_auto}}` from `git.push.auto` (true)
+  - `{{create_pr}}` from `git.push.create_pr` (true)
+  - `{{pr_template}}` from `git.push.pr_template` ("modules/git/templates/pr-body.md")
+  - `{{cleanup_on_merge}}` from `git.worktree.cleanup_on_merge` (true)
+  </action>
 </check>
 
 <check if="manifest does NOT exist">
@@ -324,9 +330,9 @@ Resolve:
 <!-- GIT: Enter worktree before dev-story -->
 <check if="{{git_enabled}} AND {{next_skill}} is bmad-dev-story">
   <action>**Sanitize branch name** — run:
-  `bash {{project_root}}/_bmad-addons/scripts/sanitize-branch.sh "{{current_story}}" --prefix "story/" --max-length 60`
+  `bash {{project_root}}/_bmad-addons/scripts/sanitize-branch.sh "{{current_story}}" --prefix "{{branch_prefix}}" --max-length 60`
   Output: sanitized name (without prefix). Set `{{branch_name}}` = output.
-  Full branch ref will be `story/{{branch_name}}`.
+  Full branch ref will be `{{branch_prefix}}{{branch_name}}`.
   </action>
 
   <action>**Check if branch already registered** in `{status_file}` for this story.
@@ -341,12 +347,12 @@ Resolve:
   Check if there is a previous story in this epic with a pushed but unmerged branch (PR pending):
   - Read `{git_status_file}` for earlier stories in the same epic
   - Find the latest story branch where `push_status` = "pushed" AND `pr_url` is a valid URL
-  - Check if that branch has been merged to `{{base_branch}}`: `git merge-base --is-ancestor origin/story/<prev-branch> origin/{{base_branch}}`
+  - Check if that branch has been merged to `{{base_branch}}`: `git merge-base --is-ancestor origin/{{branch_prefix}}<prev-branch> origin/{{base_branch}}`
 
   If an unmerged previous story branch exists:
-  - Branch from it: `git checkout origin/story/<prev-branch>`
-  - Set `{{pr_base}}` = `story/<prev-branch>` (PR should target previous story, not main)
-  - Log: "Branching from story/<prev-branch> (PR pending merge)"
+  - Branch from it: `git checkout origin/{{branch_prefix}}<prev-branch>`
+  - Set `{{pr_base}}` = `{{branch_prefix}}<prev-branch>` (PR should target previous story, not main)
+  - Log: "Branching from {{branch_prefix}}<prev-branch> (PR pending merge)"
   Otherwise:
   - Branch from base: `git checkout origin/{{base_branch}}`
   - Set `{{pr_base}}` = `{{base_branch}}`
@@ -362,16 +368,16 @@ Resolve:
   **If EnterWorktree fails** (disk full, permissions, etc.):
   - Log: "WARN: EnterWorktree failed — continuing without worktree isolation"
   - Set `{{in_worktree}}` = false
-  - Create branch manually: `git checkout -b story/{{branch_name}}`
-    If checkout also fails (branch already exists): `git checkout story/{{branch_name}}`
-    If both fail: HALT — "Could not create or switch to branch story/{{branch_name}}"
+  - Create branch manually: `git checkout -b {{branch_prefix}}{{branch_name}}`
+    If checkout also fails (branch already exists): `git checkout {{branch_prefix}}{{branch_name}}`
+    If both fail: HALT — "Could not create or switch to branch {{branch_prefix}}{{branch_name}}"
   - Continue with the skill invocation in PROJECT_ROOT (no isolation)
   - Git operations (commit, push, PR) still work on the branch
   </action>
 
   <check if="EnterWorktree succeeded">
     <action>**Rename branch** to our naming convention.
-    Run: `git branch -m "$(git branch --show-current)" "story/{{branch_name}}"`
+    Run: `git branch -m "$(git branch --show-current)" "{{branch_prefix}}{{branch_name}}"`
     </action>
 
     <action>**Init submodules** if needed.
@@ -483,7 +489,7 @@ NEVER wait for user at a menu.
   <action>Sanitize branch name for `{{current_story}}` (same logic as step 3)</action>
   <action>Check if branch already registered in `{git_status_file}` for this story → skip if so</action>
   <action>Register branch in `{git_status_file}`:
-  `bash {{project_root}}/_bmad-addons/scripts/sync-status.sh --story "{{current_story}}" --git-status-file "{git_status_file}" --branch "story/{{branch_name}}" --platform "{{platform}}" --base-branch "{{base_branch}}"`
+  `bash {{project_root}}/_bmad-addons/scripts/sync-status.sh --story "{{current_story}}" --git-status-file "{git_status_file}" --branch "{{branch_prefix}}{{branch_name}}" --platform "{{platform}}" --base-branch "{{base_branch}}"`
   </action>
 </check>
 
@@ -580,16 +586,22 @@ Apply ALL patch and bugfix findings automatically. For each:
 
 <!-- GIT: Push, PR, exit worktree -->
 <check if="{{git_enabled}} AND {{in_worktree}}">
-  <action>**Push branch**.
-  Run: `git push -u origin story/{{branch_name}} 2>&1`
-  If push fails → set `{{push_status}}` = "failed", log warning, continue.
-  If push succeeds → set `{{push_status}}` = "pushed".
-  </action>
+  <check if="{{push_auto}} is true">
+    <action>**Push branch**.
+    Run: `git push -u origin {{branch_prefix}}{{branch_name}} 2>&1`
+    If push fails → set `{{push_status}}` = "failed", log warning, continue.
+    If push succeeds → set `{{push_status}}` = "pushed".
+    </action>
+  </check>
+  <check if="{{push_auto}} is false">
+    <action>Set `{{push_status}}` = "local", `{{pr_url}}` = "SKIPPED"</action>
+    <action>Log: "Push skipped (git.push.auto = false). Branch {{branch_prefix}}{{branch_name}} is local only."</action>
+  </check>
 
   <action>**Create PR/MR** (if push succeeded AND `{{create_pr}}` is true AND platform != git_only):
-  If `{{create_pr}}` is false → set `{{pr_url}}` = "SKIPPED", skip PR creation entirely.
-  1. Read PR body template: `{{project_root}}/_bmad-addons/modules/git/templates/pr-body.md`
-     If template file doesn't exist, use a simple default: "## Story: {{current_story}}\n\n{{story-title}}"
+  If `{{create_pr}}` is false OR `{{push_status}}` is not "pushed" → set `{{pr_url}}` = "SKIPPED", skip PR creation.
+  1. Read PR body template: `{{project_root}}/_bmad-addons/{{pr_template}}`
+     If template file doesn't exist at that path, use a simple default: "## Story: {{current_story}}\n\n{{story-title}}"
   2. Fill template placeholders using the `commit_placeholder_resolution` chain from config:
      - `{story-key}` → `{{current_story}}` (from sprint-status)
      - `{story-title}` → from story file title, fallback to story-key
@@ -599,7 +611,7 @@ Apply ALL patch and bugfix findings automatically. For each:
      - `{lint-result}` → `{{lint_result}}`
      - `{test-result}` → from last test run output
      - `{patch-count}` → number of patch commits
-  3. Run: `bash {{project_root}}/_bmad-addons/scripts/create-pr.sh --platform {{platform}} --branch story/{{branch_name}} --base {{pr_base}} --title "{{story-title}} ({{current_story}})" --body "<filled template>"`
+  3. Run: `bash {{project_root}}/_bmad-addons/scripts/create-pr.sh --platform {{platform}} --branch {{branch_prefix}}{{branch_name}} --base {{pr_base}} --title "{{story-title}} ({{current_story}})" --body "<filled template>"`
   4. Output: PR URL or "SKIPPED". Set `{{pr_url}}` = output.
   If creation fails → log warning, set `{{pr_url}}` = null, continue.
   </action>
@@ -611,7 +623,7 @@ Apply ALL patch and bugfix findings automatically. For each:
   </action>
 
   <action>**Write git status** to addon's own file (NEVER modify sprint-status.yaml):
-  `bash {{project_root}}/_bmad-addons/scripts/sync-status.sh --story "{{current_story}}" --git-status-file "{git_status_file}" --branch "story/{{branch_name}}" --commit "{{story_commit}}" --patch-commits "{{patch_commits_csv}}" --push-status "{{push_status}}" --pr-url "{{pr_url}}" --lint-result "{{lint_result}}" --worktree "{{project_root}}/.claude/worktrees/{{current_story}}" --platform "{{platform}}" --base-branch "{{base_branch}}"`
+  `bash {{project_root}}/_bmad-addons/scripts/sync-status.sh --story "{{current_story}}" --git-status-file "{git_status_file}" --branch "{{branch_prefix}}{{branch_name}}" --commit "{{story_commit}}" --patch-commits "{{patch_commits_csv}}" --push-status "{{push_status}}" --pr-url "{{pr_url}}" --lint-result "{{lint_result}}" --worktree "{{project_root}}/.claude/worktrees/{{current_story}}" --platform "{{platform}}" --base-branch "{{base_branch}}"`
   This writes to `git-status.yaml` (addon-owned). Sprint-status.yaml is BMAD-owned and read-only.
   </action>
 
@@ -619,12 +631,12 @@ Apply ALL patch and bugfix findings automatically. For each:
     <action>**Merge story branch to main** — no PR workflow, merge locally.
     ```
     git checkout -B {{base_branch}} origin/{{base_branch}}
-    git merge story/{{branch_name}} --no-edit
+    git merge {{branch_prefix}}{{branch_name}} --no-edit
     git push origin {{base_branch}} 2>/dev/null || true
     ```
     If merge fails (conflict):
     - Try `git merge --abort`
-    - Log warning: "Could not auto-merge story/{{branch_name}} to {{base_branch}} — manual merge required"
+    - Log warning: "Could not auto-merge {{branch_prefix}}{{branch_name}} to {{base_branch}} — manual merge required"
     - Continue without halting (the story branch is pushed)
     </action>
   </check>
@@ -678,14 +690,19 @@ Apply ALL patch and bugfix findings automatically. For each:
     Ready to merge. Review PRs and confirm when ready.
     ```
     </action>
-    <action>**Cleanup worktrees** for completed stories:
-    For each story in this epic:
-      1. Check if worktree at `.claude/worktrees/{{story-key}}` exists
-      2. Check if clean: `git -C .claude/worktrees/{{story-key}} status --porcelain`
-      3. If clean → `git worktree remove .claude/worktrees/{{story-key}}` + `git worktree prune`
-         Update `{git_status_file}` for this story: `worktree_cleaned: true`
-      4. If dirty → warn user, skip cleanup
-    </action>
+    <check if="{{cleanup_on_merge}} is true">
+      <action>**Cleanup worktrees** for completed stories:
+      For each story in this epic:
+        1. Check if worktree at `.claude/worktrees/{{story-key}}` exists
+        2. Check if clean: `git -C .claude/worktrees/{{story-key}} status --porcelain`
+        3. If clean → `git worktree remove .claude/worktrees/{{story-key}}` + `git worktree prune`
+           Update `{git_status_file}` for this story: `worktree_cleaned: true`
+        4. If dirty → warn user, skip cleanup
+      </action>
+    </check>
+    <check if="{{cleanup_on_merge}} is false">
+      <action>Log: "Worktree cleanup skipped (git.worktree.cleanup_on_merge = false)"</action>
+    </check>
   </check>
 </check>
 

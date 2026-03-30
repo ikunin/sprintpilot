@@ -5,11 +5,10 @@ git:
   enabled: true # false = all git ops silently skip
   base_branch: main
   # Git status is tracked in git-status.yaml (addon-owned), NOT sprint-status.yaml (BMAD-owned)
-  # git_status_file resolves to: {implementation_artifacts}/git-status.yaml
 
   # Branch naming
-  branch_prefix: "story/"
-  max_branch_length: 60 # Truncate + 6-char hash if longer
+  branch_prefix: "story/" # prefix for story branches (e.g., story/1-2-user-auth)
+  max_branch_length: 60 # truncate + 6-char hash if longer
 
   # Commit message templates
   # Placeholders: {story-key}, {epic}, {story-title}, {patch-title}
@@ -24,34 +23,13 @@ git:
     story-title: "from story file title, fallback to story-key"
     patch-title: "from review finding title, fallback to 'code review fix'"
 
-  # File staging strategy
-  staging:
-    strategy: explicit # Always explicit file names, never git add -A
-    source: git-diff-primary # git diff --name-only as primary source
-    cross_reference: story-file-list # Story File List as sanity check
-    pre_commit_checks:
-      - verify_no_secrets
-      - verify_gitignore_covers_addon
-      - verify_file_size
-      - verify_no_binaries
-    secrets_scan:
-      patterns:
-        - API_KEY
-        - SECRET
-        - TOKEN
-        - PASSWORD
-        - aws_access
-        - private_key
-      severity: WARN # WARN (not BLOCK) — surfaces finding, doesn't halt
-      allowlist_file: .secrets-allowlist
-    max_file_size_mb: 1 # Reject files larger than this (configurable)
-    verify_gitignore_entries: # Entries that must be in .gitignore
-      - .autopilot.lock
-      # Tool-specific .addon-backups/ dirs are handled by install.sh per tool
-
   # Linting
   lint:
     enabled: true
+    blocking: false # true = lint errors halt the autopilot; false = warn only
+    output_limit: 100 # max lines of lint output injected into context
+    # Linter preference per language — first found wins.
+    # Override to force a specific tool (e.g., set typescript: [biome] to skip eslint).
     linters:
       python: [ruff, flake8, pylint]
       javascript: [eslint, biome]
@@ -68,34 +46,24 @@ git:
       kotlin: [ktlint, detekt]
       php: [phpstan, phpcs]
       # To add a new language: add an entry here and a matching block in scripts/lint-changed.sh
-    auto_detect: true # Detect project language from manifest files
-    scope: changed-files # Only lint files changed in this story
-    blocking: false # Warn-only, never halt
-    output_limit: 100 # Max lines injected into context
-    output_strategy: errors-first # Show all errors first, then fill with warnings
-    full_output_file: true # Save full output to file, reference path
 
   # Push & PR
   push:
-    auto: true
+    auto: true # false = branches stay local, no push or PR
     create_pr: true # true = create PR and wait for approval (no auto-merge)
                      # false = merge directly to base branch after push
-    pr_body: heredoc # Use HEREDOC for gh/glab
+    pr_template: "modules/git/templates/pr-body.md" # relative to _bmad-addons/
 
   # Worktree settings (location managed by EnterWorktree at .claude/worktrees/)
   worktree:
     submodule_init: auto # auto = only if .gitmodules exists
-    submodule_timeout: 30 # Seconds
-    cleanup_on_merge: true # ExitWorktree(action: "remove") after story merged
-    health_check_on_boot: true # Check for orphaned worktrees from crashed sessions
+    submodule_timeout: 30 # seconds
+    cleanup_on_merge: true # false = keep worktrees after epic completion for inspection
+    health_check_on_boot: true # check for orphaned worktrees from crashed sessions
 
-  # Lock file
+  # Lock file (.autopilot.lock — prevents concurrent autopilot sessions)
   lock:
-    enabled: true
-    file: .autopilot.lock
-    stale_timeout_minutes: 30
-    # Lock contains: epoch timestamp + session UUID. No PID (unreliable).
-    # All time math done in Bash (date +%s), not by the LLM.
+    stale_timeout_minutes: 30 # auto-remove locks older than this
 
   # Platform detection
   platform:
@@ -104,12 +72,10 @@ git:
     #   1. Explicit provider in this config (if not "auto")
     #   2. CLI detection: which CLIs are installed (gh, glab, bb, tea)
     #   3. Remote URL regex as last resort
-    # Runs once at autopilot boot, cached for session.
-    # Re-detect only if a platform command fails.
     #
     # For self-hosted Gitea:
     #   provider: gitea
-    #   base_url: https://git.example.com  # required for API fallback
+    #   base_url: https://git.example.com
     #   # Set GITEA_TOKEN env var for API auth
     #
     # For Bitbucket Server:

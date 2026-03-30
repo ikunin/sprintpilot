@@ -3,22 +3,25 @@
 # Auto-detects project language, finds first available linter, runs on changed files.
 # Errors-first output, truncated to limit.
 #
-# Usage: lint-changed.sh [--limit 100] [--output-file lint-output.txt]
+# Usage: lint-changed.sh [--limit 100] [--output-file lint-output.txt] [--linter <tool>]
 # Output: truncated lint output (errors first) on stdout, full output to file
 # Exit: 0 = no errors (warnings ok), 1 = errors found, 2 = no linter found
 set -e
 
 LIMIT=100
 OUTPUT_FILE=""
+LINTER_OVERRIDE=""
 
 while [[ "$#" -gt 0 ]]; do
   case $1 in
     --limit) LIMIT="$2"; shift 2 ;;
     --output-file) OUTPUT_FILE="$2"; shift 2 ;;
+    --linter) LINTER_OVERRIDE="$2"; shift 2 ;;
     -h|--help)
-      echo "Usage: lint-changed.sh [--limit 100] [--output-file path]"
+      echo "Usage: lint-changed.sh [--limit 100] [--output-file path] [--linter <tool>]"
       exit 0
       ;;
+    *) shift ;;
   esac
 done
 
@@ -218,10 +221,22 @@ detect_and_lint() {
   return 0
 }
 
-FULL_OUTPUT=$(detect_and_lint "$ALL_CHANGED") || {
-  echo "No linter found for changed files"
-  exit 2
-}
+# If --linter override is set, use it directly instead of auto-detection
+if [ -n "$LINTER_OVERRIDE" ]; then
+  if command -v "$LINTER_OVERRIDE" &>/dev/null || [ -x "node_modules/.bin/$LINTER_OVERRIDE" ]; then
+    LINTER_CMD="$LINTER_OVERRIDE"
+    [ -x "node_modules/.bin/$LINTER_OVERRIDE" ] && LINTER_CMD="node_modules/.bin/$LINTER_OVERRIDE"
+    FULL_OUTPUT=$(run_linter "$LINTER_OVERRIDE" "$LINTER_CMD" "$ALL_CHANGED") || true
+  else
+    echo "WARN: Configured linter '$LINTER_OVERRIDE' not found, falling back to auto-detection" >&2
+    FULL_OUTPUT=$(detect_and_lint "$ALL_CHANGED") || { echo "No linter found for changed files"; exit 2; }
+  fi
+else
+  FULL_OUTPUT=$(detect_and_lint "$ALL_CHANGED") || {
+    echo "No linter found for changed files"
+    exit 2
+  }
+fi
 
 # Save full output to file if requested
 if [ -n "$OUTPUT_FILE" ]; then
