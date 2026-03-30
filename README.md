@@ -24,8 +24,8 @@ That's it. The autopilot takes over and drives your entire sprint to completion:
 6. **Commits with conventional messages** — `feat(epic): story title (story-key)` with all placeholders resolved from your sprint artifacts
 7. **Runs code review** — invokes `bmad-code-review` on the worktree diff
 8. **Applies every patch** — auto-accepts all review findings, commits each fix separately for clean git history
-9. **Pushes and creates a PR** — auto-detects your platform (GitHub/GitLab) and creates a PR/MR with a detailed body
-10. **Moves to the next story** — syncs status, exits the worktree, picks up the next story
+9. **Pushes and creates a PR** (configurable) — auto-detects your platform (GitHub/GitLab) and creates a PR/MR with a detailed body. With `create_pr: false`, merges directly to main instead.
+10. **Moves to the next story** — syncs status, exits the worktree, commits artifacts to main, picks up the next story
 11. **Runs retrospective** — when all stories in an epic are done, runs `bmad-retrospective` and lists all PR URLs for merge
 
 ### What makes it autonomous
@@ -51,33 +51,34 @@ Everything else — it decides, documents the decision in one sentence, and move
 
 ### The git workflow in detail
 
+Controlled by `git.push.create_pr` in `_bmad-addons/modules/git/config.yaml`:
+
+**PR flow** (`create_pr: true`, default) — stories are pushed and PRs are created. No auto-merge. Code reaches `main` only after PR approval.
+
 ```
-                    Your main branch stays clean
-                              |
-     ┌────────────────────────┼────────────────────────┐
-     |                        |                        |
-  story/1-1              story/1-2              story/1-3
-  ┌──────────┐          ┌──────────┐          ┌──────────┐
-  │ worktree │          │ worktree │          │ worktree │
-  │          │          │          │          │          │
-  │ code     │          │ code     │          │ code     │
-  │ tests    │          │ tests    │          │ tests    │
-  │ lint     │          │ lint     │          │ lint     │
-  │ commit   │          │ commit   │          │ commit   │
-  │ review   │          │ review   │          │ review   │
-  │ patches  │          │ patches  │          │ patches  │
-  │ push     │          │ push     │          │ push     │
-  │ PR #42   │          │ PR #43   │          │ PR #44   │
-  └──────────┘          └──────────┘          └──────────┘
-     |                        |                        |
-     └────────────────────────┼────────────────────────┘
-                              |
-                     Epic 1 complete
-                     → retrospective
-                     → "Ready to merge: PR #42, #43, #44"
+main ─────────────────────────────────────────────────────────
+  │                                          (artifacts only)
+  ├── story/1-1 ──→ push + PR #42 (→ main)
+  │        │
+  │        └── story/1-2 ──→ push + PR #43 (→ story/1-1)
+  │                 │
+  │                 └── story/1-3 ──→ push + PR #44 (→ story/1-2)
+  │
+  Epic 1 complete → retrospective
+  → "Ready to merge: PR #42, #43, #44"
 ```
 
-Each story is fully isolated. No half-finished code on `main`. Every story has its own branch, its own commits, its own PR. The autopilot tracks git metadata in its own `git-status.yaml` (commit SHA, push status, PR URL, lint results) — it never modifies BMAD's `sprint-status.yaml`.
+When previous stories have pending PRs, the autopilot creates **stacked PRs** — each story branches from the previous story's branch and targets it. When a PR is merged on the platform, subsequent PRs automatically retarget.
+
+**Direct merge flow** (`create_pr: false`) — stories are merged to `main` immediately after push:
+
+```
+main ── story/1-1 ──→ merge ── story/1-2 ──→ merge ── story/1-3 ──→ merge
+```
+
+Each story is fully isolated in its own worktree. No half-finished code on `main`. The autopilot tracks git metadata in its own `git-status.yaml` (commit SHA, push status, PR URL, lint results) — it never modifies BMAD's `sprint-status.yaml`. Implementation artifacts (sprint status, story files, planning docs) are always committed to `main` after each story, regardless of merge strategy.
+
+See [`modules/git/branching-and-pr-strategy.md`](_bmad-addons/modules/git/branching-and-pr-strategy.md) for the full branching and PR decision matrix.
 
 ---
 
@@ -232,11 +233,16 @@ bash _bmad-addons/install.sh --tools claude-code,cursor,gemini-cli
 | Bitbucket | `bb` | `bitbucket.org` | Yes (`BITBUCKET_TOKEN`) |
 | Gitea | `tea` | Explicit config | Yes (`GITEA_TOKEN` + `base_url`) |
 
-No CLI installed? The addon falls back to **git_only mode**:
-- Branches are created and pushed normally
-- PR/MR creation is skipped — manual instructions are printed with the branch and base
-- All other features (worktrees, commits, linting, code review) work as usual
-- Install a platform CLI to enable automatic PR creation
+No CLI installed? The addon falls back to **git_only mode** (direct merge, no PRs).
+
+To explicitly choose between PR and direct merge regardless of platform:
+```yaml
+# _bmad-addons/modules/git/config.yaml
+git:
+  push:
+    create_pr: true   # PR flow (default) — push + PR, no auto-merge
+    create_pr: false  # Direct merge — merge to main after each story
+```
 
 ## Supported Languages (Linting)
 
