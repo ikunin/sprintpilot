@@ -144,29 +144,53 @@ BMAD's own skills are never affected.
 
 ## Platform CLI Setup
 
-### GitHub
+### GitHub (`gh`)
 
 ```bash
+# macOS
 brew install gh
+
+# Windows
+winget install GitHub.cli
+# or: scoop install gh
+# or: choco install gh
+
+# Linux (Debian/Ubuntu)
+sudo apt install gh
+# or: sudo dnf install gh (Fedora)
+
+# Then authenticate
 gh auth login
 ```
 
-### GitLab
+### GitLab (`glab`)
 
 ```bash
+# macOS
 brew install glab
+
+# Windows
+winget install GLab.GLab
+# or: scoop install glab
+
+# Linux (Debian/Ubuntu)
+sudo apt install glab
+# or see https://gitlab.com/gitlab-org/cli#installation
+
+# Then authenticate
 glab auth login
 ```
 
 ### Bitbucket
 
 ```bash
-# Option 1: Bitbucket CLI
+# Option 1: Bitbucket CLI (all platforms, requires Python)
 pip install bitbucket-cli
 bb auth login
 
-# Option 2: API token (no CLI needed)
+# Option 2: API token (no CLI needed, any platform)
 export BITBUCKET_TOKEN="your_app_password_or_token"
+# Windows (PowerShell): $env:BITBUCKET_TOKEN="your_token"
 ```
 
 For Bitbucket Cloud (bitbucket.org), the remote URL is auto-detected. For Bitbucket Server (self-hosted), set `provider: bitbucket` in config.
@@ -175,11 +199,16 @@ For Bitbucket Cloud (bitbucket.org), the remote URL is auto-detected. For Bitbuc
 
 ```bash
 # Option 1: tea CLI (https://gitea.com/gitea/tea)
-brew install tea   # or: go install code.gitea.io/tea@latest
+# macOS
+brew install tea
+
+# All platforms (requires Go)
+go install code.gitea.io/tea@latest
 tea login add
 
-# Option 2: API token (no CLI needed)
+# Option 2: API token (no CLI needed, any platform)
 export GITEA_TOKEN="your_token"
+# Windows (PowerShell): $env:GITEA_TOKEN="your_token"
 # Also set in _bmad-addons/modules/git/config.yaml:
 #   platform:
 #     provider: gitea
@@ -191,6 +220,14 @@ Gitea is always self-hosted — auto-detection requires explicit `provider: gite
 ### No CLI
 
 The add-on works without any platform CLI (`git_only` mode). Git branches are created and pushed normally, but PR/MR creation is skipped. Manual instructions are printed showing the branch and base for you to create the PR in the web UI.
+
+To skip PRs even when a CLI is installed, set `create_pr: false` in config:
+```yaml
+# _bmad-addons/modules/git/config.yaml
+git:
+  push:
+    create_pr: false  # merge directly to main, no PRs
+```
 
 ## Troubleshooting
 
