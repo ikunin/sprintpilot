@@ -78,13 +78,9 @@ git:
   # Push & PR
   push:
     auto: true
-    create_pr: true
+    create_pr: true # true = create PR and wait for approval (no auto-merge)
+                     # false = merge directly to base branch after push
     pr_body: heredoc # Use HEREDOC for gh/glab
-
-  # Merge
-  merge:
-    timing: epic-retrospective
-    require_user_confirm: true
 
   # Worktree settings (location managed by EnterWorktree at .claude/worktrees/)
   worktree:

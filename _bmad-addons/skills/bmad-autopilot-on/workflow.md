@@ -105,6 +105,7 @@ Resolve:
   <action>Read `{project-root}/_bmad-addons/modules/git/config.yaml`</action>
   <action>Set `{{git_enabled}}` from `git.enabled` field</action>
   <action>Set `{{base_branch}}` from `git.base_branch` field. If missing or empty, default to `main` and warn: "base_branch not configured, defaulting to main"</action>
+  <action>Set `{{create_pr}}` from `git.push.create_pr` field. If missing, default to `true`.</action>
 </check>
 
 <check if="manifest does NOT exist">
@@ -579,7 +580,8 @@ Apply ALL patch and bugfix findings automatically. For each:
   If push succeeds → set `{{push_status}}` = "pushed".
   </action>
 
-  <action>**Create PR/MR** (if push succeeded and platform != git_only):
+  <action>**Create PR/MR** (if push succeeded AND `{{create_pr}}` is true AND platform != git_only):
+  If `{{create_pr}}` is false → set `{{pr_url}}` = "SKIPPED", skip PR creation entirely.
   1. Read PR body template: `{{project_root}}/_bmad-addons/modules/git/templates/pr-body.md`
      If template file doesn't exist, use a simple default: "## Story: {{current_story}}\n\n{{story-title}}"
   2. Fill template placeholders using the `commit_placeholder_resolution` chain from config:
