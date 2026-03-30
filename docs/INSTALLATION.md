@@ -2,12 +2,34 @@
 
 ## Prerequisites
 
-1. **BMAD Method v6.2.0+** installed in your project
-2. **Claude Code** (CLI, desktop app, or IDE extension)
-3. **Git** initialized with at least one commit
-4. **Platform CLI** (optional): `gh` for GitHub, `glab` for GitLab, `bb` for Bitbucket, or `tea` for Gitea
+1. **Node.js 18+** and **npm** — required for BMAD installer and most projects
+2. **Git** — [git-scm.com/downloads](https://git-scm.com/downloads)
+3. **A supported AI code agent** — Claude Code, Cursor, Windsurf, etc. (see [Supported Tools](#supported-tools))
+4. **Platform CLI** (optional) — `gh` for GitHub, `glab` for GitLab, etc. (see [Platform CLI Setup](#platform-cli-setup))
 
-## Install BMAD (if needed)
+### Windows
+
+Use one of:
+- **Git Bash** (included with [Git for Windows](https://git-scm.com/download/win)) — recommended, all commands below work as-is
+- **WSL 2** (Windows Subsystem for Linux) — full Linux environment
+- **PowerShell** — works for git and npm commands; bash scripts require Git Bash or WSL
+
+## Step 1: Create or Open Your Project
+
+Start with an existing project or create a new one:
+
+```bash
+# New project
+mkdir my-project && cd my-project
+git init
+git commit --allow-empty -m "initial commit"
+
+# Or clone an existing repo
+git clone https://github.com/your-org/your-project.git
+cd your-project
+```
+
+## Step 2: Install BMAD
 
 ```bash
 npx bmad-method install --modules bmm --tools claude-code --yes
@@ -19,9 +41,35 @@ For test architecture support, add the TEA module:
 npx bmad-method install --modules bmm,tea --tools claude-code --yes
 ```
 
-## Install the Add-On
+## Step 3: Add the Autopilot Add-On
 
-### Interactive Install (recommended)
+Clone the add-on into your project as the `_bmad-addons` directory:
+
+```bash
+# From your project root
+git clone https://github.com/ikunin/bmad-autopilot-addon.git _bmad-addons
+```
+
+Or add it as a git submodule (keeps it updatable):
+
+```bash
+git submodule add https://github.com/ikunin/bmad-autopilot-addon.git _bmad-addons
+```
+
+On Windows (Git Bash or WSL):
+```bash
+# Same commands work in Git Bash and WSL
+git clone https://github.com/ikunin/bmad-autopilot-addon.git _bmad-addons
+```
+
+On Windows (PowerShell):
+```powershell
+git clone https://github.com/ikunin/bmad-autopilot-addon.git _bmad-addons
+```
+
+## Step 4: Run the Installer
+
+### Interactive (recommended)
 
 ```bash
 bash _bmad-addons/install.sh
@@ -82,7 +130,7 @@ bash _bmad-addons/install.sh --tools claude-code --force
 
 All tools use the same universal SKILL.md format.
 
-## Verify Installation
+## Step 5: Verify and Start
 
 After install, check that skills are available in your tool's directory:
 
@@ -112,6 +160,12 @@ The installer also creates **system prompt files** that enforce BMAD workflows:
 | Others | Tool-specific rules file |
 
 These files tell the AI agent about BMAD's mandatory workflow, preventing it from skipping steps or writing code without a story.
+
+Once verified, start the autopilot in your AI tool:
+
+```
+/bmad-autopilot-on
+```
 
 ## After a BMAD Update
 
