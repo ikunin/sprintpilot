@@ -313,7 +313,7 @@ Resolve:
   - Find the story file in `{implementation_artifacts}` matching `{{current_story}}-*.md` or `story-{{current_story}}*.md`
   - If found: extract the full kebab-case name from the filename and update `{{current_story}}`
   - If not found: read the epics file, find the matching story title, convert to kebab-case, and update `{{current_story}}`
-  - Update the sprint-status.yaml key to use the full name (rename the key in development_status)
+  - Update `{{current_story}}` variable to use the full name (do NOT modify sprint-status.yaml — it is BMAD-owned)
   A short key like `1-1` produces branches named `story/1-1` and PRs with no description — the title is essential for human-readable git history.</critical>
 
   <action>Create per-story step tasks if not already created</action>
@@ -464,7 +464,7 @@ NEVER wait for user at a menu.
 </check>
 
 <check if="{{completed_skill}} was bmad-retrospective">
-  <action>Update `{status_file}`: epic → `done`, retrospective → `done`</action>
+  <action>Log: "Epic retrospective complete — BMAD skills will update sprint-status.yaml directly"</action>
 </check>
 
 <check if="{{completed_skill}} was bmad-sprint-planning AND {{git_enabled}}">
@@ -647,7 +647,7 @@ Apply ALL patch and bugfix findings automatically. For each:
   <action>Update `{git_status_file}` for `{{current_story}}`: set `status: done`</action>
 </check>
 <check if="NOT {{git_enabled}}">
-  <action>Update `{status_file}`: `{{current_story}}` → `done`</action>
+  <action>Log: "Story {{current_story}} complete — BMAD dev-story updates sprint-status.yaml directly"</action>
 </check>
 
 <action>Mark all remaining tasks for this story → `completed`</action>
@@ -658,8 +658,7 @@ Apply ALL patch and bugfix findings automatically. For each:
 <action>Check if ALL stories in this epic are `done`</action>
 <check if="epic complete">
   <action>Create task "[epic] retrospective" → `in_progress`</action>
-  <action>INVOKE `bmad-retrospective` using Skill tool</action>
-  <action>Update `{status_file}`: epic → `done`, retrospective → `done`</action>
+  <action>INVOKE `bmad-retrospective` using Skill tool (retrospective skill updates sprint-status.yaml itself)</action>
   <action>Mark retrospective task → `completed`</action>
   <action>Set `{{completed_skill}}` = `bmad-retrospective`</action>
 
