@@ -42,6 +42,9 @@ const MAX_SESSIONS = 8;
 const BUDGET_PER_SESSION = 20;
 const TIMEOUT_PER_SESSION = 900_000; // 15 min
 
+/** Model to use — override via BMAD_TEST_MODEL env var (e.g. "opus") */
+const MODEL = process.env.BMAD_TEST_MODEL ?? "sonnet";
+
 /** Remote URL for push testing — override via env to avoid using a personal repo */
 const REMOTE_URL = process.env.BMAD_TEST_REMOTE_URL ?? "git@github.com:ikunin/test-tictactoe.git";
 
@@ -181,7 +184,23 @@ describe("Greenfield: Tic Tac Toe via BMAD Autopilot", () => {
     console.log(`[Greenfield] Temp project: ${project.dir}`);
   });
 
-  afterAll(() => {
+  afterAll(async () => {
+    // Ensure autopilot lock is released even if sprint didn't complete
+    if (project && existsSync(join(project.dir, ".autopilot.lock"))) {
+      console.log("[Cleanup] Lock still exists — running /bmad-autopilot-off to release");
+      try {
+        await runClaude("/bmad-autopilot-off", {
+          cwd: project.dir,
+          maxBudget: 2,
+          model: MODEL,
+          addDirs: [ADDON_SOURCE],
+          timeout: 60_000,
+        });
+      } catch {
+        // Best-effort cleanup — remove lock manually if autopilot-off fails
+        try { execSync(`rm -f "${join(project.dir, ".autopilot.lock")}"`, { timeout: 5_000 }); } catch { /* */ }
+      }
+    }
     console.log(costTracker.report());
     project?.cleanup();
   });
@@ -198,6 +217,7 @@ describe("Greenfield: Tic Tac Toe via BMAD Autopilot", () => {
   it("autopilot builds complete tic-tac-toe game", async () => {
     let session = 0;
     let totalCost = 0;
+    let gameComplete = false;
 
     while (session < MAX_SESSIONS) {
       session++;
@@ -207,8 +227,16 @@ describe("Greenfield: Tic Tac Toe via BMAD Autopilot", () => {
       const checkBranch = latestBranch ?? "main";
       gitCheckout(checkBranch, project.dir);
       if (isGameComplete(project.dir)) {
-        console.log(`[Session ${session}] Game complete on ${checkBranch} — done`);
-        break;
+        if (!gameComplete) {
+          gameComplete = true;
+          console.log(`[Session ${session}] Game code complete on ${checkBranch}`);
+        }
+        // Check if sprint is also complete (lock released = autopilot finished cleanly)
+        if (!existsSync(join(project.dir, ".autopilot.lock"))) {
+          console.log(`[Session ${session}] Sprint complete (lock released) — done`);
+          break;
+        }
+        console.log(`[Session ${session}] Game complete but lock still held — running another session to finish sprint`);
       }
 
       const systemPrompt = [
@@ -227,13 +255,16 @@ describe("Greenfield: Tic Tac Toe via BMAD Autopilot", () => {
       const result = await runClaude("/bmad-autopilot-on", {
         cwd: project.dir,
         maxBudget: BUDGET_PER_SESSION,
-        model: "sonnet",
+        model: MODEL,
         addDirs: [ADDON_SOURCE],
         timeout: TIMEOUT_PER_SESSION,
         appendSystemPrompt: systemPrompt,
       });
 
       const cost = result.json?.total_cost_usd ?? 0;
+      if (result.timedOut && cost === 0) {
+        console.warn(`[Session ${session}] Cost=$0 — likely SIGTERM killed claude before JSON output`);
+      }
       totalCost += cost;
       costTracker.record("greenfield", `session-${session}`, cost, result.json?.duration_ms ?? 0);
 
@@ -359,6 +390,18 @@ describe("Greenfield: Tic Tac Toe via BMAD Autopilot", () => {
     if (worktreePath) searchDirs.push(worktreePath);
     console.log(`[Tasks] Searching for story files in: ${searchDirs.join(", ")}`);
 
+    // Determine which stories were actually worked on (have remote branches with commits)
+    const remoteBranches = execSync(
+      `git -C "${dir}" branch -r --list 'origin/story/*'`,
+      { encoding: "utf-8", timeout: 10_000 }
+    ).trim();
+    const workedStoryKeys = new Set(
+      remoteBranches.split("\n")
+        .map((b) => b.trim().replace(/^origin\/story\//, ""))
+        .filter(Boolean)
+    );
+    console.log(`[Tasks] Worked story branches: ${[...workedStoryKeys].join(", ")}`);
+
     // Find story files (BMAD puts them in implementation-artifacts or stories per config)
     const storyFiles: string[] = [];
     for (const searchDir of searchDirs) {
@@ -377,7 +420,7 @@ describe("Greenfield: Tic Tac Toe via BMAD Autopilot", () => {
 
     for (const sf of uniqueStoryFiles) {
       const content = readFileSync(sf, "utf-8");
-      const name = sf.split("/").pop();
+      const name = sf.split("/").pop()!;
       const checked = (content.match(/\[x\]/gi) || []).length;
       const unchecked = (content.match(/\[ \]/g) || []).length;
       const hasDevRecord = content.includes("Dev Agent Record");
@@ -388,9 +431,21 @@ describe("Greenfield: Tic Tac Toe via BMAD Autopilot", () => {
       const totalCheckboxes = checked + unchecked;
       expect(totalCheckboxes, `${name} must have task checkboxes (found 0) — create-story may have skipped Tasks/Subtasks section`).toBeGreaterThan(0);
 
-      // All tasks should be checked after dev-story completes
-      expect(unchecked, `${name} has ${unchecked} unchecked tasks — dev-story should mark all [x]`).toBe(0);
-      expect(checked, `${name} should have checked tasks`).toBeGreaterThan(0);
+      // Check if this story was actually worked on (has a matching remote story branch)
+      // Extract story key from filename: "story-1-1-core-game-logic.md" → "1-1-core-game-logic"
+      const storyKey = name.replace(/^story-/, "").replace(/\.md$/, "");
+      const wasWorkedOn = [...workedStoryKeys].some((branch) =>
+        branch === storyKey || branch.startsWith(storyKey + "-") || storyKey.startsWith(branch + "-")
+      );
+
+      if (wasWorkedOn) {
+        // Stories with branches should have all tasks checked
+        expect(unchecked, `${name} has ${unchecked} unchecked tasks — dev-story should mark all [x]`).toBe(0);
+        expect(checked, `${name} should have checked tasks`).toBeGreaterThan(0);
+      } else {
+        // Stories that were only created (not implemented) may have unchecked tasks — that's expected
+        console.log(`[Tasks] ${name}: not yet implemented (no matching story branch) — skipping checkbox check`);
+      }
     }
   }, 30_000);
 

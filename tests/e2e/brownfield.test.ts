@@ -23,6 +23,9 @@ import { costTracker } from "./harness/cost-tracker.js";
 const FIXTURES_DIR = join(import.meta.dirname, "fixtures/brownfield");
 const ADDON_SOURCE = join(import.meta.dirname, "../../_bmad-addons");
 
+/** Model to use — override via BMAD_TEST_MODEL env var (e.g. "opus") */
+const MODEL = process.env.BMAD_TEST_MODEL ?? "sonnet";
+
 let projectDir: string;
 let remoteDir: string | undefined;
 
@@ -151,7 +154,7 @@ describe("Brownfield: json-server analysis + auth feature", () => {
     const result = await runClaude("/bmad-ma-codebase-map", {
       cwd: projectDir,
       maxBudget: 10,
-      model: "sonnet",
+      model: MODEL,
       addDirs: [ADDON_SOURCE],
       timeout: 600_000,
       appendSystemPrompt:
@@ -200,7 +203,7 @@ describe("Brownfield: json-server analysis + auth feature", () => {
     const result = await runClaude("/bmad-ma-assess", {
       cwd: projectDir,
       maxBudget: 8,
-      model: "sonnet",
+      model: MODEL,
       addDirs: [ADDON_SOURCE],
       timeout: 600_000,
       appendSystemPrompt:
@@ -234,7 +237,7 @@ describe("Brownfield: json-server analysis + auth feature", () => {
     const result = await runClaude("/bmad-ma-reverse-architect", {
       cwd: projectDir,
       maxBudget: 8,
-      model: "sonnet",
+      model: MODEL,
       addDirs: [ADDON_SOURCE],
       timeout: 600_000,
       appendSystemPrompt:
@@ -255,10 +258,21 @@ describe("Brownfield: json-server analysis + auth feature", () => {
     );
     expect(result.timedOut, "reverse-architect must not time out").toBe(false);
 
+    // Diagnostic: find all architecture-related files under _bmad-output
+    const bmadOutput = join(projectDir, "_bmad-output");
+    try {
+      const archFiles = execSync(
+        `find "${bmadOutput}" -iname "*architect*" -type f 2>/dev/null`,
+        { encoding: "utf-8", timeout: 5_000 }
+      ).trim();
+      console.log(`[B3] Architecture files found:\n${archFiles || "(none)"}`);
+    } catch { console.log("[B3] Architecture file search failed"); }
+
     // Look for architecture doc in likely locations
     const possiblePaths = [
       join(projectDir, "_bmad-output/planning-artifacts/architecture.md"),
       join(projectDir, "_bmad-output/codebase-analysis/architecture.md"),
+      join(projectDir, "_bmad-output/architecture.md"),
     ];
 
     const found = possiblePaths.find((p) => existsSync(p));
@@ -273,7 +287,7 @@ describe("Brownfield: json-server analysis + auth feature", () => {
       {
         cwd: projectDir,
         maxBudget: 10,
-        model: "sonnet",
+        model: MODEL,
         addDirs: [ADDON_SOURCE],
         timeout: 900_000, // 15 min — 12-step migration is the heaviest skill
         appendSystemPrompt:

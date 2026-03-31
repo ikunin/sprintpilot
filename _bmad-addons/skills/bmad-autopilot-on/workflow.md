@@ -41,14 +41,8 @@ Many BMAD skills present interactive menus or ask for confirmation. In autopilot
 - Only skip a finding if it directly contradicts a story Acceptance Criterion (document why)
 
 ### Task list discipline
-- Before each skill: create a task for it and mark `in_progress`
-- After each skill: mark its task `completed` immediately
-- For stories: create one task per BMAD step before starting that story
-- Never batch task updates
-
-### Test result transparency
-- Always state results as `N/N passed` or `N passed, M failed`
-- Never write "tests pass" without the count
+- Before starting a story, create a task for **each** BMAD step. Track each skill as a task (`in_progress` → `completed`). Never batch updates.
+- Always state test results as `N/N passed` or `N passed, M failed` — never say "tests pass" without the count.
 
 ### True blockers — the ONLY reasons to pause and ask user
 1. Required skill needs **original creative user input** not derivable from any existing artifact
@@ -63,23 +57,16 @@ For everything else: decide, document briefly, continue.
 
 ## SKILL AUTOMATABLE REFERENCE
 
-| Skill | Automatable? | Notes |
-|-------|-------------|-------|
-| `bmad-sprint-planning` | Full | No user input needed |
-| `bmad-check-implementation-readiness` | Full | Auto-continue past menus |
-| `bmad-create-epics-and-stories` | Full | Auto-continue; derive decisions from PRD+architecture |
-| `bmad-create-story` | Full | Auto-continue past menus |
-| `bmad-dev-story` | Full | Auto-continue; make implementation choices autonomously |
-| `bmad-code-review` | Full | Apply all patch findings automatically |
-| `bmad-retrospective` | Full | Auto-continue past menus |
-| `bmad-sprint-status` | Full | Read-only |
-| `bmad-validate-prd` | Full | Auto-continue |
-| `bmad-create-architecture` | If PRD exists | Derive decisions from PRD; auto-continue |
-| `bmad-create-ux-design` | If PRD exists | Derive decisions from PRD; auto-continue |
-| `bmad-create-prd` | BLOCKER if no PRD | Product vision must come from user |
-| `bmad-product-brief` | BLOCKER if no brief | Requires user's input |
-| `bmad-party-mode` | Skip | Inherently interactive |
-| `bmad-brainstorming` | Skip | Inherently interactive |
+All BMAD skills are fully automatable (auto-continue past menus, derive decisions from existing artifacts) except:
+
+| Skill | Notes |
+|-------|-------|
+| `bmad-create-prd` | BLOCKER if no PRD — product vision must come from user |
+| `bmad-product-brief` | BLOCKER if no brief — requires user input |
+| `bmad-create-architecture` | Automatable if PRD exists; BLOCKER if no PRD |
+| `bmad-create-ux-design` | Automatable if PRD exists; BLOCKER if no PRD |
+| `bmad-party-mode` | Skip — inherently interactive |
+| `bmad-brainstorming` | Skip — inherently interactive |
 
 ---
 
@@ -90,7 +77,7 @@ Load config: `{project-root}/_bmad/bmm/config.yaml`
 Resolve:
 - `project_name`, `user_name` (user)
 - `planning_artifacts`, `implementation_artifacts`
-- `status_file` = `{implementation_artifacts}/sprint-status.yaml` (BMAD-owned, READ ONLY)
+- `status_file` = `{implementation_artifacts}/sprint-status.yaml` (BMAD-owned — written by BMAD skills, not by autopilot)
 - `git_status_file` = `{implementation_artifacts}/git-status.yaml` (addon-owned, write git fields here)
 - `state_file` = `{implementation_artifacts}/autopilot-state.yaml`
 - `session_story_limit` = 3
@@ -403,15 +390,7 @@ pr_base: {{pr_base}}
 ```
 </action>
 
-<critical>
-AUTOPILOT MENU HANDLING — apply when executing any skill:
-- "Continue (C)" → select C immediately
-- "Create Mode" → select it
-- Numbered options → pick best fit; state choice + one-sentence rationale; continue
-- Yes/no → yes
-- Open creative question → answer from project docs; TRUE BLOCKER only if unanswerable from any artifact
-NEVER wait for user at a menu.
-</critical>
+<!-- Autopilot menu handling rules apply — see AUTOPILOT RULES section above -->
 
 <action>INVOKE `{{next_skill}}` skill using the Skill tool</action>
 <action>Mark task "{{next_skill}}" as `completed`</action>
@@ -446,18 +425,6 @@ NEVER wait for user at a menu.
     Warnings (secrets, large files) printed to stderr — review but don't halt unless user says to.
     </action>
 
-    <!-- Safety net: enforce task checkboxes if dev-story forgot to mark them -->
-    <action>**Enforce task checkboxes** — read the story file for `{{current_story}}` and count unchecked `[ ]` vs checked `[x]` tasks in the Tasks/Subtasks section.
-    If unchecked tasks remain BUT all tests passed during dev-story:
-    - Replace every `- [ ]` with `- [x]` in the Tasks/Subtasks section of the story file
-    - Commit the change: `git add <story-file> && git commit -m "chore: mark completed task checkboxes for {{current_story}}"`
-    - Log: "Enforced task checkboxes: marked N tasks as [x] (dev agent skipped bookkeeping)"
-    If tests did NOT all pass and unchecked tasks remain:
-    - Do NOT mark checkboxes — tasks may genuinely be incomplete
-    - Log warning: "Unchecked tasks remain and tests are failing — skipping checkbox enforcement"
-    If no unchecked tasks exist:
-    - No action needed — dev agent marked them correctly
-    </action>
   </check>
 
   <action>Set `{{next_skill}}` = `bmad-code-review` (mandatory after dev-story)</action>
@@ -476,13 +443,23 @@ NEVER wait for user at a menu.
   <action>Log: "Epic retrospective complete — BMAD skills will update sprint-status.yaml directly"</action>
 </check>
 
+<check if="{{completed_skill}} was bmad-create-epics-and-stories">
+  <action>**Validate BDD acceptance criteria** — find the epics file in `{planning_artifacts}` (glob for `*epic*.md`).
+  For each story section, check that acceptance criteria contain **Given**, **When**, and **Then** keywords.
+  If any story lacks BDD format:
+  - Rewrite only the acceptance criteria lines in Given/When/Then format, preserving all other content
+  - After rewriting, re-read the file and verify: heading structure intact, all stories still present, Given/When/Then present in every story
+  - Log: "Fixed N stories with non-BDD acceptance criteria"
+  </action>
+</check>
+
 <check if="{{completed_skill}} was bmad-sprint-planning AND {{git_enabled}}">
   <action>Run `git fetch origin`</action>
   <action>Initialize `{git_status_file}` if it doesn't exist (with git_integration block)</action>
 </check>
 
 <check if="{{completed_skill}} was bmad-create-story">
-  <critical>**Validate task checkboxes exist** — read the story file and verify it contains a "## Tasks / Subtasks" section with at least one markdown checkbox (`- [ ]`). The dev-story workflow navigates by finding unchecked `[ ]` items and marks them `[x]` on completion. If the story has NO checkboxes, re-run create-story or manually add task checkboxes derived from the acceptance criteria before proceeding.</critical>
+  <action>Verify story file has `- [ ]` checkboxes in Tasks/Subtasks section. If missing, re-run create-story.</action>
 </check>
 
 <check if="{{completed_skill}} was bmad-create-story AND {{git_enabled}}">
@@ -624,7 +601,7 @@ Apply ALL patch and bugfix findings automatically. For each:
 
   <action>**Write git status** to addon's own file (NEVER modify sprint-status.yaml):
   `bash {{project_root}}/_bmad-addons/scripts/sync-status.sh --story "{{current_story}}" --git-status-file "{git_status_file}" --branch "{{branch_prefix}}{{branch_name}}" --commit "{{story_commit}}" --patch-commits "{{patch_commits_csv}}" --push-status "{{push_status}}" --pr-url "{{pr_url}}" --lint-result "{{lint_result}}" --worktree "{{project_root}}/.claude/worktrees/{{current_story}}" --platform "{{platform}}" --base-branch "{{base_branch}}"`
-  This writes to `git-status.yaml` (addon-owned). Sprint-status.yaml is BMAD-owned and read-only.
+  This writes to `git-status.yaml` (addon-owned). Sprint-status.yaml is BMAD-owned — updated by BMAD skills only.
   </action>
 
   <check if="{{create_pr}} is false OR {{platform}} is git_only OR {{pr_url}} is null or SKIPPED">
