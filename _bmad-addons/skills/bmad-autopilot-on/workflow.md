@@ -562,6 +562,11 @@ Instruct: "Re-verify code review for story {{current_story}} — all patch findi
 
 <step n="7" goal="Mark story done, git push/PR, update records, check epic completion">
 
+<action>**Mark all task checkboxes complete** in the story file:
+  - Find every `- [ ]` in the Tasks / Subtasks section and replace with `- [x]`
+  - Verify zero `- [ ]` remain in the story file
+</action>
+
 <action>Fill story file Dev Agent Record:
   - Files changed
   - Autonomous decisions made
@@ -618,6 +623,14 @@ Instruct: "Re-verify code review for story {{current_story}} — all patch findi
     - Log warning: "Could not auto-merge {{branch_prefix}}{{branch_name}} to {{base_branch}} — manual merge required"
     - Continue without halting (the story branch is pushed)
     </action>
+    <check if="{{cleanup_on_merge}} is true">
+      <action>**Cleanup worktree** for merged story — branch was merged locally, worktree is no longer needed:
+      ```
+      git worktree remove .claude/worktrees/{{current_story}} --force 2>/dev/null || true
+      git worktree prune
+      ```
+      </action>
+    </check>
   </check>
   <check if="{{pr_url}} is a valid URL (not null, not SKIPPED)">
     <critical>**DO NOT merge** — a PR was created at {{pr_url}}. Merging requires PR approval. The branch will be merged through the PR workflow on the platform.</critical>
@@ -636,9 +649,9 @@ Instruct: "Re-verify code review for story {{current_story}} — all patch findi
   This writes to `git-status.yaml` (addon-owned). Sprint-status.yaml is BMAD-owned — updated by BMAD skills only.
   </action>
 
-  <action>**Stage and commit artifacts**:
+  <action>**Stage and commit artifacts** — explicitly include git-status.yaml:
   ```
-  git add _bmad-output/implementation-artifacts/ _bmad-output/stories/ _bmad-output/planning-artifacts/ 2>/dev/null || true
+  git add _bmad-output/implementation-artifacts/sprint-status.yaml _bmad-output/implementation-artifacts/git-status.yaml _bmad-output/implementation-artifacts/autopilot-state.yaml _bmad-output/stories/ _bmad-output/planning-artifacts/ 2>/dev/null || true
   git diff --cached --quiet || git commit -m "docs: story {{current_story}} done — {{test_count}} tests{{#if pr_url}}, PR: {{pr_url}}{{/if}}"
   git push origin {{base_branch}} 2>/dev/null || true
   ```
@@ -646,10 +659,8 @@ Instruct: "Re-verify code review for story {{current_story}} — all patch findi
   </action>
 </check>
 
-<!-- Track story completion — write to addon-owned git-status.yaml (sprint-status.yaml is BMAD-owned, updated by dev-story itself) -->
-<check if="{{git_enabled}}">
-  <action>Update `{git_status_file}` for `{{current_story}}`: set `status: done`</action>
-</check>
+<!-- Story git status was already written by sync-status.sh above (when git_enabled AND in_worktree).
+     sprint-status.yaml is BMAD-owned — updated by bmad-dev-story / bmad-code-review directly. -->
 <check if="NOT {{git_enabled}}">
   <action>Log: "Story {{current_story}} complete — BMAD dev-story updates sprint-status.yaml directly"</action>
 </check>
