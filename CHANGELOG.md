@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.0.10] - 2026-04-03
+
+### Added
+- Automated npm publishing via GitHub Actions trusted publishers (OIDC, no tokens needed)
+- Provenance attestation on published packages
+- Shields.io badges in README (npm version, downloads, license, BMAD compat, Node.js, tools, stars)
+- Add-on skills table and configuration section in README
+- `/ship` and `/release` project skills for streamlined workflows
+
+### Changed
+- Removed BMAD standard TEA skills table from README (belongs in BMAD docs, not add-on)
+
+### Fixed
+- GitHub Actions publish workflow: Node 24 for npm 11.5.1+ OIDC support, removed `registry-url` that conflicted with trusted publishing
+
 ## [1.0.7] - 2026-04-03
 
 ### Fixed
