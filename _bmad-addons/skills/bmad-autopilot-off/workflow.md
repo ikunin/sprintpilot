@@ -14,6 +14,7 @@ Resolve:
 - `implementation_artifacts`
 - `status_file` = `{implementation_artifacts}/sprint-status.yaml` (BMAD-owned, read only)
 - `git_status_file` = `{implementation_artifacts}/git-status.yaml` (addon-owned git fields)
+- `decision_log_file` = `{implementation_artifacts}/decision-log.yaml`
 - `planning_artifacts`
 - `project_root` = absolute path of current working directory
 
@@ -78,38 +79,76 @@ Extract the recommended next skill and any important context.
   <action>Release lock: `bash {{project_root}}/_bmad-addons/scripts/lock.sh release`</action>
 </check>
 
-### Step 7 — Produce status report
+### Step 7 — Collect decision log
 
-Output to user:
+<action>Read `{decision_log_file}` if it exists</action>
+<action>Collect:
+  - All decisions with impact `medium` or `high`
+  - Count of `review-accept` entries (patches applied)
+  - Count of `review-triage` entries (findings dismissed)
+  - Per-story summary: patches applied and findings dismissed
+</action>
+
+### Step 8 — Produce status report
+
+Output to user (use exact format):
 
 ```
-BMAD Autopilot OFF
+╔═══════════════════════════════════════════════════════════════╗
+║               BMAD AUTOPILOT — STATUS REPORT                  ║
+╚═══════════════════════════════════════════════════════════════╝
 
-SPRINT STATUS REPORT
+SUMMARY
+  Stories completed : {{done_count}}/{{total_stories}}
+  Epics completed   : {{done_epics}}/{{total_epics}}
+{{#if git_enabled}}
+  Platform          : {{platform}}
+{{/if}}
 
-COMPLETED  ({{done_count}} stories)
-[list each done story: "E1-S1: Story title — done"]
+STORIES
+{{#each epic}}
+  Epic {{epic_number}}: {{epic_title}}
+  {{#each stories}}
+  {{#if done}}✓{{else}}{{#if in_progress}}▶{{else}}·{{/if}}{{/if}} {{story-key}}{{#if done}}{{#if pr_url}}  PR: {{pr_url}}{{/if}}{{/if}}{{#if in_progress}} ← current{{/if}}
+  {{/each}}
+{{/each}}
 
-CURRENT POSITION
-Story: [story-key and title]
-Sprint status: [status value]
+{{#if medium_high_decisions}}
+DECISIONS REQUIRING REVIEW (high/medium impact)
+{{#each medium_high_decisions}}
+  #{{id}}  [{{impact}}] {{story}} / {{phase}}
+      {{decision}}
+      → {{rationale}}
+{{/each}}
 
-REMAINING  ({{remaining_count}} stories)
-[list in order: story-key + title]
+  Full log: {decision_log_file}
+{{/if}}
+
+{{#if has_review_data}}
+REVIEW FINDINGS APPLIED
+  Patches applied    : {{total_patches}}
+  Findings dismissed : {{total_dismissed}}
+
+CODE REVIEW SUMMARY (per story)
+{{#each reviewed_stories}}
+  {{story-key}} : {{patches_applied}} patches applied, {{findings_dismissed}} dismissed
+{{/each}}
+{{/if}}
 
 {{#if git_enabled}}
 GIT STATUS
-Platform: {{platform}}
 {{#each stories_with_git_fields}}
   {{story-key}}: branch={{branch}} push={{push_status}} {{#if pr_url}}PR: {{pr_url}}{{/if}}
 {{/each}}
-Active worktrees: {{worktree_count}}
-Lock: released
+  Active worktrees: {{worktree_count}}
+  Lock: released
 {{/if}}
 
 NEXT REQUIRED STEP (from bmad-help)
-[skill name and brief description]
+  {{next_skill_name}} — {{next_skill_description}}
 
-TO RESUME AUTOPILOT:  /bmad-autopilot-on
-TO CONTINUE MANUALLY: /[next-skill-name]
+WHAT TO DO NEXT
+  1. Review decisions marked medium/high above (if any)
+  2. TO RESUME AUTOPILOT:  /bmad-autopilot-on
+  3. TO CONTINUE MANUALLY: /{{next-skill-name}}
 ```

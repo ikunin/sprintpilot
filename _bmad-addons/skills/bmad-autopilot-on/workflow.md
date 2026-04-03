@@ -55,6 +55,59 @@ For everything else: decide, document briefly, continue.
 
 ---
 
+## DECISION LOGGING
+
+Every non-trivial decision made during autopilot execution MUST be logged to `{decision_log_file}`. This creates an audit trail the user reviews at the end of each session.
+
+### When to log
+
+Log a decision whenever you:
+- Choose an architecture pattern, data structure, or design approach (`architecture`)
+- Select a test strategy or skip a test category (`test-strategy`)
+- Add, remove, or substitute a dependency (`dependency`)
+- Dismiss a code review finding (`review-triage`)
+- Accept and apply a code review finding (`review-accept`)
+- Recover from a HALT condition (`halt-recovery`)
+- Implement something not explicitly in the story spec (`scope`)
+- Apply a workaround for a tool limitation or false positive (`workaround`)
+
+Do NOT log routine actions (running tests, staging files, creating branches).
+
+### File format
+
+Initialize `{decision_log_file}` on first decision (if it does not exist):
+
+```yaml
+generated: {current_date}
+last_updated: {current_datetime}
+
+decisions: []
+```
+
+Append each decision as a new entry:
+
+```yaml
+  - id: {auto_increment}
+    timestamp: "{current_datetime_iso8601}"
+    story: "{current_story or sprint-level}"
+    phase: "{skill}:{sub_phase}"
+    category: {architecture|test-strategy|dependency|review-triage|review-accept|halt-recovery|scope|workaround}
+    decision: "{what was decided — one line}"
+    rationale: "{why — one line}"
+    impact: {low|medium|high}
+```
+
+**Phase format:** `dev-story:RED`, `dev-story:GREEN`, `code-review:triage`, `code-review:patch`, `autopilot:init`, `autopilot:routing`, etc.
+
+**Impact levels:**
+- `low` — easily reversible, cosmetic, or standard practice
+- `medium` — affects behavior but contained to one story/component
+- `high` — cross-cutting, hard to reverse, or deviates from spec
+
+Always update `last_updated` when appending.
+
+---
+
 ## SKILL AUTOMATABLE REFERENCE
 
 All BMAD skills are fully automatable (auto-continue past menus, derive decisions from existing artifacts) except:
@@ -80,6 +133,7 @@ Resolve:
 - `status_file` = `{implementation_artifacts}/sprint-status.yaml` (BMAD-owned — written by BMAD skills, not by autopilot)
 - `git_status_file` = `{implementation_artifacts}/git-status.yaml` (addon-owned, write git fields here)
 - `state_file` = `{implementation_artifacts}/autopilot-state.yaml`
+- `decision_log_file` = `{implementation_artifacts}/decision-log.yaml`
 - `session_story_limit` = 3
 - `project_root` = absolute path of current working directory (store for later use)
 
@@ -412,6 +466,7 @@ pr_base: {{pr_base}}
 
 <check if="{{completed_skill}} was bmad-dev-story">
   <action>Verify tests ran — if not, run them now: report `N/N passed`</action>
+  <action>**Log decisions** — review implementation choices made during dev-story and append entries to `{decision_log_file}` for any architecture, test-strategy, dependency, scope, or workaround decisions (see DECISION LOGGING section)</action>
 
   <!-- GIT: Lint, stage, and commit after dev-story -->
   <check if="{{git_enabled}} AND {{in_worktree}}">
@@ -534,11 +589,15 @@ Apply ALL patch and bugfix findings automatically. For each:
 1. Create sub-task "Patch: [title]" → `in_progress`
 2. Apply fix
 3. Run affected tests — report `N/N passed`
-4. If {{git_enabled}} AND {{in_worktree}}:
+4. **Log decision** — append `review-accept` entry to `{decision_log_file}` with finding title and rationale
+5. If {{git_enabled}} AND {{in_worktree}}:
    - Stage changed files explicitly: `git add -- "file1" "file2"`
    - Commit: `git commit -m "fix({{current_story}}): {{patch_title}}"`
    - Record commit SHA in `{{patch_commits}}` list
-5. Mark sub-task `completed`
+6. Mark sub-task `completed`
+
+For any finding that is DISMISSED (contradicts AC or is a false positive):
+- **Log decision** — append `review-triage` entry to `{decision_log_file}` with finding title, why it was dismissed, and impact level
 </critical>
 
 <action>Run full test suite after all patches — report `N/N passed`</action>
@@ -551,6 +610,7 @@ Apply ALL patch and bugfix findings automatically. For each:
     <action>STOP</action>
   </check>
   <action>Diagnose and fix — re-run — loop until green</action>
+  <action>**Log decision** — append `halt-recovery` entry to `{decision_log_file}` with root cause and resolution</action>
 </check>
 
 <action>Log: "All patches applied — {{N}}/{{N}} passing"</action>
@@ -657,9 +717,9 @@ Instruct: "Re-verify code review for story {{current_story}} — all patch findi
   This writes to `git-status.yaml` (addon-owned). Sprint-status.yaml is BMAD-owned — updated by BMAD skills only.
   </action>
 
-  <action>**Stage and commit artifacts** — explicitly include git-status.yaml:
+  <action>**Stage and commit artifacts** — explicitly include git-status.yaml and decision-log.yaml:
   ```
-  git add _bmad-output/implementation-artifacts/sprint-status.yaml _bmad-output/implementation-artifacts/git-status.yaml _bmad-output/implementation-artifacts/autopilot-state.yaml _bmad-output/stories/ _bmad-output/planning-artifacts/ 2>/dev/null || true
+  git add _bmad-output/implementation-artifacts/sprint-status.yaml _bmad-output/implementation-artifacts/git-status.yaml _bmad-output/implementation-artifacts/autopilot-state.yaml _bmad-output/implementation-artifacts/decision-log.yaml _bmad-output/stories/ _bmad-output/planning-artifacts/ 2>/dev/null || true
   git diff --cached --quiet || git commit -m "docs: story {{current_story}} done — {{test_count}} tests{{#if pr_url}}, PR: {{pr_url}}{{/if}}"
   git push origin {{base_branch}} 2>/dev/null || true
   ```
@@ -758,6 +818,8 @@ pr_base: {{pr_base}}
 
 <action>Update `{state_file}` with full current state</action>
 
+<action>Read `{decision_log_file}` — count medium/high decisions from this session's stories</action>
+
 <action>Report to user:
 ```
 Autopilot session checkpoint
@@ -769,6 +831,14 @@ Git status:
 {{#each completed_stories_this_session}}
   - {{story-key}}: {{push_status}} {{pr_url}}
 {{/each}}
+{{/if}}
+{{#if medium_high_decisions_count > 0}}
+
+Decisions requiring review: {{medium_high_decisions_count}} (medium/high impact)
+{{#each medium_high_decisions}}
+  #{{id}} [{{impact}}] {{story}} — {{decision}}
+{{/each}}
+Full log: {decision_log_file}
 {{/if}}
 
 To continue without losing any context, please start a new session and run:
@@ -822,7 +892,15 @@ If the skill is not available or fails, generate a minimal README.md:
   - All completed stories grouped by epic, with their story titles
   - Total story count, total epic count
   - Final test count
-  - If git_enabled: all PR/MR URLs
+  - If git_enabled: all PR/MR URLs, patch counts, dismissed findings per story
+</action>
+
+<action>Read `{decision_log_file}` and collect:
+  - All decisions with impact `medium` or `high`
+  - Count of `review-accept` entries (patches applied)
+  - Count of `review-triage` entries (findings dismissed)
+  - Total review rounds (count of code-review invocations)
+  - Per-story summary: patches applied and findings dismissed
 </action>
 
 <action>Find the app launch command by checking (in order):
@@ -850,32 +928,68 @@ If the skill is not available or fails, generate a minimal README.md:
 <action>Delete `{state_file}` — sprint complete</action>
 <action>Mark master task "BMAD Autopilot — Full Sprint Execution" → `completed`</action>
 
-<action>Report:
+<action>Report (use exact format):
 ```
-BMAD Autopilot — Sprint Complete
+╔═══════════════════════════════════════════════════════════════╗
+║                   BMAD AUTOPILOT — REPORT                     ║
+╚═══════════════════════════════════════════════════════════════╝
 
-Stories completed : {{total_stories}}
-Epics done        : {{total_epics}}
-Final test count  : {{N}}/{{N}} passed
+SUMMARY
+  Stories completed : {{done_count}}/{{total_stories}}
+  Epics completed   : {{done_epics}}/{{total_epics}}
+  Total tests       : {{N}}/{{N}} passed
 {{#if git_enabled}}
-Platform          : {{platform}}
+  Platform          : {{platform}}
 {{/if}}
 
-What was implemented
---------------------
-[For each epic, list stories as: - [story-id] Story title{{#if pr_url}} (PR: url){{/if}}]
+STORIES
+{{#each epic}}
+  Epic {{epic_number}}: {{epic_title}}
+  {{#each stories}}
+  ✓ {{story-key}}  — {{test_count}} tests{{#if pr_url}}  PR: {{pr_url}}{{/if}}
+  {{/each}}
+{{/each}}
+{{#if remaining_stories}}
+  Not started:
+  {{#each remaining_stories}}
+  · {{story-key}}
+  {{/each}}
+{{/if}}
 
+DECISIONS REQUIRING REVIEW (high/medium impact)
+{{#each medium_high_decisions}}
+  #{{id}}  [{{impact}}] {{story}} / {{phase}}
+      {{decision}}
+      → {{rationale}}
+{{/each}}
+{{#if no_medium_high_decisions}}
+  None — all decisions were low-impact.
+{{/if}}
+
+  Full log: {decision_log_file}
+
+REVIEW FINDINGS APPLIED
+  Patches applied    : {{total_patches}}
+  Findings dismissed : {{total_dismissed}}
+  Review rounds      : {{total_review_rounds}}
+
+CODE REVIEW SUMMARY (per story)
+{{#each completed_stories}}
+  {{story-key}} : {{patches_applied}} patches applied, {{findings_dismissed}} dismissed
+{{/each}}
+
+WHAT TO DO NEXT
+  1. Review decisions marked medium/high above
+{{#if has_pr_urls}}
+  2. Merge open PRs: {{pr_urls_list}}
+{{/if}}
 {{#if launch_cmd}}
-Run the app
------------
-  {{launch_cmd}}
+  {{next_number}}. Run the app: {{launch_cmd}}
 {{/if}}
-
-Suggested manual test checklist
--------------------------------
-[One bullet per story: what to do → what to see]
-
-All automated tests are green. The application is ready for your review.
+  {{next_number}}. Manual smoke test checklist:
+{{#each completed_stories}}
+     · [{{story-key}}] {{smoke_test_suggestion}}
+{{/each}}
 ```
 </action>
 
