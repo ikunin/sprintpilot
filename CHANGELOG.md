@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.0.11] - 2026-04-04
+
+### Fixed
+- npm website showing stale README (re-publish with updated metadata)
+
 ## [1.0.10] - 2026-04-03
 
 ### Added
