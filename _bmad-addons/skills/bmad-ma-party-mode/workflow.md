@@ -28,7 +28,7 @@ If not specified, recommend a relevant set based on the topic:
 
 <action>For each selected persona, read the agent definition from BMAD:
 - `{project-root}/_bmad/_config/agents/` — look for persona YAML files
-- Or use `{project-root}/.claude/skills/bmad-agent-{persona}/SKILL.md`
+- Or look in the installed skills directory for `bmad-agent-{persona}/SKILL.md`
 
 Extract the persona's:
 - Role description
