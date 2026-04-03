@@ -518,5 +518,5 @@ else
   echo "  /bmad-ma-research          Parallel web research"
   echo "  /bmad-ma-party-mode        Multi-persona agent discussions"
   echo ""
-  echo "Docs: https://github.com/ikunin/bmad-autopilot-addon"
+  echo "MIT License — Igor Kunin — https://github.com/ikunin/bmad-autopilot-addon"
 fi
