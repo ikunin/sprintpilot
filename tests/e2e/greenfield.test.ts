@@ -45,8 +45,8 @@ const TIMEOUT_PER_SESSION = 1_200_000; // 20 min
 /** Model to use — override via BMAD_TEST_MODEL env var (e.g. "opus") */
 const MODEL = process.env.BMAD_TEST_MODEL ?? "sonnet";
 
-/** Remote URL for push testing — override via env to avoid using a personal repo */
-const REMOTE_URL = process.env.BMAD_TEST_REMOTE_URL ?? "git@github.com:ikunin/test-tictactoe.git";
+/** Remote URL for push testing — must be set via BMAD_TEST_REMOTE_URL env var */
+const REMOTE_URL = process.env.BMAD_TEST_REMOTE_URL ?? "";
 
 let project: TempProject;
 
