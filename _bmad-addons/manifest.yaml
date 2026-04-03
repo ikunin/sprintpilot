@@ -1,6 +1,6 @@
 addon:
   name: bmad-ma-git
-  version: 2.0.0
+  version: 1.0.0
   description: Multi-agent execution + git workflow integration for BMAD
   bmad_compatibility: ">=6.2.0"
   modules:

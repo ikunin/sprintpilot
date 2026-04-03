@@ -1,52 +1,6 @@
 # Changelog
 
-## [2.0.3] - 2026-03-29
-
-### Changed
-- **GSD attribution** — credited [GSD map-codebase](https://github.com/gsd-build/get-shit-done) as inspiration for `bmad-ma-codebase-map` in SKILL.md, workflow.md, README
-- **Renamed output files** — distinct from GSD: `stack-analysis.md`, `architecture-analysis.md`, `quality-analysis.md`, `concerns-analysis.md`, `integrations-analysis.md`
-- **Enriched agent prompts** — all 5 codebase-map agents expanded from ~50 to ~120 lines each with:
-  - Specific bash/grep exploration commands
-  - Forbidden files list (security)
-  - Quality bar ("patterns matter more than lists", "be prescriptive")
-  - Downstream consumers table
-  - Richer output templates with evidence requirements
-- Updated all downstream skills (assess, reverse-architect, migrate) to use new file names
-
-## [2.0.2] - 2026-03-28
-
-### Added
-
-#### Bitbucket & Gitea Platform Support
-- `platform.yaml`: Bitbucket (`bb` CLI + REST API fallback with `BITBUCKET_TOKEN`)
-- `platform.yaml`: Gitea (`tea` CLI + REST API fallback with `GITEA_TOKEN` + `base_url`)
-- `detect-platform.sh`: auto-detects Bitbucket (remote URL) and Gitea (tea CLI)
-- `create-pr.sh`: full PR creation for both platforms with CLI and API fallback
-
-#### 8 New Languages for Linting
-- Java (checkstyle, pmd)
-- C (cppcheck, clang-tidy)
-- C++ (cppcheck, clang-tidy)
-- C# (dotnet format)
-- Swift (swiftlint)
-- PL/SQL (sqlfluff — Oracle, PostgreSQL, MySQL, T-SQL dialects)
-- Kotlin (ktlint, detekt)
-- PHP (phpstan, phpcs)
-
-#### Documentation
-- `docs/EXTENDING.md`: guide for adding new platforms and languages
-
-## [2.0.1] - 2026-03-28
-
-### Changed
-- **Git status separated from sprint-status.yaml** — addon now writes git metadata
-  (branch, commit, PR URL, push status, lint result) to its own `git-status.yaml`
-  instead of injecting fields into BMAD's `sprint-status.yaml`
-- `sync-status.sh` rewritten: simple YAML write instead of complex awk injection
-- `sprint-status.yaml` is now READ ONLY for the addon
-- Updated all workflow files and documentation
-
-## [2.0.0] - 2026-03-28
+## [1.0.0] - 2026-03-29
 
 ### Added
 
@@ -83,10 +37,49 @@
 
 - **bmad-ma-party-mode** — Real parallel multi-persona discussions
 
-#### Documentation
-- README.md with quick start and skill overview
-- Installation guide, usage guide, architecture docs
-- Configuration reference, contributing guide
+#### Git Workflow Integration
+- Enhanced `bmad-autopilot-on` with git operations between skill invocations
+- Enhanced `bmad-autopilot-off` with git status report and lock release
+- Worktree isolation via `EnterWorktree`/`ExitWorktree`
+- Sprint-status.yaml sync from worktree to project root
+- Git status separated from sprint-status.yaml — addon writes git metadata
+  (branch, commit, PR URL, push status, lint result) to its own `git-status.yaml`
+
+#### Helper Scripts (8)
+- `detect-platform.sh` — GitHub/GitLab/Bitbucket/Gitea auto-detection
+- `sanitize-branch.sh` — Story key to valid branch name
+- `lock.sh` — Session lock (epoch + UUID, 30m stale timeout)
+- `stage-and-commit.sh` — Explicit staging with pre-commit checks, binary file detection, `--file-list` cross-reference, `.gitignore` coverage verification
+- `sync-status.sh` — Simple YAML write to `git-status.yaml`
+- `lint-changed.sh` — Language-aware linting of changed files, multi-language monorepo support
+- `health-check.sh` — Orphaned worktree classification with `git fetch` before commit comparison
+- `create-pr.sh` — PR/MR creation with remote existence pre-check and graceful fallback
+
+#### Platform Support
+- GitHub (`gh` CLI)
+- GitLab (`glab` CLI)
+- Bitbucket (`bb` CLI + REST API fallback with `BITBUCKET_TOKEN`)
+- Gitea (`tea` CLI + REST API fallback with `GITEA_TOKEN` + `base_url`)
+
+#### Linting — 16 Languages
+- JavaScript/TypeScript (eslint, biome)
+- Python (ruff, flake8, pylint)
+- Go (golangci-lint, go vet)
+- Rust (clippy)
+- Ruby (rubocop)
+- Java (checkstyle, pmd)
+- C/C++ (cppcheck, clang-tidy)
+- C# (dotnet format)
+- Swift (swiftlint)
+- PL/SQL (sqlfluff — Oracle, PostgreSQL, MySQL, T-SQL dialects)
+- Kotlin (ktlint, detekt)
+- PHP (phpstan, phpcs)
+
+#### Configuration
+- Git workflow config (`modules/git/config.yaml`)
+- Platform commands (`modules/git/platform.yaml`)
+- Commit and PR templates
+- Secrets allowlist
 
 #### System Prompt Enforcement
 - `BMAD.md` in `_bmad-addons/`: comprehensive skill reference by lifecycle phase
@@ -101,55 +94,17 @@
 #### Windows Compatibility
 - `sanitize-branch.sh`: `sha256sum` before `shasum` fallback
 - `stage-and-commit.sh`: `wc -c` fallback for `stat`, guard `file` command
-- All scripts now work on macOS, Linux, and Git Bash/WSL
-
-### Changed
-- Manifest bumped to v2.0.0
-- Multi-agent module enabled (`ma.enabled: true`)
-- 9 supported tools (added Gemini CLI)
-
-## [1.0.1] - 2026-03-28
-
-### Fixed (Adversarial Review)
-- `stage-and-commit.sh`: Added binary file detection
-- `stage-and-commit.sh`: Added `--file-list` for story File List cross-reference
-- `stage-and-commit.sh`: Added `.gitignore` coverage verification
-- `lint-changed.sh`: Multi-language support for monorepo projects
-- `sync-status.sh`: Added `--worktree-status-file` parameter
-- `health-check.sh`: Added `git fetch` before commit comparison
-- `create-pr.sh`: Added remote existence pre-check
-- `workflow.md`: Added `EnterWorktree` failure fallback (regular branch)
-- Populated migration templates and resources (were empty directories)
-- Removed empty `steps/` directory
-
-## [1.0.0] - 2026-03-28
-
-### Added
-
-#### Git Workflow Integration
-- Enhanced `bmad-autopilot-on` with git operations between skill invocations
-- Enhanced `bmad-autopilot-off` with git status report and lock release
-- Worktree isolation via `EnterWorktree`/`ExitWorktree`
-- Sprint-status.yaml sync from worktree to project root
-
-#### Helper Scripts (8)
-- `detect-platform.sh` — GitHub/GitLab/git_only auto-detection
-- `sanitize-branch.sh` — Story key to valid branch name
-- `lock.sh` — Session lock (epoch + UUID, 30m stale timeout)
-- `stage-and-commit.sh` — Explicit staging with pre-commit checks
-- `sync-status.sh` — Atomic status merge
-- `lint-changed.sh` — Language-aware linting of changed files
-- `health-check.sh` — Orphaned worktree classification
-- `create-pr.sh` — PR/MR creation with graceful fallback
-
-#### Configuration
-- Git workflow config (`modules/git/config.yaml`)
-- Platform commands (`modules/git/platform.yaml`)
-- Commit and PR templates
-- Secrets allowlist
-- Multi-agent config placeholder (disabled)
+- All scripts work on macOS, Linux, and Git Bash/WSL
 
 #### Infrastructure
 - `install.sh` with `--dry-run`, `--force`, backup with retention
 - `uninstall.sh` with dirty-check worktree cleanup
 - `manifest.yaml` with BMAD compatibility tracking
+- 9 supported tools (Claude Code, Cursor, Windsurf, Cline, Roo, Trae, Kiro, GitHub Copilot, Gemini CLI)
+
+#### Documentation
+- README.md with quick start and skill overview
+- Installation guide, usage guide, architecture docs
+- Configuration reference, contributing guide
+- Guide for adding new platforms and language linters
+- GSD attribution for `bmad-ma-codebase-map` inspiration

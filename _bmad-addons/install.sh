@@ -186,7 +186,15 @@ HELPEOF
   shift
 done
 
-echo "=== BMAD Autopilot Add-On Installer ==="
+ADDON_VERSION=$(grep 'version:' "$ADDON_MANIFEST" | head -1 | awk '{print $2}')
+cat << BANNER
+ ____  __  __    _    ____       _         _              _ _       _
+| __ )|  \/  |  / \  |  _ \     / \  _   _| |_ ___  _ __ (_) | ___ | |_
+|  _ \| |\/| | / _ \ | | | |   / _ \| | | | __/ _ \| '_ \| | |/ _ \| __|
+| |_) | |  | |/ ___ \| |_| |  / ___ \ |_| | || (_) | |_) | | | (_) | |_
+|____/|_|  |_/_/   \_\____/  /_/   \_\__,_|\__\___/| .__/|_|_|\___/ \__| v$ADDON_VERSION
+                                                   |_|
+BANNER
 echo ""
 
 # --- 1. Verify BMAD is installed ---
@@ -197,9 +205,7 @@ if [ ! -f "$MANIFEST" ]; then
 fi
 
 BMAD_VERSION=$(grep 'version:' "$MANIFEST" | head -1 | awk '{print $2}')
-ADDON_VERSION=$(grep 'version:' "$ADDON_MANIFEST" | head -1 | awk '{print $2}')
-echo "BMAD version:  $BMAD_VERSION"
-echo "Add-on version: $ADDON_VERSION"
+echo "BMAD version: $BMAD_VERSION"
 echo ""
 
 # --- 2. Detect or select tools ---

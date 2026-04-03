@@ -128,7 +128,7 @@ bmad-autopilot-addon/
 ├── CLAUDE.md                        # → @AGENTS.md (redirect)
 ├── AGENTS.md                        # BMAD workflow enforcement rules
 ├── README.md                        # Comprehensive project documentation
-├── CHANGELOG.md                     # Version history (v1.0.0 → v2.0.3)
+├── CHANGELOG.md                     # Version history
 ├── LICENSE                          # MIT License
 ├── .gitignore                       # Ignores _bmad/, _bmad-output/, .claude/skills/
 └── .gitattributes                   # Git attributes

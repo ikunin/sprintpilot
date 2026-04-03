@@ -1,4 +1,4 @@
-# BMAD Autopilot Add-On
+# BMAD Autopilot Add-On v1.0.0
 
 Autonomous end-to-end software delivery powered by the [BMAD Method](https://github.com/bmad-code-org/BMAD-METHOD). One command takes your project from sprint plan to reviewed, tested, PR-ready code — with full git workflow and multi-agent intelligence.
 

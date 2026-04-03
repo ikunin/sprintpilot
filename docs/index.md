@@ -29,7 +29,7 @@
 - [Usage Guide](./USAGE.md) — Autopilot workflow, session management, crash recovery, multi-agent skills
 - [Contributing](./CONTRIBUTING.md) — Project structure, conventions, script/skill creation guides
 - [Extending](./EXTENDING.md) — Adding new git platforms and language linters
-- [Changelog](../CHANGELOG.md) — Version history (v1.0.0 through v2.0.3)
+- [Changelog](../CHANGELOG.md) — Version history
 - [README](../README.md) — Comprehensive project introduction with workflow diagrams
 
 ## Getting Started
