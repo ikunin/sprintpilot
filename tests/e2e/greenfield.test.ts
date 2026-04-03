@@ -45,8 +45,8 @@ const TIMEOUT_PER_SESSION = 1_200_000; // 20 min
 /** Model to use — override via BMAD_TEST_MODEL env var (e.g. "opus") */
 const MODEL = process.env.BMAD_TEST_MODEL ?? "sonnet";
 
-/** Remote URL for push testing — override via env; falls back to local bare remote if unset */
-const REMOTE_URL = process.env.BMAD_TEST_REMOTE_URL ?? "";
+/** Remote URL for push testing — override via env to avoid using a personal repo */
+const REMOTE_URL = process.env.BMAD_TEST_REMOTE_URL ?? "git@github.com:ikunin/test-tictactoe.git";
 
 let project: TempProject;
 
@@ -62,6 +62,19 @@ function git(cmd: string, dir: string): string {
 function gitCheckout(branch: string, dir: string): void {
   try { execSync(`rm -rf "${dir}/node_modules/.vite"`, { timeout: 5_000 }); } catch { /* */ }
   git(`checkout -f ${branch}`, dir);
+}
+
+/**
+ * Resolve a branch to the directory where its code lives.
+ * If the branch is held by a worktree, return the worktree path (can't git checkout it).
+ * Otherwise, checkout the branch in `dir` and return `dir`.
+ */
+function resolveCheckDir(branch: string, dir: string): string {
+  const localBranch = branch.replace(/^origin\//, "");
+  const wt = getWorktreePath(dir, localBranch);
+  if (wt) return wt;
+  gitCheckout(branch, dir);
+  return dir;
 }
 
 function findFiles(dir: string, pattern: RegExp, excludeDirs: string[]): string[] {
@@ -169,10 +182,10 @@ function getTestCount(dir: string): { files: number; tests: number; error?: stri
 describe("Greenfield: Tic Tac Toe via BMAD Autopilot", () => {
   beforeAll(() => {
     project = createTempProject({
-      ...(REMOTE_URL ? { remoteUrl: REMOTE_URL } : { withRemote: true }),
+      remoteUrl: REMOTE_URL,
       installBmadCore: true,
       installAddon: true,
-      platform: REMOTE_URL ? "github" : "git_only",
+      platform: "github",
     });
 
     placeFixture(
@@ -222,30 +235,14 @@ describe("Greenfield: Tic Tac Toe via BMAD Autopilot", () => {
     while (session < MAX_SESSIONS) {
       session++;
 
-      // Check if game is already complete — check main first (stories merge locally in git_only),
-      // then fall back to latest story branch (via worktree path if in use)
-      let checkDir = project.dir;
-      let checkLabel = "main";
-      try {
-        gitCheckout("main", project.dir);
-      } catch { /* already on main or main doesn't exist yet */ }
-      if (!isGameComplete(project.dir)) {
-        const latestBranch = getLatestStoryBranch(project.dir);
-        if (latestBranch) {
-          const localBranch = latestBranch.replace("origin/", "");
-          const wt = getWorktreePath(project.dir, localBranch);
-          if (wt) {
-            checkDir = wt;
-            checkLabel = `${localBranch} (worktree)`;
-          } else {
-            try { gitCheckout(latestBranch, project.dir); checkLabel = latestBranch; } catch { /* */ }
-          }
-        }
-      }
+      // Check if game is already complete — check latest story branch first, then main
+      const latestBranch = getLatestStoryBranch(project.dir);
+      const checkBranch = latestBranch ?? "main";
+      const checkDir = resolveCheckDir(checkBranch, project.dir);
       if (isGameComplete(checkDir)) {
         if (!gameComplete) {
           gameComplete = true;
-          console.log(`[Session ${session}] Game code complete on ${checkLabel}`);
+          console.log(`[Session ${session}] Game code complete on ${checkBranch}`);
         }
         // Check if sprint is also complete (lock released = autopilot finished cleanly)
         if (!existsSync(join(project.dir, ".autopilot.lock"))) {
@@ -298,30 +295,16 @@ describe("Greenfield: Tic Tac Toe via BMAD Autopilot", () => {
       }
     }
 
-    // Verify game is complete — check main first (git_only merges locally), then story branches
-    let finalDir = project.dir;
-    let finalLabel = "main";
-    try { gitCheckout("main", project.dir); } catch { /* */ }
-    if (!isGameComplete(project.dir)) {
-      const finalBranch = getLatestStoryBranch(project.dir);
-      if (finalBranch) {
-        const localBranch = finalBranch.replace("origin/", "");
-        const wt = getWorktreePath(project.dir, localBranch);
-        if (wt) {
-          finalDir = wt;
-          finalLabel = `${localBranch} (worktree)`;
-        } else {
-          try { gitCheckout(finalBranch, project.dir); finalLabel = finalBranch; } catch { /* */ }
-        }
-      }
-    }
+    // Verify game is complete — check latest story branch (PRs may not be merged to main yet)
+    const finalBranch = getLatestStoryBranch(project.dir) ?? "main";
+    const finalDir = resolveCheckDir(finalBranch, project.dir);
     if (!existsSync(join(finalDir, "node_modules")) && existsSync(join(finalDir, "package.json"))) {
       try { execSync("npm install", { cwd: finalDir, timeout: 60_000, stdio: "pipe" }); } catch {
         console.warn("[Result] npm install failed before final check");
       }
     }
     const complete = isGameComplete(finalDir);
-    console.log(`\n[Result] ${complete ? "SUCCESS" : "INCOMPLETE"} on ${finalLabel} after ${session} sessions, $${totalCost.toFixed(4)}`);
+    console.log(`\n[Result] ${complete ? "SUCCESS" : "INCOMPLETE"} on ${finalBranch} after ${session} sessions, $${totalCost.toFixed(4)}`);
     expect(complete).toBe(true);
   }, MAX_SESSIONS * (TIMEOUT_PER_SESSION + 120_000));
 
@@ -332,51 +315,39 @@ describe("Greenfield: Tic Tac Toe via BMAD Autopilot", () => {
   it("story branches were pushed and contain working code", () => {
     const dir = project.dir;
 
-    // Story branches must exist — either on remote (PR flow) or local (git_only merges to main)
+    // Story branches must exist on remote
     const remoteBranches = execSync(
       `git -C "${dir}" branch -r --list 'origin/story/*'`,
       { encoding: "utf-8", timeout: 10_000 }
     ).trim();
-    const remoteStoryBranches = remoteBranches.split("\n").map((b) => b.trim()).filter(Boolean);
-    const localBranches = execSync(
-      `git -C "${dir}" branch --list 'story/*'`,
-      { encoding: "utf-8", timeout: 10_000 }
-    ).trim();
-    const localStoryBranches = localBranches.split("\n").map((b) => b.trim().replace(/^\*\s*/, "")).filter(Boolean);
-    const allStoryBranches = remoteStoryBranches.length > 0 ? remoteStoryBranches : localStoryBranches;
-    console.log(`[Branches] Remote story branches: ${remoteStoryBranches.join(", ") || "(none)"}`);
-    console.log(`[Branches] Local story branches: ${localStoryBranches.join(", ") || "(none)"}`);
-    expect(allStoryBranches.length, "at least one story branch must exist").toBeGreaterThan(0);
+    const storyBranches = remoteBranches.split("\n").map((b) => b.trim()).filter(Boolean);
+    console.log(`[Branches] Remote story branches: ${storyBranches.join(", ")}`);
+    expect(storyBranches.length, "at least one story branch must be pushed to remote").toBeGreaterThan(0);
 
-    // Check code on main first (git_only merges locally), then fall back to story branch/worktree
-    let checkDir = dir;
-    let checkLabel = "main";
-    try { gitCheckout("main", dir); } catch { /* */ }
-
+    // Check latest story branch for source files and passing tests
+    // Use worktree path if available (can't git checkout a branch used by a worktree)
     const latestBranch = getLatestStoryBranch(dir);
-    if (latestBranch) {
-      const localBranch = latestBranch.replace("origin/", "");
-      const worktreePath = getWorktreePath(dir, localBranch);
-      if (worktreePath) {
-        checkDir = worktreePath;
-        checkLabel = `${localBranch} (worktree)`;
-      } else if (!isGameComplete(dir)) {
-        try { gitCheckout(latestBranch, dir); checkLabel = latestBranch; } catch { /* */ }
-      }
+    expect(latestBranch, "latest story branch must be resolvable").toBeTruthy();
+    const localBranch = latestBranch!.replace("origin/", "");
+    const worktreePath = getWorktreePath(dir, localBranch);
+    const checkDir = worktreePath ?? dir;
+
+    if (!worktreePath) {
+      gitCheckout(latestBranch!, dir);
     }
-    console.log(`[Branches] Checking code at: ${checkLabel}`);
+    console.log(`[Branches] Checking ${localBranch} at: ${checkDir}`);
 
     const srcFiles = findFiles(checkDir, /\.(ts|js)$/, ["node_modules", ".git", "_bmad", "dist"]);
-    console.log(`[Branches] Source files on ${checkLabel}: ${srcFiles.length}`);
+    console.log(`[Branches] Source files on ${localBranch}: ${srcFiles.length}`);
     expect(srcFiles.length).toBeGreaterThanOrEqual(4);
 
-    // Tests pass
+    // Tests pass on the latest story branch
     const testResult = getTestCount(checkDir);
-    console.log(`[Branches] Tests on ${checkLabel}: ${testResult.tests} passed`);
+    console.log(`[Branches] Tests on ${localBranch}: ${testResult.tests} passed`);
     if (testResult.error) {
       console.error(`[Branches] Test runner error: ${testResult.error}`);
     }
-    expect(testResult.tests, `project tests must pass on ${checkLabel}`).toBeGreaterThan(0);
+    expect(testResult.tests, `project tests must pass on ${localBranch}`).toBeGreaterThan(0);
   }, 120_000);
 
   it("planning artifacts were committed to main by autopilot", () => {
@@ -432,23 +403,16 @@ describe("Greenfield: Tic Tac Toe via BMAD Autopilot", () => {
     if (worktreePath) searchDirs.push(worktreePath);
     console.log(`[Tasks] Searching for story files in: ${searchDirs.join(", ")}`);
 
-    // Determine which stories were actually worked on (have branches — remote or local)
+    // Determine which stories were actually worked on (have remote branches with commits)
     const remoteBranches = execSync(
       `git -C "${dir}" branch -r --list 'origin/story/*'`,
       { encoding: "utf-8", timeout: 10_000 }
     ).trim();
-    const localBranches = execSync(
-      `git -C "${dir}" branch --list 'story/*'`,
-      { encoding: "utf-8", timeout: 10_000 }
-    ).trim();
-    const workedStoryKeys = new Set([
-      ...remoteBranches.split("\n")
+    const workedStoryKeys = new Set(
+      remoteBranches.split("\n")
         .map((b) => b.trim().replace(/^origin\/story\//, ""))
-        .filter(Boolean),
-      ...localBranches.split("\n")
-        .map((b) => b.trim().replace(/^\*?\s*story\//, ""))
-        .filter(Boolean),
-    ]);
+        .filter(Boolean)
+    );
     console.log(`[Tasks] Worked story branches: ${[...workedStoryKeys].join(", ")}`);
 
     // Find story files (BMAD puts them in implementation-artifacts or stories per config)
@@ -500,7 +464,7 @@ describe("Greenfield: Tic Tac Toe via BMAD Autopilot", () => {
 
   it("pull requests were created for story branches", () => {
     const dir = project.dir;
-    try { gitCheckout("main", dir); } catch { /* */ }
+    gitCheckout("main", dir);
     const gitStatusPath = join(dir, "_bmad-output/implementation-artifacts/git-status.yaml");
 
     // Check if gh CLI is available — PRs require it
@@ -520,18 +484,6 @@ describe("Greenfield: Tic Tac Toe via BMAD Autopilot", () => {
     const storyKeys = Object.keys(stories);
     console.log(`[PR] Stories in git-status.yaml: ${storyKeys.join(", ")}`);
     console.log(`[PR] gh CLI available: ${ghAvailable}`);
-
-    // In git_only mode without gh, git-status.yaml may not have story entries
-    // (sync-status.sh is called but the LLM may not resolve the path correctly)
-    if (storyKeys.length === 0 && !ghAvailable) {
-      // Verify stories were at least merged to main by checking git log
-      const log = git("log --oneline", dir);
-      const hasFeatCommits = /feat\(.+\):/.test(log);
-      console.log(`[PR] No story entries in git-status.yaml (git_only mode) — checking git log for feat commits: ${hasFeatCommits}`);
-      expect(hasFeatCommits, "git log must contain feat commits from story branches").toBe(true);
-      return;
-    }
-
     expect(storyKeys.length, "git-status.yaml must track at least one story").toBeGreaterThan(0);
 
     for (const key of storyKeys) {
@@ -562,7 +514,7 @@ describe("Greenfield: Tic Tac Toe via BMAD Autopilot", () => {
 
   it("lock is released and project is clean", () => {
     const dir = project.dir;
-    try { gitCheckout("main", dir); } catch { /* */ }
+    gitCheckout("main", dir);
 
     // Lock must be released
     expect(existsSync(join(dir, ".autopilot.lock")), "autopilot lock must be released").toBe(false);
@@ -579,25 +531,8 @@ describe("Greenfield: Tic Tac Toe via BMAD Autopilot", () => {
     }
     expect(trackedChanges, "no tracked files should be modified").toBe("");
 
-    // Check for orphaned worktrees — warn but don't fail if sprint completed (lock released)
-    // The autopilot should clean up worktrees but this is a known issue in git_only mode
-    try {
-      assertNoOrphanedWorktrees(dir);
-    } catch (err) {
-      const worktreeList = execSync(`git -C "${dir}" worktree list`, { encoding: "utf-8", timeout: 10_000 }).trim();
-      console.warn(`[Clean] Worktrees still present (cleanup not triggered):\n${worktreeList}`);
-      // Prune and remove worktrees ourselves so the test temp dir can be cleaned
-      try {
-        const lines = worktreeList.split("\n").slice(1); // skip main worktree
-        for (const line of lines) {
-          const wtPath = line.split(/\s+/)[0];
-          if (wtPath && wtPath !== dir) {
-            execSync(`git -C "${dir}" worktree remove "${wtPath}" --force 2>/dev/null || true`, { timeout: 5_000 });
-          }
-        }
-        execSync(`git -C "${dir}" worktree prune`, { timeout: 5_000 });
-      } catch { /* best effort */ }
-    }
+    // No orphaned worktrees
+    assertNoOrphanedWorktrees(dir);
 
     console.log(`[Clean] Project dir: ${dir}`);
   });
