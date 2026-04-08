@@ -2,7 +2,7 @@
 const { execFileSync } = require("child_process");
 const { join } = require("path");
 
-const script = join(__dirname, "bmad-autopilot-addon.sh");
+const script = join(__dirname, "bmad-autopilot-addon.sh").replace(/\\/g, "/");
 try {
   execFileSync("bash", [script, ...process.argv.slice(2)], {
     stdio: "inherit",
