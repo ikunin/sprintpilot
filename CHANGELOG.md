@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.0.13] - 2026-04-08
+
+### Fixed
+- Windows: launcher now explicitly prefers Git Bash over WSL's bash, which cannot resolve `C:/...` paths and broke `npx bmad-autopilot-addon` when both were installed.
+
 ## [1.0.12] - 2026-04-08
 
 ### Fixed
