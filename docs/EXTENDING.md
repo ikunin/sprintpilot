@@ -1,5 +1,7 @@
 # Extending the Add-On
 
+> **Windows note:** All addon scripts (`scripts/*.sh`, `install.sh`, `uninstall.sh`) run under **Git Bash**, which ships with [Git for Windows](https://git-scm.com/download/win). The launcher explicitly prefers Git Bash over WSL bash, so Windows-style paths (`C:\...`) work transparently. When extending the addon on Windows, edit the `.sh` files in Git Bash (or any editor with LF line endings) and use forward slashes inside scripts.
+
 ## Adding a New Git Platform
 
 The addon supports GitHub, GitLab, Bitbucket, and Gitea. To add another platform:
@@ -123,22 +125,24 @@ For linters that don't take individual files (like `dotnet format` or `cargo cli
 
 ### Currently Supported Languages
 
-| Language | Extensions | Linters (first found wins) | Install |
-|----------|-----------|---------------------------|---------|
-| Python | `.py` | ruff, flake8, pylint | `pip install ruff` |
-| JavaScript | `.js`, `.jsx` | eslint, biome | `npm install eslint` |
-| TypeScript | `.ts`, `.tsx` | eslint, biome | `npm install eslint` |
-| Rust | `.rs` | cargo clippy | Included with Rust |
-| Go | `.go` | golangci-lint | `brew install golangci-lint` |
-| Ruby | `.rb` | rubocop | `gem install rubocop` |
-| Java | `.java` | checkstyle, pmd | `brew install checkstyle` |
-| C | `.c`, `.h` | cppcheck, clang-tidy | `brew install cppcheck` |
-| C++ | `.cpp`, `.cc`, `.cxx`, `.hpp` | cppcheck, clang-tidy | `brew install cppcheck` |
-| C# | `.cs` | dotnet format | Included with .NET SDK |
-| Swift | `.swift` | swiftlint | `brew install swiftlint` |
-| PL/SQL | `.sql`, `.pls`, `.plb`, `.pks`, `.pkb` | sqlfluff | `pip install sqlfluff` |
-| Kotlin | `.kt` | ktlint, detekt | `brew install ktlint` |
-| PHP | `.php` | phpstan, phpcs | `composer require --dev phpstan/phpstan squizlabs/php_codesniffer` |
+| Language | Extensions | Linters (first found wins) | Install (macOS / Linux) | Install (Windows) |
+|----------|-----------|---------------------------|-------------------------|-------------------|
+| Python | `.py` | ruff, flake8, pylint | `pip install ruff` | `pip install ruff` |
+| JavaScript | `.js`, `.jsx` | eslint, biome | `npm install eslint` | `npm install eslint` |
+| TypeScript | `.ts`, `.tsx` | eslint, biome | `npm install eslint` | `npm install eslint` |
+| Rust | `.rs` | cargo clippy | Included with Rust | Included with Rust |
+| Go | `.go` | golangci-lint | `brew install golangci-lint` | `winget install golangci-lint` or `scoop install golangci-lint` |
+| Ruby | `.rb` | rubocop | `gem install rubocop` | `gem install rubocop` |
+| Java | `.java` | checkstyle, pmd | `brew install checkstyle` | `scoop install checkstyle` or download JAR |
+| C | `.c`, `.h` | cppcheck, clang-tidy | `brew install cppcheck` | `winget install cppcheck` or `choco install cppcheck` |
+| C++ | `.cpp`, `.cc`, `.cxx`, `.hpp` | cppcheck, clang-tidy | `brew install cppcheck` | `winget install cppcheck` or `choco install cppcheck` |
+| C# | `.cs` | dotnet format | Included with .NET SDK | Included with .NET SDK |
+| Swift | `.swift` | swiftlint | `brew install swiftlint` | Not officially supported on Windows |
+| PL/SQL | `.sql`, `.pls`, `.plb`, `.pks`, `.pkb` | sqlfluff | `pip install sqlfluff` | `pip install sqlfluff` |
+| Kotlin | `.kt` | ktlint, detekt | `brew install ktlint` | `scoop install ktlint` or `choco install ktlint` |
+| PHP | `.php` | phpstan, phpcs | `composer require --dev phpstan/phpstan squizlabs/php_codesniffer` | `composer require --dev phpstan/phpstan squizlabs/php_codesniffer` |
+
+> On Windows, ensure each linter is on the **Git Bash** PATH (not just CMD/PowerShell). Most installers above add to system PATH, which Git Bash inherits — verify with `which <linter>` inside a Git Bash shell.
 
 ### Notes on Specific Languages
 
