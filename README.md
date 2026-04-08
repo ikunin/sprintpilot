@@ -174,33 +174,28 @@ A 12-step workflow for taking a codebase from one stack to another. 4 subagent f
 
 ```bash
 # 1. Install BMAD with the core method and Test Architect module
-npx bmad-method install --modules bmm,tea --tools claude-code --yes
+#    (interactive — you'll be prompted to pick your tool)
+npx bmad-method install --modules bmm,tea
 ```
 
 This installs:
 - **BMM** (BMad Method) — the core development workflow with 34+ skills
 - **TEA** (Test Architect Enterprise) — risk-based test strategy, ATDD, CI quality gates, test framework scaffolding
 
-For interactive module selection (see all available modules):
+For full interactive setup (module *and* tool selection):
 ```bash
 npx bmad-method install
 ```
 
-For multiple tools:
 ```bash
-npx bmad-method install --modules bmm,tea --tools claude-code,cursor --yes
-```
-
-```bash
-# 2. Install the autopilot add-on
+# 2. Install the autopilot add-on (interactive — select your tool when prompted)
 npx bmad-autopilot-addon
-
-# Or specify tools directly:
-npx bmad-autopilot-addon install --tools claude-code,cursor --yes
 
 # 3. Start the autopilot in your IDE
 /bmad-autopilot-on
 ```
+
+See [Supported Tools](#supported-tools) below for the full list of `--tools` values if you prefer non-interactive installs.
 
 ## Supported Tools
 
@@ -218,9 +213,11 @@ The add-on uses the universal SKILL.md format — same skills work across all 9 
 | Kiro | `.kiro/skills/` |
 | GitHub Copilot | `.github/copilot/skills/` |
 
+For non-interactive installs, pass one or more tool keys via `--tools`:
 ```bash
-npx bmad-autopilot-addon install --tools claude-code,cursor,gemini-cli
+npx bmad-autopilot-addon install --tools <tool1>,<tool2> --yes
 ```
+Valid values: `claude-code`, `cursor`, `windsurf`, `gemini-cli`, `cline`, `roo`, `trae`, `kiro`, `github-copilot`, or `all`.
 
 ## Git Platforms
 
