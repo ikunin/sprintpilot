@@ -29,7 +29,7 @@ All tools reference `_bmad-addons/BMAD.md` for the full skill catalog. The enfor
 
 ### Starting the Autopilot
 
-In Claude Code, invoke:
+In the coding agent of your choice, invoke:
 
 ```
 /bmad-autopilot-on
