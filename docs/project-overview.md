@@ -30,7 +30,7 @@ BMAD provides a structured AI-driven development workflow with 50+ skills and ag
 | Test Language | TypeScript | ^5.7.0 | E2E test implementation |
 | Package Manager | npm | - | Test dependency management |
 | Version Control | Git | - | Worktree-based isolation |
-| AI Tool | Claude Code | - | Primary supported AI coding tool |
+| AI Tools | Claude Code, Cursor, Windsurf, Cline, Roo, Trae, Kiro, GitHub Copilot, Gemini CLI | - | Any of 9 supported coding agents |
 
 ## Architecture
 

@@ -94,7 +94,7 @@ npx bmad-autopilot-addon uninstall           # uninstall
 
 ### Skills
 
-Skills are tested by invoking them in Claude Code:
+Skills are tested by invoking them in your coding agent of choice:
 ```
 /bmad-ma-{name}
 ```
@@ -118,7 +118,7 @@ Story isolation uses standard `git worktree add` commands, making it compatible 
 
 ### Why explicit staging instead of git add -A?
 
-Claude Code's safety system flags `git add -A` as potentially dangerous. Explicit staging also prevents accidentally committing secrets, large files, or build artifacts.
+Many coding agents (including Claude Code) flag `git add -A` as potentially dangerous. Explicit staging also prevents accidentally committing secrets, large files, or build artifacts.
 
 ## Commit Convention
 

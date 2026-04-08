@@ -31,15 +31,19 @@ cd your-project
 
 ## Step 2: Install BMAD
 
+Run interactively and pick your coding agent when prompted:
+
 ```bash
-npx bmad-method install --modules bmm --tools claude-code --yes
+npx bmad-method install --modules bmm
 ```
 
 For test architecture support, add the TEA module:
 
 ```bash
-npx bmad-method install --modules bmm,tea --tools claude-code --yes
+npx bmad-method install --modules bmm,tea
 ```
+
+To pre-select tools non-interactively, add `--tools <tool1>,<tool2> --yes`. See [Supported Tools](#supported-tools) for valid values.
 
 ## Step 3: Install the Autopilot Add-On
 
@@ -61,31 +65,33 @@ The installer will:
 
 ```bash
 # Single tool
-npx bmad-autopilot-addon install --tools claude-code
+npx bmad-autopilot-addon install --tools <tool>
 
 # Multiple tools
-npx bmad-autopilot-addon install --tools claude-code,cursor,windsurf
+npx bmad-autopilot-addon install --tools <tool1>,<tool2>,<tool3>
 
 # All supported tools
 npx bmad-autopilot-addon install --tools all
 ```
 
+Replace `<tool>` with one of the keys from [Supported Tools](#supported-tools) below.
+
 ### Non-Interactive (CI/CD)
 
 ```bash
-npx bmad-autopilot-addon install --tools claude-code,cursor --yes
+npx bmad-autopilot-addon install --tools <tool1>,<tool2> --yes
 ```
 
 ### Dry Run (preview without changes)
 
 ```bash
-npx bmad-autopilot-addon install --tools claude-code,cursor --dry-run
+npx bmad-autopilot-addon install --tools <tool1>,<tool2> --dry-run
 ```
 
 ### Force Install (skip backups)
 
 ```bash
-npx bmad-autopilot-addon install --tools claude-code --force
+npx bmad-autopilot-addon install --tools <tool> --force
 ```
 
 ### Supported Tools
@@ -109,11 +115,9 @@ All tools use the same universal SKILL.md format.
 After install, check that skills are available in your tool's directory:
 
 ```bash
-# For Claude Code
-ls .claude/skills/bmad-autopilot-* .claude/skills/bmad-ma-*
-
-# For Cursor
-ls .cursor/skills/bmad-autopilot-* .cursor/skills/bmad-ma-*
+# Replace <tool-dir> with your tool's skills directory from the table above
+# (e.g. .claude/skills, .cursor/skills, .windsurf/skills, ...)
+ls <tool-dir>/bmad-autopilot-* <tool-dir>/bmad-ma-*
 ```
 
 You should see 9 skill directories per tool:
@@ -263,12 +267,12 @@ git:
 
 Ensure BMAD is installed in the project root (`_bmad/_config/manifest.yaml` must exist).
 
-### Skills not appearing in Claude Code
+### Skills not appearing in your coding agent
 
-Claude Code discovers skills by scanning `.claude/skills/`. Verify the directory exists and contains `SKILL.md` files:
+Each supported tool discovers skills by scanning its own skills directory (`.claude/skills/`, `.cursor/skills/`, `.windsurf/skills/`, etc. — see the [Supported Tools](#supported-tools) table). Verify the directory exists and contains `SKILL.md` files:
 
 ```bash
-find .claude/skills -name SKILL.md
+find <tool-dir> -name SKILL.md
 ```
 
 ### Lock file prevents startup
@@ -283,13 +287,13 @@ Or wait 30 minutes for automatic stale lock removal.
 
 ### Windows (Git Bash / WSL)
 
-Use `npx` to install (requires Node.js):
+Use `npx` to install (requires Node.js and [Git for Windows](https://git-scm.com/download/win), which provides Git Bash):
 
 ```bash
-npx bmad-autopilot-addon install --tools claude-code
+npx bmad-autopilot-addon
 ```
 
-This works on Git Bash, WSL, and PowerShell.
+The launcher explicitly prefers Git Bash over WSL bash, so this works from CMD, PowerShell, or Git Bash.
 
 The repo includes `.gitattributes` that forces LF line endings for all scripts and YAML files, preventing CRLF issues on clone.
 
