@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.0.12] - 2026-04-08
+
+### Fixed
+- Windows: `npx bmad-autopilot-addon` failed because Git Bash interpreted backslashes in the launcher script path as escapes. Path is now normalized to forward slashes.
+
 ## [1.0.11] - 2026-04-04
 
 ### Fixed
