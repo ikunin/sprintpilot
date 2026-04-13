@@ -461,6 +461,22 @@ for tool in $SELECTED_TOOLS; do
   echo ""
 done
 
+# --- 5. Copy runtime resources to project _bmad-addons/ ---
+TARGET_ADDON_DIR="$PROJECT_ROOT/_bmad-addons"
+
+if [ "$DRY_RUN" = true ]; then
+  echo "[DRY RUN] Would copy runtime resources to $TARGET_ADDON_DIR"
+else
+  mkdir -p "$TARGET_ADDON_DIR"
+  for item in BMAD.md manifest.yaml .secrets-allowlist modules scripts templates; do
+    src="$ADDON_DIR/$item"
+    if [ -e "$src" ]; then
+      cp -r "$src" "$TARGET_ADDON_DIR/"
+    fi
+  done
+  echo "Runtime resources installed to _bmad-addons/"
+fi
+
 # Verify ignore is effective
 if [ "$DRY_RUN" = false ] && command -v git >/dev/null 2>&1 && [ -d "$PROJECT_ROOT/.git" ]; then
   if ! git -C "$PROJECT_ROOT" check-ignore -q .autopilot.lock 2>/dev/null; then
@@ -468,7 +484,7 @@ if [ "$DRY_RUN" = false ] && command -v git >/dev/null 2>&1 && [ -d "$PROJECT_RO
   fi
 fi
 
-# --- 5. Report ---
+# --- 6. Report ---
 echo ""
 if [ "$DRY_RUN" = true ]; then
   echo "Dry run complete. No changes made."
