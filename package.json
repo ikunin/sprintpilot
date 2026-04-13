@@ -1,6 +1,6 @@
 {
   "name": "bmad-autopilot-addon",
-  "version": "1.0.13",
+  "version": "1.0.14",
   "description": "Autonomous end-to-end software delivery powered by the BMAD Method — git workflow, multi-agent skills, and autopilot execution",
   "license": "MIT",
   "repository": {
