@@ -193,7 +193,15 @@ if [ -d "$WORKTREES_DIR" ]; then
   fi
 fi
 
-# --- 3. Remove lock file ---
+# --- 3. Remove runtime resources ---
+TARGET_ADDON_DIR="$PROJECT_ROOT/_bmad-addons"
+if [ -d "$TARGET_ADDON_DIR" ]; then
+  rm -rf "$TARGET_ADDON_DIR"
+  echo ""
+  echo "Removed _bmad-addons/"
+fi
+
+# --- 4. Remove lock file ---
 if [ -f "$PROJECT_ROOT/.autopilot.lock" ]; then
   rm -f "$PROJECT_ROOT/.autopilot.lock"
   echo ""
