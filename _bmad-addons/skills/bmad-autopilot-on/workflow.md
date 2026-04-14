@@ -219,13 +219,14 @@ Resolve:
             `git merge origin/<branch> --no-edit`
             `git push origin {{base_branch}}`
           - If merge fails: log warning, continue (branch is preserved on remote)
-          - If merge succeeds: set merge_status = "merged"
-        - If `{{platform}}` is github/gitlab AND `{{create_pr}}` is true:
-          - Check if PR already exists for this branch
-          - If no PR: create one via `bash {{project_root}}/_bmad-addons/scripts/create-pr.sh ...`
+          - If merge succeeds:
+            - Re-read `{status_file}` from HEAD (may now include story artifacts after merge)
+            - Update `{git_status_file}` via sync-status.sh: set `--merge-status "recovered"` for this story
+        - If `{{platform}}` is NOT git_only (github, gitlab, bitbucket, gitea) AND `{{create_pr}}` is true:
+          - Check if PR/MR already exists for this branch (platform-specific check via create-pr.sh or CLI)
+          - If no PR: create one via `bash {{project_root}}/_bmad-addons/scripts/create-pr.sh --platform {{platform}} ...`
           - Log: "PR created/found for <story-key>"
-        - Re-read `{status_file}` from HEAD (may now show story as done after merge)
-        - Update `{git_status_file}` via sync-status.sh: set `--merge-status "recovered"` for this story
+          - Update `{git_status_file}` via sync-status.sh: set `--merge-status "pr_pending"` for this story
     - If status IS "done" AND branch still exists AND `{{cleanup_on_merge}}` is true:
       - Log: "Stale remote branch: <branch> — story already done, cleaning up"
       - Delete remote branch: `git push origin --delete <branch> 2>/dev/null || true`
@@ -737,12 +738,11 @@ Instruct: "Re-verify code review for story {{current_story}} — all patch findi
       - If retry fails: set `{{merge_status}}` = "failed"
         Log: "WARN: merge failed for {{current_story}} — will retry on next boot"
 
-    **Immediately persist merge_status** via sync-status.sh:
-    `bash {{project_root}}/_bmad-addons/scripts/sync-status.sh --story "{{current_story}}" --git-status-file "{{project_root}}/_bmad-output/implementation-artifacts/git-status.yaml" --merge-status "{{merge_status}}"`
-
     If `{{merge_status}}` == "failed":
       Log warning but do NOT halt. The branch is pushed and preserved.
       Boot reconciliation (INITIALIZATION branch reconciliation) will retry on next session.
+
+    Note: `{{merge_status}}` is persisted by the full sync-status.sh call later in this step (via `--merge-status`). Do NOT call sync-status.sh separately here — it does full block replacement and would destroy other fields.
     </action>
     <check if="{{cleanup_on_merge}} is true">
       <action>**Cleanup worktree** for merged story — branch was merged locally, worktree is no longer needed:
@@ -755,6 +755,7 @@ Instruct: "Re-verify code review for story {{current_story}} — all patch findi
   </check>
   <check if="{{pr_url}} is a valid URL (not null, not SKIPPED)">
     <critical>**DO NOT merge** — a PR was created at {{pr_url}}. Merging requires PR approval. The branch will be merged through the PR workflow on the platform.</critical>
+    <action>Set `{{merge_status}}` = "pr_pending"</action>
     <action>Log: "Story {{current_story}} pushed — PR awaiting review: {{pr_url}}"</action>
   </check>
 
@@ -766,7 +767,7 @@ Instruct: "Re-verify code review for story {{current_story}} — all patch findi
   </action>
 
   <action>**Write git status** to addon's own file (NEVER modify sprint-status.yaml) — runs AFTER checkout to base branch so the file persists in the working tree for the commit below:
-  `bash {{project_root}}/_bmad-addons/scripts/sync-status.sh --story "{{current_story}}" --git-status-file "{{project_root}}/_bmad-output/implementation-artifacts/git-status.yaml" --branch "{{branch_prefix}}{{branch_name}}" --commit "{{story_commit}}" --patch-commits "{{patch_commits_csv}}" --push-status "{{push_status}}" --pr-url "{{pr_url}}" --lint-result "{{lint_result}}" --worktree "{{project_root}}/.worktrees/{{current_story}}" --platform "{{platform}}" --base-branch "{{base_branch}}"`
+  `bash {{project_root}}/_bmad-addons/scripts/sync-status.sh --story "{{current_story}}" --git-status-file "{{project_root}}/_bmad-output/implementation-artifacts/git-status.yaml" --branch "{{branch_prefix}}{{branch_name}}" --commit "{{story_commit}}" --patch-commits "{{patch_commits_csv}}" --push-status "{{push_status}}" --merge-status "{{merge_status}}" --pr-url "{{pr_url}}" --lint-result "{{lint_result}}" --worktree "{{project_root}}/.worktrees/{{current_story}}" --platform "{{platform}}" --base-branch "{{base_branch}}"`
   This writes to `git-status.yaml` (addon-owned). Sprint-status.yaml is BMAD-owned — updated by BMAD skills only.
   </action>
 
@@ -872,17 +873,17 @@ pr_base: {{pr_base}}
 <check if="{{git_enabled}}">
   <action>**Pre-checkpoint merge sweep** — ensure all completed stories are on base branch.
   Read `{git_status_file}`. For each story completed this session:
-    - If merge_status is "pending" or empty:
+    - If merge_status is "merged" or "pr_pending": skip
+    - If merge_status is "pending", empty, or "failed":
+      - Determine branch ref: if push_status is "pushed", use `origin/{{branch_prefix}}<branch>`;
+        if push_status is "local", use local ref `{{branch_prefix}}<branch>`
       - Attempt merge:
         `git checkout -B {{base_branch}} origin/{{base_branch}}`
-        `git merge origin/{{branch_prefix}}<branch> --no-edit`
+        `git merge <branch-ref> --no-edit`
         `git push origin {{base_branch}}`
-      - Update merge_status via sync-status.sh:
+      - If merge succeeds: update merge_status via sync-status.sh:
         `bash {{project_root}}/_bmad-addons/scripts/sync-status.sh --story "<story-key>" --git-status-file "..." --merge-status "merged"`
-      - If merge fails: set merge_status = "failed" via sync-status.sh, log warning, continue
-    - If merge_status is "failed":
-      - Retry merge (same as above)
-    - If merge_status is "merged": skip
+      - If merge fails: `git merge --abort`, set merge_status = "failed" via sync-status.sh, log warning, continue
   Log: "Pre-checkpoint merge: N stories verified on {{base_branch}}"
   </action>
 </check>
