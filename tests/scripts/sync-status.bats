@@ -142,3 +142,153 @@ teardown() {
   [ "$status" -eq 0 ]
   [[ "$output" == *"Usage:"* ]]
 }
+
+@test "merge_status is written when provided" {
+  run bash "$SCRIPTS_DIR/sync-status.sh" \
+    --story "1-1" \
+    --git-status-file "git-status.yaml" \
+    --branch "story/1-1" \
+    --push-status "pushed" \
+    --merge-status "merged"
+  [ "$status" -eq 0 ]
+  grep -q "merge_status: merged" git-status.yaml
+}
+
+@test "merge_status omitted when not provided" {
+  run bash "$SCRIPTS_DIR/sync-status.sh" \
+    --story "1-1" \
+    --git-status-file "git-status.yaml" \
+    --branch "story/1-1" \
+    --push-status "pushed"
+  [ "$status" -eq 0 ]
+  ! grep -q "merge_status:" git-status.yaml
+}
+
+@test "merge_status supports all valid values" {
+  for value in pending merged failed recovered pr_pending; do
+    rm -f git-status.yaml
+    run bash "$SCRIPTS_DIR/sync-status.sh" \
+      --story "1-1" \
+      --git-status-file "git-status.yaml" \
+      --branch "story/1-1" \
+      --merge-status "$value"
+    [ "$status" -eq 0 ]
+    grep -q "merge_status: $value" git-status.yaml
+  done
+}
+
+@test "merge_status preserved when updating existing story with all fields" {
+  # Create initial entry with merge_status
+  bash "$SCRIPTS_DIR/sync-status.sh" \
+    --story "1-1" \
+    --git-status-file "git-status.yaml" \
+    --branch "story/1-1" \
+    --push-status "pushed" \
+    --merge-status "merged" \
+    --pr-url "https://github.com/u/r/pull/1" \
+    --platform "github"
+
+  grep -q "merge_status: merged" git-status.yaml
+  grep -q "push_status: pushed" git-status.yaml
+  grep -q "pr_url:" git-status.yaml
+
+  # Update with all fields including merge_status
+  run bash "$SCRIPTS_DIR/sync-status.sh" \
+    --story "1-1" \
+    --git-status-file "git-status.yaml" \
+    --branch "story/1-1" \
+    --push-status "pushed" \
+    --merge-status "recovered" \
+    --pr-url "https://github.com/u/r/pull/1"
+  [ "$status" -eq 0 ]
+  grep -q "merge_status: recovered" git-status.yaml
+  grep -q "push_status: pushed" git-status.yaml
+  grep -q "pr_url:" git-status.yaml
+}
+
+@test "all fields including merge_status are written together" {
+  run bash "$SCRIPTS_DIR/sync-status.sh" \
+    --story "2-1" \
+    --git-status-file "git-status.yaml" \
+    --branch "story/2-1" \
+    --worktree ".worktrees/2-1" \
+    --commit "abc123def456" \
+    --patch-commits "def789,ghi012" \
+    --push-status "pushed" \
+    --merge-status "merged" \
+    --pr-url "https://github.com/u/r/pull/1" \
+    --lint-result "0 errors, 2 warnings" \
+    --platform "github" \
+    --base-branch "main" \
+    --worktree-cleaned "true"
+  [ "$status" -eq 0 ]
+  grep -q "branch:" git-status.yaml
+  grep -q "worktree:" git-status.yaml
+  grep -q "story_commit:" git-status.yaml
+  grep -q "patch_commits:" git-status.yaml
+  grep -q "push_status: pushed" git-status.yaml
+  grep -q "merge_status: merged" git-status.yaml
+  grep -q "pr_url:" git-status.yaml
+  grep -q "lint_result:" git-status.yaml
+  grep -q "worktree_cleaned: true" git-status.yaml
+}
+
+@test "merge_status field appears between push_status and pr_url" {
+  bash "$SCRIPTS_DIR/sync-status.sh" \
+    --story "1-1" \
+    --git-status-file "git-status.yaml" \
+    --branch "story/1-1" \
+    --push-status "pushed" \
+    --merge-status "merged" \
+    --pr-url "https://github.com/u/r/pull/1"
+
+  # Verify field ordering: push_status before merge_status before pr_url
+  local push_line=$(grep -n "push_status:" git-status.yaml | head -1 | cut -d: -f1)
+  local merge_line=$(grep -n "merge_status:" git-status.yaml | head -1 | cut -d: -f1)
+  local pr_line=$(grep -n "pr_url:" git-status.yaml | head -1 | cut -d: -f1)
+  [ "$push_line" -lt "$merge_line" ]
+  [ "$merge_line" -lt "$pr_line" ]
+}
+
+@test "updating story without merge_status does not add merge_status field" {
+  # Create entry without merge_status
+  bash "$SCRIPTS_DIR/sync-status.sh" \
+    --story "1-1" \
+    --git-status-file "git-status.yaml" \
+    --branch "story/1-1" \
+    --push-status "pending"
+
+  ! grep -q "merge_status:" git-status.yaml
+
+  # Update same story still without merge_status
+  run bash "$SCRIPTS_DIR/sync-status.sh" \
+    --story "1-1" \
+    --git-status-file "git-status.yaml" \
+    --branch "story/1-1" \
+    --push-status "pushed"
+  [ "$status" -eq 0 ]
+  ! grep -q "merge_status:" git-status.yaml
+}
+
+@test "merge_status on one story does not affect another story" {
+  bash "$SCRIPTS_DIR/sync-status.sh" \
+    --story "1-1" \
+    --git-status-file "git-status.yaml" \
+    --branch "story/1-1" \
+    --push-status "pushed" \
+    --merge-status "merged"
+
+  bash "$SCRIPTS_DIR/sync-status.sh" \
+    --story "1-2" \
+    --git-status-file "git-status.yaml" \
+    --branch "story/1-2" \
+    --push-status "pushed"
+
+  # 1-1 should have merge_status, 1-2 should not
+  # Extract each story block and check independently
+  local full=$(cat git-status.yaml)
+  # Count occurrences — should be exactly 1
+  local count=$(grep -c "merge_status:" git-status.yaml)
+  [ "$count" -eq 1 ]
+  grep -q "merge_status: merged" git-status.yaml
+}
