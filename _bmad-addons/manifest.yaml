@@ -13,6 +13,7 @@ addon:
   installed_skills:
     - bmad-autopilot-on
     - bmad-autopilot-off
+    - bmad-addon-update
     - bmad-ma-code-review
     - bmad-ma-codebase-map
     - bmad-ma-assess

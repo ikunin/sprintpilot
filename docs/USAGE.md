@@ -64,6 +64,16 @@ For each story, the autopilot:
 
 This produces a status report with git information and releases the lock.
 
+### Updating the Add-On
+
+Check for updates and install them from within your coding agent:
+
+```
+/bmad-addon-update
+```
+
+This compares your installed version against npm, shows what's new, and asks for confirmation before updating. You can also check from the terminal: `npx bmad-autopilot-addon check-update`.
+
 ### Session Management
 
 The autopilot checkpoints after every 3 stories (configurable). It saves state to `_bmad-output/implementation-artifacts/autopilot-state.yaml` and asks you to start a new session:

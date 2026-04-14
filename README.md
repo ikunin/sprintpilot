@@ -16,6 +16,7 @@ Autonomous end-to-end software delivery powered by the [BMAD Method](https://git
 |-------|-------------|
 | `/bmad-autopilot-on` | Engage autonomous sprint execution |
 | `/bmad-autopilot-off` | Disengage and show status |
+| `/bmad-addon-update` | Check for updates and install the latest version |
 | `/bmad-ma-code-review` | Parallel 3-layer adversarial code review |
 | `/bmad-ma-codebase-map` | 5-stream brownfield codebase analysis |
 | `/bmad-ma-assess` | Tech debt and dependency audit |

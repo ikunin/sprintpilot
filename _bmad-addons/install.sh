@@ -187,6 +187,13 @@ HELPEOF
 done
 
 ADDON_VERSION=$(grep 'version:' "$ADDON_MANIFEST" | head -1 | awk '{print $2}')
+
+# Non-blocking update check (runs in background, result used in post-install summary)
+LATEST_VERSION=""
+if command -v npm >/dev/null 2>&1; then
+  LATEST_VERSION=$(npm view bmad-autopilot-addon@latest version 2>/dev/null || true)
+fi
+
 cat << BANNER
  ____  __  __    _    ____       _         _              _ _       _
 | __ )|  \/  |  / \  |  _ \     / \  _   _| |_ ___  _ __ (_) | ___ | |_
@@ -533,6 +540,13 @@ else
   echo "  /bmad-ma-migrate           Legacy migration planning"
   echo "  /bmad-ma-research          Parallel web research"
   echo "  /bmad-ma-party-mode        Multi-persona agent discussions"
-  echo ""
+  # Update notice (only if a newer version exists on npm)
+  if [ -n "$LATEST_VERSION" ] && [ "$LATEST_VERSION" != "$ADDON_VERSION" ]; then
+    echo "┌─────────────────────────────────────────────────────────┐"
+    echo "│  Update available: $ADDON_VERSION → $LATEST_VERSION"
+    echo "│  Run: npx bmad-autopilot-addon@latest"
+    echo "└─────────────────────────────────────────────────────────┘"
+    echo ""
+  fi
   echo "MIT License — Igor Kunin — https://github.com/ikunin/bmad-autopilot-addon"
 fi

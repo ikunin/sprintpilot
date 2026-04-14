@@ -57,7 +57,7 @@ The installer will:
 1. Verify BMAD is installed
 2. Auto-detect which tools have BMAD configured
 3. Prompt you to select target tools (or press Enter to use detected ones)
-4. Install 9 skills to each selected tool's skills directory
+4. Install 10 skills to each selected tool's skills directory
 5. Back up any existing skills before overwriting
 6. Add artifact entries to `.gitignore`
 
@@ -120,8 +120,8 @@ After install, check that skills are available in your tool's directory:
 ls <tool-dir>/bmad-autopilot-* <tool-dir>/bmad-ma-*
 ```
 
-You should see 9 skill directories per tool:
-- `bmad-autopilot-on`, `bmad-autopilot-off`
+You should see 10 skill directories per tool:
+- `bmad-autopilot-on`, `bmad-autopilot-off`, `bmad-addon-update`
 - `bmad-ma-code-review`, `bmad-ma-codebase-map`, `bmad-ma-assess`
 - `bmad-ma-reverse-architect`, `bmad-ma-migrate`
 - `bmad-ma-research`, `bmad-ma-party-mode`
@@ -145,15 +145,31 @@ Once verified, start the autopilot in your AI tool:
 /bmad-autopilot-on
 ```
 
+## Updating
+
+Check if a newer version is available:
+
+```bash
+npx bmad-autopilot-addon check-update
+```
+
+Upgrade to the latest version:
+
+```bash
+npx bmad-autopilot-addon@latest
+```
+
+This backs up existing skills before overwriting. Your configuration in `_bmad-addons/modules/` is preserved. Previous skill versions are kept in `.claude/.addon-backups/` (last 3 per skill).
+
+The installer also shows an update notice after installation if a newer version exists on npm.
+
 ## After a BMAD Update
 
 BMAD updates may regenerate `.claude/skills/`. The add-on's skills use prefixes not in BMAD's manifest, so they typically survive. If any are lost:
 
 ```bash
-npx bmad-autopilot-addon
+npx bmad-autopilot-addon@latest
 ```
-
-Backups of previous versions are kept in `.claude/.addon-backups/` (last 3 per skill).
 
 ## Uninstall
 

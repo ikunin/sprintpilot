@@ -1,5 +1,15 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- `/bmad-addon-update` skill — check for updates and install the latest version from within your coding agent
+- `check-update` CLI command — check if a newer version is available on npm (`npx bmad-autopilot-addon check-update`)
+- Post-install update notice — installer shows a banner when a newer version exists on npm
+
+### Fixed
+- `--version` and `check-update` now read from the project's installed manifest, not the npx-cached package
+
 ## [1.0.17] - 2026-04-14
 
 ### Fixed
