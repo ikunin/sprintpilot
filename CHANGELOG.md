@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.0.17] - 2026-04-14
 
 ### Fixed
 - Autopilot state file lost `stories_remaining` and `next_skill` across sessions — all state writes now persist the complete field set
