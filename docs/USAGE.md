@@ -75,9 +75,13 @@ The autopilot checkpoints after every 3 stories (configurable). It saves state t
 The state file tracks:
 - Current story and BMAD step in progress
 - Stories completed this session
+- Remaining stories in the sprint
 - Next skill to invoke
 - Git platform detected
 - Whether a worktree is active
+- PR target branch (for stacked PRs)
+
+All fields are persisted on every state write to prevent data loss across sessions. If `next_skill` is empty on resume, the autopilot recovers by re-reading `sprint-status.yaml` and determining the correct next step for the first undone story.
 
 This file is deleted automatically when the sprint completes.
 

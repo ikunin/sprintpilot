@@ -350,8 +350,18 @@ Resolve:
 
 <step n="2" goal="Main execution loop — route to correct handler">
 
-<check if="{{next_skill}} is empty OR all stories in status_file are done">
+<check if="all stories in status_file are done">
   <goto step="10">Sprint complete</goto>
+</check>
+
+<check if="{{next_skill}} is empty">
+  <action>**Recover next_skill** — re-read `{status_file}`, find first story with status != "done"</action>
+  <check if="no undone stories found">
+    <goto step="10">Sprint complete</goto>
+  </check>
+  <action>Set `{{current_story}}` = first undone story from `{status_file}`</action>
+  <action>Invoke `bmad-help` — "Story {{current_story}} needs attention. What is the next required workflow step?"</action>
+  <action>Extract `{{next_skill}}` from bmad-help response</action>
 </check>
 
 <check if="{{next_skill}} is in SKIP list (party-mode, brainstorming)">
@@ -488,6 +498,9 @@ current_bmad_step: executing
 completed_skill: {previous skill}
 next_skill: {{next_skill}}
 session_stories_done: {{session_stories_done}}
+stories_remaining: {{stories_remaining}}
+git_enabled: {{git_enabled}}
+platform: {{platform}}
 in_worktree: {{in_worktree}}
 pr_base: {{pr_base}}
 ```
@@ -612,8 +625,22 @@ pr_base: {{pr_base}}
   <action>Log: "Next step from bmad-help fallback: {{next_skill}}"</action>
 </check>
 
-<check if="{{next_skill}} signals completion (no further steps / sprint done / all done)">
-  <goto step="10">Sprint complete</goto>
+<check if="{{next_skill}} is null, empty, or signals completion (no further steps / sprint done / all done)">
+  <action>**Verify against source of truth** — re-read `{status_file}` and check for any story with status != "done"</action>
+  <check if="undone stories exist in status_file">
+    <action>Set `{{current_story}}` = first undone story from `{status_file}`</action>
+    <action>Determine `{{next_skill}}` based on that story's current status and BMAD step:
+      - If story has no story file yet → `bmad-create-story`
+      - If story file exists but status is `ready-for-dev` → `bmad-check-implementation-readiness`
+      - If story is `in-progress` and `current_bmad_step` is before `code-review` (i.e. RED or GREEN phase) → `bmad-dev-story`
+      - If story is `in-progress` and `current_bmad_step` is `code-review` or later → `bmad-code-review`
+      - Otherwise → invoke `bmad-help` for precise determination
+    </action>
+    <action>Log: "next_skill was empty but undone stories remain — resolved to {{next_skill}} for {{current_story}}"</action>
+  </check>
+  <check if="all stories in status_file are done">
+    <goto step="10">Sprint complete</goto>
+  </check>
 </check>
 
 <goto step="8">Save state and continue</goto>
@@ -790,6 +817,7 @@ Instruct: "Re-verify code review for story {{current_story}} — all patch findi
 
 <action>Mark all remaining tasks for this story → `completed`</action>
 <action>Increment `{{session_stories_done}}` by 1</action>
+<action>Remove `{{current_story}}` from `{{stories_remaining}}` list</action>
 
 <action>Report: "Story {{current_story}} done — N/N passing{{#if pr_url}} — PR: {{pr_url}}{{/if}}"</action>
 
@@ -849,6 +877,7 @@ current_bmad_step: {{current_bmad_step}}
 completed_skill: {{completed_skill}}
 next_skill: {{next_skill}}
 session_stories_done: {{session_stories_done}}
+stories_remaining: {{stories_remaining}}
 git_enabled: {{git_enabled}}
 platform: {{platform}}
 in_worktree: {{in_worktree}}
@@ -889,7 +918,21 @@ pr_base: {{pr_base}}
   </action>
 </check>
 
-<action>Update `{state_file}` with full current state</action>
+<action>Update `{state_file}`:
+```yaml
+last_updated: {current_datetime}
+current_story: {{current_story}}
+current_bmad_step: {{current_bmad_step}}
+completed_skill: {{completed_skill}}
+next_skill: {{next_skill}}
+session_stories_done: {{session_stories_done}}
+stories_remaining: {{stories_remaining}}
+git_enabled: {{git_enabled}}
+platform: {{platform}}
+in_worktree: {{in_worktree}}
+pr_base: {{pr_base}}
+```
+</action>
 
 <action>Read `{decision_log_file}` — count medium/high decisions from this session's stories</action>
 

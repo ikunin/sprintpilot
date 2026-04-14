@@ -1,5 +1,17 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+- Autopilot state file lost `stories_remaining` and `next_skill` across sessions — all state writes now persist the complete field set
+- Autopilot terminated prematurely when `next_skill` was empty despite undone stories — added recovery that re-reads `sprint-status.yaml` and determines the correct next step
+- Step 2 recovery now sets `current_story` alongside `next_skill` to prevent mismatched story/skill pairing
+- Step 5 recovery heuristic uses `current_bmad_step` instead of test-file presence to correctly distinguish RED/GREEN phase from code-review phase
+
+### Changed
+- State file checkpoint (step 9) now uses explicit schema instead of ambiguous "full current state"
+- `stories_remaining` list is actively maintained — entries removed as stories complete
+
 ## [1.0.16] - 2026-04-14
 
 ### Added

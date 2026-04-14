@@ -293,6 +293,20 @@ describe("Greenfield: Tic Tac Toe via BMAD Autopilot", () => {
         // Rate limit — stop retrying
         if (/rate.?limit/i.test(result.json.result ?? "")) break;
       }
+
+      // Validate state file between sessions — stories_remaining and next_skill must persist
+      const stateFilePath = join(project.dir, "_bmad-output/implementation-artifacts/autopilot-state.yaml");
+      if (existsSync(stateFilePath) && existsSync(join(project.dir, ".autopilot.lock"))) {
+        const state = readYaml(stateFilePath);
+        console.log(`[State] stories_remaining: ${JSON.stringify(state.stories_remaining)}, next_skill: ${state.next_skill}`);
+
+        // stories_remaining must be a non-empty array while sprint is in progress
+        expect(Array.isArray(state.stories_remaining), `autopilot-state.yaml must have stories_remaining array (got ${typeof state.stories_remaining})`).toBe(true);
+        expect((state.stories_remaining as unknown[]).length, "stories_remaining must not be empty while sprint is in progress").toBeGreaterThan(0);
+
+        // next_skill must be set for resumption
+        expect(state.next_skill, "autopilot-state.yaml must have next_skill set for resumption").toBeTruthy();
+      }
     }
 
     // Verify game is complete — check latest story branch (PRs may not be merged to main yet)
