@@ -221,12 +221,13 @@ Resolve:
           - If merge fails: log warning, continue (branch is preserved on remote)
           - If merge succeeds:
             - Re-read `{status_file}` from HEAD (may now include story artifacts after merge)
-            - Update `{git_status_file}` via sync-status.sh: set `--merge-status "recovered"` for this story
+            - Update `{git_status_file}` via sync-status.sh: set `--merge-status "recovered"` for this story.
+              **IMPORTANT:** sync-status.sh does full block replacement. If the story already has an entry in `{git_status_file}`, re-read its existing fields and pass ALL of them alongside `--merge-status`. If no entry exists yet, pass at minimum `--branch` and `--push-status "pushed"`.
         - If `{{platform}}` is NOT git_only (github, gitlab, bitbucket, gitea) AND `{{create_pr}}` is true:
           - Check if PR/MR already exists for this branch (platform-specific check via create-pr.sh or CLI)
           - If no PR: create one via `bash {{project_root}}/_bmad-addons/scripts/create-pr.sh --platform {{platform}} ...`
           - Log: "PR created/found for <story-key>"
-          - Update `{git_status_file}` via sync-status.sh: set `--merge-status "pr_pending"` for this story
+          - Update `{git_status_file}` via sync-status.sh: set `--merge-status "pr_pending"` for this story (same full-field requirement as above)
     - If status IS "done" AND branch still exists AND `{{cleanup_on_merge}}` is true:
       - Log: "Stale remote branch: <branch> — story already done, cleaning up"
       - Delete remote branch: `git push origin --delete <branch> 2>/dev/null || true`
@@ -881,9 +882,9 @@ pr_base: {{pr_base}}
         `git checkout -B {{base_branch}} origin/{{base_branch}}`
         `git merge <branch-ref> --no-edit`
         `git push origin {{base_branch}}`
-      - If merge succeeds: update merge_status via sync-status.sh:
-        `bash {{project_root}}/_bmad-addons/scripts/sync-status.sh --story "<story-key>" --git-status-file "..." --merge-status "merged"`
-      - If merge fails: `git merge --abort`, set merge_status = "failed" via sync-status.sh, log warning, continue
+      - If merge succeeds: update merge_status in `{git_status_file}`.
+        **IMPORTANT:** sync-status.sh does full block replacement — you MUST re-read the story's existing fields from `{git_status_file}` (branch, commit, patch_commits, push_status, pr_url, lint_result, worktree, platform, base_branch, worktree_cleaned) and pass ALL of them along with `--merge-status "merged"`. Omitting fields destroys them.
+      - If merge fails: `git merge --abort`, update merge_status to "failed" in `{git_status_file}` (same full-field requirement), log warning, continue
   Log: "Pre-checkpoint merge: N stories verified on {{base_branch}}"
   </action>
 </check>
