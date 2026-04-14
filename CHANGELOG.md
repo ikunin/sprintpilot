@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.0.18] - 2026-04-14
 
 ### Added
 - `/bmad-addon-update` skill — check for updates and install the latest version from within your coding agent

@@ -1,4 +1,4 @@
-# BMAD Autopilot Add-On v1.0.17
+# BMAD Autopilot Add-On v1.0.18
 
 [![npm version](https://img.shields.io/npm/v/bmad-autopilot-addon.svg?style=flat)](https://www.npmjs.com/package/bmad-autopilot-addon)
 [![npm downloads](https://img.shields.io/npm/dm/bmad-autopilot-addon.svg?style=flat)](https://www.npmjs.com/package/bmad-autopilot-addon)
