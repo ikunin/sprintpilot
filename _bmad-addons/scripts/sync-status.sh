@@ -4,7 +4,8 @@
 #
 # Usage: sync-status.sh --story <key> --git-status-file <path> \
 #          [--branch <name>] [--commit <sha>] [--patch-commits <sha,...>] \
-#          [--push-status <status>] [--pr-url <url>] [--lint-result <text>] \
+#          [--push-status <status>] [--merge-status <status>] \
+#          [--pr-url <url>] [--lint-result <text>] \
 #          [--worktree <path>] [--platform <name>] [--base-branch <name>]
 #
 # Reads existing git-status.yaml and updates the story entry.
@@ -19,6 +20,7 @@ WORKTREE=""
 STORY_COMMIT=""
 PATCH_COMMITS=""
 PUSH_STATUS="pending"
+MERGE_STATUS=""
 PR_URL=""
 LINT_RESULT=""
 PLATFORM=""
@@ -34,6 +36,7 @@ while [ "$#" -gt 0 ]; do
     --commit) STORY_COMMIT="$2"; shift 2 ;;
     --patch-commits) PATCH_COMMITS="$2"; shift 2 ;;
     --push-status) PUSH_STATUS="$2"; shift 2 ;;
+    --merge-status) MERGE_STATUS="$2"; shift 2 ;;
     --pr-url) PR_URL="$2"; shift 2 ;;
     --lint-result) LINT_RESULT="$2"; shift 2 ;;
     --platform) PLATFORM="$2"; shift 2 ;;
@@ -87,6 +90,8 @@ STORY_BLOCK="  ${STORY}:"
     lint_result: $(yaml_safe "$LINT_RESULT")"
 STORY_BLOCK="$STORY_BLOCK
     push_status: $(yaml_safe "$PUSH_STATUS")"
+[ -n "$MERGE_STATUS" ] && STORY_BLOCK="$STORY_BLOCK
+    merge_status: $(yaml_safe "$MERGE_STATUS")"
 [ -n "$PR_URL" ] && STORY_BLOCK="$STORY_BLOCK
     pr_url: $(yaml_safe "$PR_URL")"
 STORY_BLOCK="$STORY_BLOCK

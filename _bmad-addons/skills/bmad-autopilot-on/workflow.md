@@ -203,6 +203,34 @@ Resolve:
   - ORPHAN: `rm -rf .worktrees/<name>` + `git worktree prune`
   </action>
 
+  <action>**Branch reconciliation** — detect pushed-but-unmerged story branches.
+  Run: `git fetch origin && git branch -r --list "origin/{{branch_prefix}}*"`
+  For each remote branch:
+    - Extract story-key from branch name (strip "origin/{{branch_prefix}}" prefix)
+    - Look up story status in `{status_file}`
+    - If status is NOT "done":
+      - Check if branch has implementation commits beyond base:
+        `git log --oneline origin/{{base_branch}}..origin/<branch> | head -5`
+      - If commits exist:
+        - Log: "RECOVERY: Found unmerged work for <story-key> on <branch>"
+        - If `{{platform}}` is git_only OR `{{create_pr}}` is false:
+          - Merge to base:
+            `git checkout -B {{base_branch}} origin/{{base_branch}}`
+            `git merge origin/<branch> --no-edit`
+            `git push origin {{base_branch}}`
+          - If merge fails: log warning, continue (branch is preserved on remote)
+          - If merge succeeds: set merge_status = "merged"
+        - If `{{platform}}` is github/gitlab AND `{{create_pr}}` is true:
+          - Check if PR already exists for this branch
+          - If no PR: create one via `bash {{project_root}}/_bmad-addons/scripts/create-pr.sh ...`
+          - Log: "PR created/found for <story-key>"
+        - Re-read `{status_file}` from HEAD (may now show story as done after merge)
+        - Update `{git_status_file}` via sync-status.sh: set `--merge-status "recovered"` for this story
+    - If status IS "done" AND branch still exists AND `{{cleanup_on_merge}}` is true:
+      - Log: "Stale remote branch: <branch> — story already done, cleaning up"
+      - Delete remote branch: `git push origin --delete <branch> 2>/dev/null || true`
+  </action>
+
   <action>Set `{{git_enabled}}` = true, `{{platform}}` = detected value</action>
 </check>
 
@@ -244,7 +272,18 @@ Resolve:
   Git integration: {{git_enabled}}
   ```
   </action>
-  <goto step="2">Jump to execution loop with restored state</goto>
+  <action>**Post-resume reconciliation** — sync state with git reality.
+    - Re-read `{status_file}` (may have been updated by boot branch reconciliation)
+    - Recalculate `{{stories_remaining}}` by scanning all story keys where status != "done"
+    - If `{{current_story}}` is now "done" in `{status_file}` (merged during reconciliation):
+      - Log: "Story {{current_story}} was recovered from remote — skipping to next"
+      - Set `{{current_story}}` = null
+      - Set `{{next_skill}}` = next appropriate skill for first non-done story
+    - If `{{next_skill}}` targets a story that is now "done":
+      - Advance to next non-done story
+    - Update `{state_file}` with reconciled values
+  </action>
+  <goto step="2">Jump to execution loop with reconciled state</goto>
 </check>
 
 <check if="state_file does NOT exist">
@@ -680,16 +719,30 @@ Instruct: "Re-verify code review for story {{current_story}} — all patch findi
   </action>
 
   <check if="{{create_pr}} is false OR {{platform}} is git_only OR {{pr_url}} is null or SKIPPED">
-    <action>**Merge story branch to main** — no PR workflow, merge locally.
+    <action>**Merge story branch to main** — tracked and retryable.
+    Run:
     ```
     git checkout -B {{base_branch}} origin/{{base_branch}}
     git merge {{branch_prefix}}{{branch_name}} --no-edit
-    git push origin {{base_branch}} 2>/dev/null || true
     ```
-    If merge fails (conflict):
-    - Try `git merge --abort`
-    - Log warning: "Could not auto-merge {{branch_prefix}}{{branch_name}} to {{base_branch}} — manual merge required"
-    - Continue without halting (the story branch is pushed)
+    If succeeds:
+      - `git push origin {{base_branch}}`
+      - Set `{{merge_status}}` = "merged"
+    If fails (conflict):
+      - `git merge --abort`
+      - `git fetch origin`
+      - `git checkout -B {{base_branch}} origin/{{base_branch}}`
+      - Retry merge once: `git merge {{branch_prefix}}{{branch_name}} --no-edit`
+      - If retry succeeds: push, set `{{merge_status}}` = "merged"
+      - If retry fails: set `{{merge_status}}` = "failed"
+        Log: "WARN: merge failed for {{current_story}} — will retry on next boot"
+
+    **Immediately persist merge_status** via sync-status.sh:
+    `bash {{project_root}}/_bmad-addons/scripts/sync-status.sh --story "{{current_story}}" --git-status-file "{{project_root}}/_bmad-output/implementation-artifacts/git-status.yaml" --merge-status "{{merge_status}}"`
+
+    If `{{merge_status}}` == "failed":
+      Log warning but do NOT halt. The branch is pushed and preserved.
+      Boot reconciliation (INITIALIZATION branch reconciliation) will retry on next session.
     </action>
     <check if="{{cleanup_on_merge}} is true">
       <action>**Cleanup worktree** for merged story — branch was merged locally, worktree is no longer needed:
@@ -814,6 +867,24 @@ pr_base: {{pr_base}}
   <action>`cd {{project_root}}` — return to project root, preserve worktree for next session</action>
   <action>Write git status to git-status.yaml (same sync as step 7)</action>
   <action>Set `{{in_worktree}}` = false</action>
+</check>
+
+<check if="{{git_enabled}}">
+  <action>**Pre-checkpoint merge sweep** — ensure all completed stories are on base branch.
+  Read `{git_status_file}`. For each story completed this session:
+    - If merge_status is "pending" or empty:
+      - Attempt merge:
+        `git checkout -B {{base_branch}} origin/{{base_branch}}`
+        `git merge origin/{{branch_prefix}}<branch> --no-edit`
+        `git push origin {{base_branch}}`
+      - Update merge_status via sync-status.sh:
+        `bash {{project_root}}/_bmad-addons/scripts/sync-status.sh --story "<story-key>" --git-status-file "..." --merge-status "merged"`
+      - If merge fails: set merge_status = "failed" via sync-status.sh, log warning, continue
+    - If merge_status is "failed":
+      - Retry merge (same as above)
+    - If merge_status is "merged": skip
+  Log: "Pre-checkpoint merge: N stories verified on {{base_branch}}"
+  </action>
 </check>
 
 <action>Update `{state_file}` with full current state</action>
