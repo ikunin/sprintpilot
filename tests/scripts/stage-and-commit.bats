@@ -12,6 +12,11 @@ teardown() {
 }
 
 @test "commits modified tracked file and outputs SHA" {
+  # .gitignore with .autopilot.lock prevents the missing-gitignore warning
+  # that would otherwise pollute stdout via bats run (merges stderr+stdout)
+  echo ".autopilot.lock" > .gitignore
+  git add .gitignore && git commit -m "add gitignore" >/dev/null 2>&1
+
   commit_file "hello.txt" "original"
   modify_file "hello.txt" "updated"
 
