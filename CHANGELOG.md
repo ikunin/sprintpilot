@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.0.16] - 2026-04-14
+
+### Added
+- `/ship` and `/publish` project commands (moved from published skills to `.claude/commands/`)
+
+### Fixed
+- Install now copies runtime resources (`_bmad-addons/`) to the target project
+- Autopilot git recovery for pushed-but-unmerged story branches
+- 5 bugs found in adversarial review of git recovery logic
+- Partial `sync-status.sh` calls in boot reconciliation and checkpoint sweep
+- Pre-existing test: added `.gitignore` to prevent stderr in SHA check
+
+### Changed
+- Added tests for `--merge-status` flag in `sync-status.sh`
+
 ## [1.0.13] - 2026-04-08
 
 ### Fixed
