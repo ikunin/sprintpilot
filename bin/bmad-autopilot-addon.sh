@@ -17,10 +17,10 @@ shift 2>/dev/null || true
 
 case "$COMMAND" in
   install)
-    exec bash "$PKG_ROOT/_bmad-addons/install.sh" "$@"
+    exec "$BASH" "$PKG_ROOT/_bmad-addons/install.sh" "$@"
     ;;
   uninstall)
-    exec bash "$PKG_ROOT/_bmad-addons/uninstall.sh" "$@"
+    exec "$BASH" "$PKG_ROOT/_bmad-addons/uninstall.sh" "$@"
     ;;
   --version|-v)
     # Prefer project's installed version over npx-cached package version
