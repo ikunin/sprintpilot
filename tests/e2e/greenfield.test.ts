@@ -374,7 +374,7 @@ describe("Greenfield: Tic Tac Toe via BMAD Autopilot", () => {
     const sprintStatus = join(dir, "_bmad-output/implementation-artifacts/sprint-status.yaml");
     assertFileExists(sprintStatus);
     assertFileNotEmpty(sprintStatus);
-    assertFileContains(sprintStatus, /status:\s*done/);
+    assertFileContains(sprintStatus, /epic-\d+:\s*done/);
     console.log("[Artifacts] sprint-status.yaml ✓");
 
     // Epics — must exist with epic sections and BDD acceptance criteria

@@ -3,7 +3,7 @@
  * Each test gets an isolated git repo with BMAD installed.
  */
 import { mkdtempSync, rmSync, existsSync, mkdirSync, writeFileSync, readFileSync, cpSync } from "node:fs";
-import { execSync } from "node:child_process";
+import { execSync, execFileSync } from "node:child_process";
 import { join, dirname } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -95,18 +95,19 @@ export function createTempProject(options: TempProjectOptions = {}): TempProject
     const destAddons = join(dir, "_bmad-addons");
     cpSync(ADDON_DIR, destAddons, { recursive: true });
 
-    // Run install.sh if it exists
-    const installScript = join(destAddons, "install.sh");
-    if (existsSync(installScript)) {
-      try {
-        exec(`bash "${installScript}" --tools claude-code --yes`, dir);
-      } catch {
-        // install.sh may fail in test environment; copy skills manually
-        const skillsSrc = join(destAddons, "skills");
-        const skillsDest = join(dir, ".claude/skills");
-        if (existsSync(skillsSrc)) {
-          cpSync(skillsSrc, skillsDest, { recursive: true });
-        }
+    const installerCli = join(import.meta.dirname, "../../../bin/bmad-autopilot-addon.js");
+    try {
+      execFileSync("node", [installerCli, "install", "--tools", "claude-code", "--yes"], {
+        cwd: dir,
+        encoding: "utf-8",
+        timeout: 30_000,
+        stdio: "pipe",
+      });
+    } catch {
+      const skillsSrc = join(destAddons, "skills");
+      const skillsDest = join(dir, ".claude/skills");
+      if (existsSync(skillsSrc)) {
+        cpSync(skillsSrc, skillsDest, { recursive: true });
       }
     }
 
