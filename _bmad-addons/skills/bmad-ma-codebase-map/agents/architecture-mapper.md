@@ -27,19 +27,19 @@ ls -la
 find . -maxdepth 2 -type d -not -path '*/node_modules/*' -not -path '*/.git/*' -not -path '*/vendor/*' | head -50
 
 # Entry points
-cat index.ts index.js main.py main.go cmd/main.go src/main.rs lib/main.rb app.py manage.py 2>/dev/null | head -30
+cat index.ts index.js main.py main.go cmd/main.go src/main.rs lib/main.rb app.py manage.py main.c main.cpp src/main.c src/main.cpp 2>/dev/null | head -30
 
 # Route definitions
-grep -rn "router\.\|app\.\(get\|post\|put\|delete\|patch\)\|@app\.route\|@Controller\|@RequestMapping" --include='*.ts' --include='*.js' --include='*.py' --include='*.java' --include='*.go' --include='*.xml' | head -30
+grep -rn "router\.\|app\.\(get\|post\|put\|delete\|patch\)\|@app\.route\|@Controller\|@RequestMapping\|CROW_ROUTE\|CPPREST_\|Pistache::" --include='*.ts' --include='*.js' --include='*.py' --include='*.java' --include='*.go' --include='*.xml' --include='*.c' --include='*.h' --include='*.cpp' --include='*.hpp' --include='*.cc' --include='*.cxx' --include='*.hxx' | head -30
 
 # Module exports / barrel files
 find . -name 'index.ts' -o -name 'index.js' -o -name '__init__.py' -o -name 'mod.rs' | head -20
 
 # Import patterns (what depends on what)
-grep -rn "^import\|^from\|require(\|source \|^\." --include='*.ts' --include='*.js' --include='*.py' --include='*.sh' | awk -F'from |require' '{print $2}' | sort | uniq -c | sort -rn | head -20
+grep -rn "^import\|^from\|require(\|source \|^\.\|^#include" --include='*.ts' --include='*.js' --include='*.py' --include='*.sh' --include='*.c' --include='*.h' --include='*.cpp' --include='*.hpp' --include='*.cc' --include='*.cxx' --include='*.hxx' | awk -F'from |require|#include' '{print $2}' | sort | uniq -c | sort -rn | head -20
 
 # Configuration loading
-grep -rn "config\|CONFIG\|Settings\|settings" --include='*.ts' --include='*.js' --include='*.py' --include='*.yaml' --include='*.json' --include='*.xml' --include='*.sh' -l | head -10
+grep -rn "config\|CONFIG\|Settings\|settings" --include='*.ts' --include='*.js' --include='*.py' --include='*.yaml' --include='*.json' --include='*.xml' --include='*.sh' --include='*.c' --include='*.h' --include='*.cpp' --include='*.hpp' --include='*.cc' --include='*.cxx' --include='*.hxx' -l | head -10
 ```
 
 Read entry point files, follow the import chain 2-3 levels deep to understand request flow.

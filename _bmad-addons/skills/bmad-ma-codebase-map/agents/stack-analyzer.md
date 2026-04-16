@@ -40,6 +40,11 @@ ls -la *.sql *.sps *.spb 2>/dev/null | head -10
 find . -type f \( -name '*.sql' -o -name '*.sps' -o -name '*.spb' \) -not -path '*/.git/*' 2>/dev/null | wc -l
 cat tnsnames.ora sqlnet.ora 2>/dev/null | head -20
 
+# C / C++ manifests
+ls -la *.c *.h *.cpp *.hpp *.cc *.cxx *.hxx 2>/dev/null | head -10
+find . -type f \( -name '*.c' -o -name '*.h' -o -name '*.cpp' -o -name '*.hpp' -o -name '*.cc' -o -name '*.cxx' -o -name '*.hxx' \) -not -path '*/.git/*' 2>/dev/null | wc -l
+cat CMakeLists.txt configure.ac conanfile.txt vcpkg.json 2>/dev/null | head -20
+
 # Lockfiles (versions)
 head -100 package-lock.json 2>/dev/null || head -100 yarn.lock 2>/dev/null || head -100 pnpm-lock.yaml 2>/dev/null
 

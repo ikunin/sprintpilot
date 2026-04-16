@@ -24,10 +24,10 @@ Scan the project at `{{project_root}}` and write your findings to `{{output_file
 
 ```bash
 # TODOs, FIXMEs, HACKs
-grep -rn 'TODO\|FIXME\|HACK\|XXX\|WORKAROUND\|TEMP\|DEPRECATED' --include='*.ts' --include='*.js' --include='*.py' --include='*.go' --include='*.java' --include='*.rs' --include='*.rb' --include='*.cs' --include='*.sql' --include='*.sps' --include='*.spb' --include='*.xml' --include='*.sh' | head -50
+grep -rn 'TODO\|FIXME\|HACK\|XXX\|WORKAROUND\|TEMP\|DEPRECATED' --include='*.ts' --include='*.js' --include='*.py' --include='*.go' --include='*.java' --include='*.rs' --include='*.rb' --include='*.cs' --include='*.sql' --include='*.sps' --include='*.spb' --include='*.xml' --include='*.sh' --include='*.c' --include='*.h' --include='*.cpp' --include='*.hpp' --include='*.cc' --include='*.cxx' --include='*.hxx' | head -50
 
 # Security: hardcoded secrets patterns
-grep -rn 'password\s*=\s*["\x27]\|api_key\s*=\s*["\x27]\|secret\s*=\s*["\x27]\|token\s*=\s*["\x27]' --include='*.ts' --include='*.js' --include='*.py' --include='*.java' --include='*.sql' --include='*.sps' --include='*.spb' --include='*.xml' --include='*.sh' -i | grep -v 'node_modules\|test\|spec\|mock\|fixture\|\.env\.example' | head -20
+grep -rn 'password\s*=\s*["\x27]\|api_key\s*=\s*["\x27]\|secret\s*=\s*["\x27]\|token\s*=\s*["\x27]' --include='*.ts' --include='*.js' --include='*.py' --include='*.java' --include='*.sql' --include='*.sps' --include='*.spb' --include='*.xml' --include='*.sh' --include='*.c' --include='*.h' --include='*.cpp' --include='*.hpp' --include='*.cc' --include='*.cxx' --include='*.hxx' -i | grep -v 'node_modules\|test\|spec\|mock\|fixture\|\.env\.example' | head -20
 
 # Security: dangerous functions
 grep -rn 'eval(\|exec(\|dangerouslySetInnerHTML\|innerHTML\s*=\|__import__\|pickle\.load\|yaml\.load(\|EXECUTE IMMEDIATE\|DBMS_SQL' --include='*.ts' --include='*.js' --include='*.py' --include='*.java' --include='*.sql' --include='*.sps' --include='*.spb' --include='*.sh' | head -20
@@ -35,23 +35,26 @@ grep -rn 'eval(\|exec(\|dangerouslySetInnerHTML\|innerHTML\s*=\|__import__\|pick
 # SQL injection risk
 grep -rn 'query.*\${\|query.*%s\|query.*format\|execute.*f"\|query.*\+' --include='*.ts' --include='*.js' --include='*.py' --include='*.java' --include='*.xml' | head -20
 
+# C/C++ unsafe string and memory functions (buffer overflow risk)
+grep -rn 'strcpy(\|strcat(\|sprintf(\|gets(\|scanf(.*%s[^0-9]\|system(\|popen(' --include='*.c' --include='*.h' --include='*.cpp' --include='*.hpp' --include='*.cc' --include='*.cxx' --include='*.hxx' | head -20
+
 # Dead code: unused imports (sample)
 grep -rn '^import.*from' --include='*.ts' --include='*.js' --include='*.py' | awk -F'import ' '{print $2}' | awk -F' from' '{print $1}' | sort | uniq -c | sort -rn | head -10
 
 # Commented-out code blocks (likely dead code)
-grep -rn '^\s*//.*function\|^\s*//.*class\|^\s*//.*const\|^\s*#.*def\|^\s*#.*class\|^\s*--.*PROCEDURE\|^\s*--.*FUNCTION\|^\s*--.*PACKAGE' --include='*.ts' --include='*.js' --include='*.py' --include='*.sql' --include='*.sps' --include='*.spb' --include='*.sh' | head -20
+grep -rn '^\s*//.*function\|^\s*//.*class\|^\s*//.*const\|^\s*#.*def\|^\s*#.*class\|^\s*--.*PROCEDURE\|^\s*--.*FUNCTION\|^\s*--.*PACKAGE\|^\s*//.*struct\|^\s*//.*typedef\|^\s*/\*.*struct\|^\s*/\*.*typedef' --include='*.ts' --include='*.js' --include='*.py' --include='*.sql' --include='*.sps' --include='*.spb' --include='*.sh' --include='*.c' --include='*.h' --include='*.cpp' --include='*.hpp' --include='*.cc' --include='*.cxx' --include='*.hxx' | head -20
 
 # Complexity: deeply nested code
-grep -rn '^\s\{16,\}' --include='*.ts' --include='*.js' --include='*.py' --include='*.sql' --include='*.sps' --include='*.spb' --include='*.sh' | head -10
+grep -rn '^\s\{16,\}' --include='*.ts' --include='*.js' --include='*.py' --include='*.sql' --include='*.sps' --include='*.spb' --include='*.sh' --include='*.c' --include='*.h' --include='*.cpp' --include='*.hpp' --include='*.cc' --include='*.cxx' --include='*.hxx' | head -10
 
 # Large files (complexity hotspots)
-find . -type f \( -name '*.ts' -o -name '*.js' -o -name '*.py' -o -name '*.java' -o -name '*.sql' -o -name '*.sps' -o -name '*.spb' -o -name '*.xml' -o -name '*.sh' \) -not -path '*/node_modules/*' -exec wc -l {} + 2>/dev/null | sort -rn | head -10
+find . -type f \( -name '*.ts' -o -name '*.js' -o -name '*.py' -o -name '*.java' -o -name '*.sql' -o -name '*.sps' -o -name '*.spb' -o -name '*.xml' -o -name '*.sh' -o -name '*.c' -o -name '*.h' -o -name '*.cpp' -o -name '*.hpp' -o -name '*.cc' -o -name '*.cxx' -o -name '*.hxx' \) -not -path '*/node_modules/*' -exec wc -l {} + 2>/dev/null | sort -rn | head -10
 
 # Deprecated package warnings
 cat package.json 2>/dev/null | grep -i 'deprecated\|legacy\|old'
 
 # Error handling: bare catches
-grep -rn 'catch\s*(\|except:\|except Exception\|rescue$\|EXCEPTION\s*$\|WHEN OTHERS' --include='*.ts' --include='*.js' --include='*.py' --include='*.rb' --include='*.sql' --include='*.sps' --include='*.spb' | head -20
+grep -rn 'catch\s*(\|except:\|except Exception\|rescue$\|EXCEPTION\s*$\|WHEN OTHERS\|catch\s*(\.\.\.)' --include='*.ts' --include='*.js' --include='*.py' --include='*.rb' --include='*.sql' --include='*.sps' --include='*.spb' --include='*.c' --include='*.h' --include='*.cpp' --include='*.hpp' --include='*.cc' --include='*.cxx' --include='*.hxx' | head -20
 ```
 
 ## Downstream Consumers
