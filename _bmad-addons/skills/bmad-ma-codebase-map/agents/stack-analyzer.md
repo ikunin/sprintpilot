@@ -35,6 +35,11 @@ cat pom.xml 2>/dev/null | head -100
 cat build.gradle 2>/dev/null | head -50
 cat *.csproj 2>/dev/null | head -50
 
+# Database / PL/SQL manifests
+ls -la *.sql *.sps *.spb 2>/dev/null | head -10
+find . -type f \( -name '*.sql' -o -name '*.sps' -o -name '*.spb' \) -not -path '*/.git/*' 2>/dev/null | wc -l
+cat tnsnames.ora sqlnet.ora 2>/dev/null | head -20
+
 # Lockfiles (versions)
 head -100 package-lock.json 2>/dev/null || head -100 yarn.lock 2>/dev/null || head -100 pnpm-lock.yaml 2>/dev/null
 
@@ -46,7 +51,7 @@ cat rust-toolchain.toml 2>/dev/null
 find . -type f -not -path '*/node_modules/*' -not -path '*/.git/*' -not -path '*/vendor/*' -not -path '*/target/*' | sed 's/.*\.//' | sort | uniq -c | sort -rn | head -20
 
 # Build tools
-ls -la webpack.config* vite.config* rollup.config* tsconfig* babel.config* .babelrc Makefile CMakeLists.txt build.gradle* pom.xml *.sln 2>/dev/null
+ls -la webpack.config* vite.config* rollup.config* tsconfig* babel.config* .babelrc Makefile CMakeLists.txt build.gradle* pom.xml *.sln *.xml 2>/dev/null
 
 # Infrastructure
 ls -la Dockerfile* docker-compose* .dockerignore 2>/dev/null

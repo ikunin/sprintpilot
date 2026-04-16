@@ -27,7 +27,7 @@ cat jest.config* vitest.config* pytest.ini setup.cfg pyproject.toml .rspec Cargo
 
 # Test file count vs source file count
 echo "Test files:" && find . -type f \( -name '*.test.*' -o -name '*.spec.*' -o -name 'test_*' -o -name '*_test.*' \) -not -path '*/node_modules/*' | wc -l
-echo "Source files:" && find . -type f \( -name '*.ts' -o -name '*.js' -o -name '*.py' -o -name '*.go' -o -name '*.rs' -o -name '*.java' \) -not -path '*/node_modules/*' -not -path '*/test*' -not -name '*.test.*' -not -name '*.spec.*' | wc -l
+echo "Source files:" && find . -type f \( -name '*.ts' -o -name '*.js' -o -name '*.py' -o -name '*.go' -o -name '*.rs' -o -name '*.java' -o -name '*.sql' -o -name '*.sps' -o -name '*.spb' -o -name '*.xml' -o -name '*.sh' \) -not -path '*/node_modules/*' -not -path '*/test*' -not -name '*.test.*' -not -name '*.spec.*' | wc -l
 
 # Test types present
 find . -path '*/e2e/*' -o -path '*/integration/*' -o -path '*/unit/*' -o -name '*.e2e.*' -o -name '*.integration.*' 2>/dev/null | head -10
@@ -36,13 +36,13 @@ find . -path '*/e2e/*' -o -path '*/integration/*' -o -path '*/unit/*' -o -name '
 cat .github/workflows/*.yml .gitlab-ci.yml Jenkinsfile azure-pipelines.yml .circleci/config.yml .travis.yml 2>/dev/null | head -80
 
 # Linting & formatting config
-ls -la .eslintrc* .prettierrc* .editorconfig .rubocop.yml .flake8 pyproject.toml rustfmt.toml .golangci.yml biome.json 2>/dev/null
+ls -la .eslintrc* .prettierrc* .editorconfig .rubocop.yml .flake8 pyproject.toml rustfmt.toml .golangci.yml biome.json .sqlfluff .sqlfluffrc 2>/dev/null
 
 # Code metrics (approximate LOC)
-find . -type f \( -name '*.ts' -o -name '*.js' -o -name '*.py' -o -name '*.go' -o -name '*.rs' -o -name '*.java' \) -not -path '*/node_modules/*' -not -path '*/.git/*' | xargs wc -l 2>/dev/null | tail -1
+find . -type f \( -name '*.ts' -o -name '*.js' -o -name '*.py' -o -name '*.go' -o -name '*.rs' -o -name '*.java' -o -name '*.sql' -o -name '*.sps' -o -name '*.spb' -o -name '*.xml' -o -name '*.sh' \) -not -path '*/node_modules/*' -not -path '*/.git/*' | xargs wc -l 2>/dev/null | tail -1
 
 # Largest files (complexity hotspots)
-find . -type f \( -name '*.ts' -o -name '*.js' -o -name '*.py' \) -not -path '*/node_modules/*' -exec wc -l {} + 2>/dev/null | sort -rn | head -10
+find . -type f \( -name '*.ts' -o -name '*.js' -o -name '*.py' -o -name '*.sql' -o -name '*.sps' -o -name '*.spb' -o -name '*.sh' \) -not -path '*/node_modules/*' -exec wc -l {} + 2>/dev/null | sort -rn | head -10
 
 # Coverage config
 cat .nycrc .istanbul.yml jest.config* vitest.config* 2>/dev/null | grep -i 'cover'
