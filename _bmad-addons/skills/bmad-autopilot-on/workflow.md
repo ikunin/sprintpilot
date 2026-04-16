@@ -23,7 +23,7 @@ Long autopilot runs will fill the context window. To prevent state loss:
 
 - **All state lives in files, never only in memory.** After every step, write progress to `{state_file}`.
 - **Story boundary = session boundary.** Never split a single story across sessions. Always finish the current story fully (dev → review → patches → done) before ending a session.
-- **Proactive session handoff.** After completing `{{session_story_limit}}` stories in one session (default: 3), write state and tell user to start a new session with `/bmad-autopilot-on`. Do not wait for compaction to happen.
+- **Proactive session handoff.** After `{{session_story_limit}}` stories have been **fully implemented** in one session (default: 3) — meaning their complete cycle is finished (dev-story GREEN + code-review + patches + artifacts committed) — write state and tell user to start a new session with `/bmad-autopilot-on`. Configurable via `autopilot.session_story_limit` in `modules/autopilot/config.yaml`. Creating a story file does NOT count toward the limit — only finishing step 7 does. Do not wait for compaction to happen.
 - **On startup: check for saved state first.** If `{state_file}` exists, this is a RESUME — read it and skip to the saved story/step. Never re-do completed work.
 
 ### Menu and interaction handling — CRITICAL
@@ -134,8 +134,8 @@ Resolve:
 - `git_status_file` = `{implementation_artifacts}/git-status.yaml` (addon-owned, write git fields here)
 - `state_file` = `{implementation_artifacts}/autopilot-state.yaml`
 - `decision_log_file` = `{implementation_artifacts}/decision-log.yaml`
-- `session_story_limit` = 3
 - `project_root` = absolute path of current working directory (store for later use)
+- `session_story_limit` is loaded below from `modules/autopilot/config.yaml` (default: 3)
 
 ### Git integration bootstrap
 
@@ -153,10 +153,15 @@ Resolve:
   - `{{pr_template}}` from `git.push.pr_template` ("modules/git/templates/pr-body.md")
   - `{{cleanup_on_merge}}` from `git.worktree.cleanup_on_merge` (true)
   </action>
+  <action>Read `{project-root}/_bmad-addons/modules/autopilot/config.yaml` (if present) and set:
+  - `{{session_story_limit}}` from `autopilot.session_story_limit` (default: 3). A value of 0 disables the limit (run until sprint complete).
+  If the file or key is missing, fall back to 3.
+  </action>
 </check>
 
 <check if="manifest does NOT exist">
   <action>Set `{{git_enabled}}` = false</action>
+  <action>Set `{{session_story_limit}}` = 3</action>
   <action>Log: "No _bmad-addons/manifest.yaml found — running stock autopilot (no git)"</action>
 </check>
 
@@ -816,7 +821,7 @@ Instruct: "Re-verify code review for story {{current_story}} — all patch findi
 </check>
 
 <action>Mark all remaining tasks for this story → `completed`</action>
-<action>Increment `{{session_stories_done}}` by 1</action>
+<action>**Increment `{{session_stories_done}}` by 1** — this is the ONLY place the counter ticks up. It runs only after the story's full implementation cycle (dev-story GREEN + code-review + patches + artifacts committed + optional push/PR). Creating a story file in step 3 never increments this counter.</action>
 <action>Remove `{{current_story}}` from `{{stories_remaining}}` list</action>
 
 <action>Report: "Story {{current_story}} done — N/N passing{{#if pr_url}} — PR: {{pr_url}}{{/if}}"</action>
@@ -857,8 +862,8 @@ Instruct: "Re-verify code review for story {{current_story}} — all patch findi
   </check>
 </check>
 
-<!-- Session limit check -->
-<check if="{{session_stories_done}} >= {{session_story_limit}}">
+<!-- Session limit check — 0 means disabled (run until sprint complete) -->
+<check if="{{session_story_limit}} > 0 AND {{session_stories_done}} >= {{session_story_limit}}">
   <goto step="9">Session checkpoint</goto>
 </check>
 

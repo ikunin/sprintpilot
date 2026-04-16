@@ -10,6 +10,9 @@ addon:
     ma:
       enabled: true
       config: modules/ma/config.yaml
+    autopilot:
+      enabled: true
+      config: modules/autopilot/config.yaml
   installed_skills:
     - bmad-autopilot-on
     - bmad-autopilot-off
