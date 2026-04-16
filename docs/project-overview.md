@@ -16,7 +16,7 @@ BMAD provides a structured AI-driven development workflow with 50+ skills and ag
 - **Repository:** Monolith
 - **Primary Languages:** Shell (Bash), Markdown
 - **Test Languages:** TypeScript (Vitest, BATS)
-- **License:** MIT
+- **License:** Apache 2.0
 
 ## Technology Stack
 

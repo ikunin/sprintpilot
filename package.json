@@ -2,7 +2,7 @@
   "name": "bmad-autopilot-addon",
   "version": "1.0.20",
   "description": "Autonomous end-to-end software delivery powered by the BMAD Method — git workflow, multi-agent skills, and autopilot execution",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/ikunin/bmad-autopilot-addon.git"
@@ -13,6 +13,7 @@
   },
   "files": [
     "bin/",
+    "lib/",
     "_bmad-addons/"
   ],
   "keywords": [
@@ -21,7 +22,7 @@
     "orchestrator",
     "ai-development",
     "claude",
-    "gemini",   
+    "gemini",
     "cursor",
     "windsurf",
     "cline",
@@ -29,7 +30,16 @@
     "multi-agent"
   ],
   "engines": {
-    "node": ">=14.0.0"
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "@clack/core": "^1.0.0",
+    "@clack/prompts": "^1.0.0",
+    "commander": "^14.0.0",
+    "fs-extra": "^11.3.0",
+    "js-yaml": "^4.1.0",
+    "picocolors": "^1.1.1",
+    "semver": "^7.6.3"
   },
   "publishConfig": {
     "provenance": true

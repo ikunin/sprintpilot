@@ -2,7 +2,7 @@
 
 [![npm version](https://img.shields.io/npm/v/bmad-autopilot-addon.svg?style=flat)](https://www.npmjs.com/package/bmad-autopilot-addon)
 [![npm downloads](https://img.shields.io/npm/dm/bmad-autopilot-addon.svg?style=flat)](https://www.npmjs.com/package/bmad-autopilot-addon)
-[![License MIT](https://img.shields.io/badge/license-MIT-blue.svg?style=flat)](LICENSE)
+[![License Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg?style=flat)](LICENSE)
 [![BMAD Method](https://img.shields.io/badge/BMAD-v6.2%2B-green.svg?style=flat)](https://github.com/bmad-code-org/BMAD-METHOD)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D14-brightgreen.svg?style=flat)](https://nodejs.org)
 [![Tools](https://img.shields.io/badge/tools-9%20supported-orange.svg?style=flat)](#supported-tools)
@@ -323,4 +323,4 @@ See the [Configuration Reference](docs/CONFIGURATION.md) for the full list.
 
 ## License
 
-MIT
+Apache 2.0

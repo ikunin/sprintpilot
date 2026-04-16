@@ -129,7 +129,7 @@ bmad-autopilot-addon/
 ├── AGENTS.md                        # BMAD workflow enforcement rules
 ├── README.md                        # Comprehensive project documentation
 ├── CHANGELOG.md                     # Version history
-├── LICENSE                          # MIT License
+├── LICENSE                          # Apache 2.0 License
 ├── .gitignore                       # Ignores _bmad/, _bmad-output/, .claude/skills/
 └── .gitattributes                   # Git attributes
 ```
