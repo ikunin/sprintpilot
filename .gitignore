@@ -12,6 +12,12 @@ _bmad-output/
 # Addon runtime artifacts
 .autopilot.lock
 
+# Node
+node_modules/
+
+# Claude Code runtime state
+.claude/scheduled_tasks.lock
+
 # OS
 .DS_Store
 *.DS_Store

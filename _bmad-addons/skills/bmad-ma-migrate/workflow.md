@@ -6,7 +6,7 @@ Plan a full-lifecycle migration from current stack to a target stack. Produces a
 
 ## Prerequisites
 
-- `bmad-ma-codebase-map` outputs in `_bmad-output/codebase-analysis/`
+- `bmad-ma-codebase-map` outputs in `{output_folder}/codebase-analysis/`
 - `bmad-ma-assess` output (`brownfield-assessment.md`) — recommended but not required
 
 ## Outputs

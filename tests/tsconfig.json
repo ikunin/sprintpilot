@@ -10,5 +10,5 @@
     "rootDir": ".",
     "types": ["vitest/globals", "node"]
   },
-  "include": ["e2e/**/*.ts"]
+  "include": ["e2e/**/*.ts", "scripts/**/*.ts", "unit/**/*.ts"]
 }

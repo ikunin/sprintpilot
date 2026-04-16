@@ -6,20 +6,20 @@ Deep-dive assessment of tech debt, dependency health, and migration paths. Runs 
 
 ## Prerequisites
 
-Run `bmad-ma-codebase-map` first. This skill reads from `_bmad-output/codebase-analysis/`.
+Run `bmad-ma-codebase-map` first. This skill reads from `{output_folder}/codebase-analysis/`.
 
 ## Output Location
 
-`_bmad-output/codebase-analysis/brownfield-assessment.md`
+`{output_folder}/codebase-analysis/brownfield-assessment.md`
 
 ---
 
 ## Step 1 — Verify Prerequisites
 
 <action>Check that codebase analysis outputs exist:
-- `_bmad-output/codebase-analysis/stack-analysis.md`
-- `_bmad-output/codebase-analysis/concerns-analysis.md`
-- `_bmad-output/codebase-analysis/quality-analysis.md`
+- `{output_folder}/codebase-analysis/stack-analysis.md`
+- `{output_folder}/codebase-analysis/concerns-analysis.md`
+- `{output_folder}/codebase-analysis/quality-analysis.md`
 If missing, suggest running `bmad-ma-codebase-map` first.
 </action>
 
@@ -105,7 +105,7 @@ Agent(
 ```
 </action>
 
-<action>Write to `_bmad-output/codebase-analysis/brownfield-assessment.md`</action>
+<action>Write to `{output_folder}/codebase-analysis/brownfield-assessment.md`</action>
 
 <action>Suggest next steps:
 - `bmad-ma-reverse-architect` — extract architecture from code

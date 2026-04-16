@@ -8,7 +8,7 @@ Analyze an existing codebase across 5 dimensions in parallel. Produces structure
 
 ## Output Location
 
-All outputs go to `{project-root}/_bmad-output/codebase-analysis/`.
+All outputs go to `{project-root}/{output_folder}/codebase-analysis/`.
 
 ## Relationship to bmad-document-project
 
@@ -18,7 +18,7 @@ Complementary, not a replacement. `bmad-document-project` generates comprehensiv
 
 ## Step 1 — Prepare
 
-<action>Create output directory: `mkdir -p _bmad-output/codebase-analysis`</action>
+<action>Create output directory: `mkdir -p {output_folder}/codebase-analysis`</action>
 <action>Determine project root absolute path: `{{project_root}}`</action>
 
 ---
@@ -39,7 +39,7 @@ Each agent has specific exploration commands to run — they are self-sufficient
 ```
 Agent(
   description: "Technology stack analysis",
-  prompt: <read from ./agents/stack-analyzer.md, set project_root={{project_root}}, output_file={{project_root}}/_bmad-output/codebase-analysis/stack-analysis.md>
+  prompt: <read from ./agents/stack-analyzer.md, set project_root={{project_root}}, output_file={{project_root}}/{output_folder}/codebase-analysis/stack-analysis.md>
 )
 ```
 
@@ -83,7 +83,7 @@ Agent(
 
 ## Step 3 — Collect and Verify
 
-<action>Verify all 5 output files exist in `_bmad-output/codebase-analysis/`:
+<action>Verify all 5 output files exist in `{output_folder}/codebase-analysis/`:
 - `stack-analysis.md`
 - `architecture-analysis.md`
 - `quality-analysis.md`
@@ -110,7 +110,7 @@ Agent(
 | Concerns | concerns-analysis.md | {critical count}, {high count} |
 | Integrations | integrations-analysis.md | {external service count} |
 
-Outputs: `_bmad-output/codebase-analysis/`
+Outputs: `{output_folder}/codebase-analysis/`
 
 Recommended next steps:
 - `bmad-ma-assess` — deep-dive tech debt and migration assessment

@@ -37,7 +37,7 @@ Skipping any step (especially RED tests before implementation) is a workflow vio
 
 ### Quick reference
 
-- Sprint state: `_bmad-output/implementation-artifacts/sprint-status.yaml`
+- Sprint state: `{implementation_artifacts}/sprint-status.yaml`
 - Full skill catalog: `_bmad-addons/BMAD.md`
 - Config: `_bmad/bmm/config.yaml`
 <!-- END:bmad-workflow-rules -->

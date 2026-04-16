@@ -6,7 +6,7 @@ Extract a formal architecture document from existing code (bottom-up). Produces 
 
 ## Prerequisites
 
-Run `bmad-ma-codebase-map` first. This skill reads from `_bmad-output/codebase-analysis/`.
+Run `bmad-ma-codebase-map` first. This skill reads from `{output_folder}/codebase-analysis/`.
 
 ## Output
 
@@ -17,9 +17,9 @@ Run `bmad-ma-codebase-map` first. This skill reads from `_bmad-output/codebase-a
 ## Step 1 — Load Context
 
 <action>Read codebase analysis files:
-- `_bmad-output/codebase-analysis/stack-analysis.md`
-- `_bmad-output/codebase-analysis/architecture-analysis.md`
-- `_bmad-output/codebase-analysis/integrations-analysis.md`
+- `{output_folder}/codebase-analysis/stack-analysis.md`
+- `{output_folder}/codebase-analysis/architecture-analysis.md`
+- `{output_folder}/codebase-analysis/integrations-analysis.md`
 These provide the foundation for deeper extraction.
 </action>
 

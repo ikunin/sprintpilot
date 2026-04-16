@@ -3,11 +3,13 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test:scripts": "bats scripts/*.bats",
+    "test:unit": "vitest run unit/",
+    "test:scripts": "vitest run scripts/",
     "test:e2e:greenfield": "vitest run e2e/greenfield.test.ts",
     "test:e2e:brownfield": "vitest run e2e/brownfield.test.ts",
     "test:e2e": "vitest run e2e/",
-    "test": "bats scripts/*.bats && vitest run e2e/"
+    "test:fast": "vitest run unit/ scripts/",
+    "test": "vitest run unit/ scripts/ e2e/"
   },
   "devDependencies": {
     "@types/node": "^25.5.0",

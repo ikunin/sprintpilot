@@ -1,55 +1,94 @@
 #!/usr/bin/env node
-const { execFileSync, execSync } = require("child_process");
-const { existsSync } = require("fs");
-const { join, dirname } = require("path");
+'use strict';
 
-const script = join(__dirname, "bmad-autopilot-addon.sh").replace(/\\/g, "/");
+const path = require('node:path');
+const { Command } = require('commander');
 
-// On Windows, `bash` in PATH is usually WSL's bash, which cannot resolve
-// Windows-style paths (C:/...). Prefer Git for Windows' bash explicitly.
-function resolveBash() {
-  if (process.platform !== "win32") return "bash";
+const pkg = require('../package.json');
+const { runInstall } = require('../lib/commands/install');
+const { runUninstall } = require('../lib/commands/uninstall');
+const { runCheckUpdate } = require('../lib/commands/check-update');
+const { readAddonManifestVersion } = require('../lib/core/bmad-config');
 
-  // 1. Well-known install locations
-  const candidates = [
-    process.env.ProgramFiles && join(process.env.ProgramFiles, "Git", "bin", "bash.exe"),
-    process.env["ProgramFiles(x86)"] && join(process.env["ProgramFiles(x86)"], "Git", "bin", "bash.exe"),
-    process.env.LOCALAPPDATA && join(process.env.LOCALAPPDATA, "Programs", "Git", "bin", "bash.exe"),
-  ].filter(Boolean);
-  for (const p of candidates) {
-    if (existsSync(p)) return p;
-  }
-
-  // 2. Derive from git.exe in PATH (covers Scoop, Chocolatey, custom installs)
+async function resolveVersion() {
+  const packageRoot = path.resolve(__dirname, '..');
+  const projectManifest = path.join(process.cwd(), '_bmad-addons', 'manifest.yaml');
+  const packageManifest = path.join(packageRoot, '_bmad-addons', 'manifest.yaml');
   try {
-    const gitPath = execSync("where git", { encoding: "utf-8" })
-      .split(/\r?\n/)
-      .map((l) => l.trim())
-      .find((l) => l.endsWith("git.exe") && !l.toLowerCase().includes("windowsapps"));
-    if (gitPath) {
-      // git.exe is typically in Git/cmd/git.exe — bash is in Git/bin/bash.exe
-      const gitDir = dirname(dirname(gitPath));
-      const bash = join(gitDir, "bin", "bash.exe");
-      if (existsSync(bash)) return bash;
-      // Some layouts have git.exe directly in Git/bin/
-      const bashSibling = join(dirname(gitPath), "bash.exe");
-      if (existsSync(bashSibling)) return bashSibling;
+    const fs = require('fs-extra');
+    if (await fs.pathExists(projectManifest)) {
+      const v = await readAddonManifestVersion(projectManifest);
+      if (v) return v;
     }
-  } catch (_) {
-    // git not in PATH — fall through
+    const v = await readAddonManifestVersion(packageManifest);
+    if (v) return v;
+  } catch {
+    // fall through
   }
-
-  console.error(
-    "bmad-autopilot-addon: Git Bash not found. Install Git for Windows from https://git-scm.com/download/win"
-  );
-  process.exit(1);
+  return pkg.version;
 }
 
-try {
-  execFileSync(resolveBash(), [script, ...process.argv.slice(2)], {
-    stdio: "inherit",
-    env: { ...process.env, BMAD_PROJECT_ROOT: process.cwd() },
-  });
-} catch (e) {
-  process.exit(e.status || 1);
+function bail(err) {
+  if (err && err.stack) {
+    console.error(err.stack);
+  } else if (err) {
+    console.error(String(err));
+  }
+  process.exit(typeof err?.exitCode === 'number' ? err.exitCode : 1);
 }
+
+async function main() {
+  const program = new Command();
+
+  program
+    .name('bmad-autopilot-addon')
+    .description('BMAD Autopilot Add-On — autonomous story execution, multi-agent skills, git workflow')
+    .version(await resolveVersion(), '-v, --version', 'Show version');
+
+  program
+    .command('install', { isDefault: true })
+    .description('Install add-on into current BMAD project')
+    .option('--tools <list>', 'Comma-separated tools (claude-code,cursor,windsurf,cline,roo,trae,kiro,gemini-cli,github-copilot,all)')
+    .option('--dry-run', 'Preview without making changes')
+    .option('--force', 'Skip backup of existing skills')
+    .option('-y, --yes', 'Non-interactive mode')
+    .action(async (options) => {
+      try {
+        await runInstall(options);
+      } catch (err) {
+        bail(err);
+      }
+    });
+
+  program
+    .command('uninstall')
+    .description('Remove add-on from current project')
+    .option('--force', 'Remove dirty worktrees without prompting')
+    .action(async (options) => {
+      try {
+        await runUninstall(options);
+      } catch (err) {
+        bail(err);
+      }
+    });
+
+  program
+    .command('check-update')
+    .description('Check if a newer version is available on npm')
+    .action(async () => {
+      try {
+        await runCheckUpdate();
+      } catch (err) {
+        bail(err);
+      }
+    });
+
+  program
+    .command('help')
+    .description('Show help')
+    .action(() => program.help({ error: false }));
+
+  await program.parseAsync(process.argv);
+}
+
+main().catch(bail);

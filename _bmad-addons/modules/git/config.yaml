@@ -45,7 +45,7 @@ git:
       plsql: [sqlfluff]
       kotlin: [ktlint, detekt]
       php: [phpstan, phpcs]
-      # To add a new language: add an entry here and a matching block in scripts/lint-changed.sh
+      # To add a new language: add an entry here and a matching block in scripts/lint-changed.js
 
   # Push & PR
   push:

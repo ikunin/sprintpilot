@@ -181,7 +181,7 @@ These skills activate an interactive agent persona. They stay in character until
 
 ## Task list hygiene
 
-BMAD skills only update `_bmad-output/implementation-artifacts/sprint-status.yaml` — they do NOT update the coding agent's task list.
+BMAD skills only update `{implementation_artifacts}/sprint-status.yaml` — they do NOT update the coding agent's task list.
 
 The task list must always reflect the full BMAD work breakdown. Before starting a story, create a task for **each step** above. Keep the list granular enough that anyone can see exactly where work stands at a glance.
 
