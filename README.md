@@ -134,17 +134,31 @@ For existing codebases, three skills chain together:
 - Concerns Hunter (TODOs, deprecated APIs, security issues, dead code)
 - Integration Mapper (external APIs, databases, env vars)
 
+Output files (`_bmad-output/codebase-analysis/`):
+
+| File | Content |
+|------|---------|
+| `stack-analysis.md` | Languages, frameworks, versions, runtime requirements, package health |
+| `architecture-analysis.md` | Project structure, architectural pattern, module boundaries, data flow |
+| `quality-analysis.md` | Test coverage, CI/CD pipeline, code conventions, complexity metrics |
+| `concerns-analysis.md` | TODOs/FIXMEs, security issues, dead code, deprecated patterns, error handling gaps |
+| `integrations-analysis.md` | External APIs, databases, message queues, cloud services, env vars |
+
+Scanned file types: TypeScript, JavaScript, Python, Java, Go, Rust, Ruby, C#, SQL, PL/SQL (`.sps`, `.spb`), XML, Shell.
+
 **`/bmad-ma-assess`** — 3 parallel agents produce actionable findings:
 - Dependency Auditor (CVEs, outdated packages, upgrade paths)
 - Debt Classifier (prioritized tech debt with effort estimates)
 - Migration Analyzer (framework upgrade paths and phased roadmap)
+
+Output file: `_bmad-output/codebase-analysis/brownfield-assessment.md` — prioritized findings with severity, confidence, effort, and migration paths.
 
 **`/bmad-ma-reverse-architect`** — 3 parallel agents extract architecture from code:
 - Component Mapper (module boundaries, dependency graph)
 - Data Flow Tracer (request lifecycle, state management)
 - Pattern Extractor (design patterns, conventions, error handling)
 
-Output: a BMAD-compatible `architecture.md` that feeds directly into `bmad-create-epics-and-stories`.
+Output file: `{planning_artifacts}/architecture.md` — BMAD-compatible architecture document that feeds directly into `bmad-create-epics-and-stories`.
 
 ### Migration Planning (`/bmad-ma-migrate`)
 
@@ -162,6 +176,14 @@ A 12-step workflow for taking a codebase from one stack to another. 4 subagent f
 10. **Parallel**: Risk Assessor produces per-phase risk matrix with rollback triggers
 11. Generate BMAD-compatible epics for sprint planning
 12. Finalize migration plan, epics, and tracking artifacts
+
+Output files:
+
+| File | Location | Content |
+|------|----------|---------|
+| `migration-plan.md` | `{planning_artifacts}/` | Full plan: strategy, compatibility matrix, coexistence design, phased roadmap, component cards, data/API migration, risk matrix |
+| `migration-epics.md` | `{planning_artifacts}/` | BMAD-compatible epics with stories, acceptance criteria, and effort estimates |
+| `migration-tracking.yaml` | `{implementation_artifacts}/` | Phase-by-phase progress tracking for sprint execution |
 
 ### Research and Discussion
 
