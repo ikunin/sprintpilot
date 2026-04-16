@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.0.19] - 2026-04-16
+
+### Fixed
+- Windows: shell wrapper used `exec bash` which resolved to WSL's bash instead of Git Bash, causing `execvpe(/bin/bash) failed` errors. Now uses `$BASH` to stay in the same Git Bash instance the Node.js launcher resolved.
+
 ## [1.0.18] - 2026-04-14
 
 ### Added
