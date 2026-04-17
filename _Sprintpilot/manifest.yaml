@@ -1,6 +1,6 @@
 addon:
   name: sprintpilot
-  version: 1.0.1
+  version: 1.0.2
   description: Sprintpilot — autopilot and multi-agent addon for BMad Method (git workflow, parallel agents, autonomous story execution)
   bmad_compatibility: ">=6.2.0"
   modules:

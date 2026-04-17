@@ -1,6 +1,6 @@
 {
   "name": "@ikunin/sprintpilot",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Sprintpilot — autopilot and multi-agent addon for BMad Method v6: git workflow, parallel agents, autonomous story execution",
   "license": "Apache-2.0",
   "repository": {

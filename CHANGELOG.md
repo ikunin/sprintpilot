@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.0.2] - 2026-04-17
+
+### Changed
+- README: section heading **"The Solution: Sprintpilot"** → **"The Solution: Sprint Autopilot"** to lead with the headline feature name.
+- README: scanned file types list for `sprintpilot-codebase-map` now correctly lists **C** and **C++** (the agent prompts have scanned `.c`, `.cc`, `.cpp`, `.cxx`, `.h`, `.hpp`, `.hxx` since legacy v1.0.21; the README was out of date).
+
+### Added (developer tooling — no user-facing runtime changes)
+- `.github/workflows/ci.yml`: fast test suite now runs on every push to `main` and every PR, in addition to the release-driven publish workflow.
+- Biome for lint + format (config at repo root, `@biomejs/biome` in `tests/` devDeps so it doesn't ship). One-time `biome check --write .` reformat applied (single-quote, trailing commas, 100-col, 2-space). No semantic code changes; 265/265 tests green before and after.
+- `.githooks/pre-push` — opt-in local hook running `biome ci .` + `npm run test:fast` before push. Enable with `git config core.hooksPath .githooks`.
+- `docs/CONTRIBUTING.md`: new **Developer setup (one-time)** section documenting the hook opt-in and the `biome check --write` auto-fix command.
+
+### Fixed (CI)
+- `detect-platform` test's "no CLI" fallback case used `/usr/bin` in its minimal PATH, which leaks `gh` on GitHub Actions runners. Replaced with a tmpdir containing only `git` and `node` symlinks — test now correctly asserts `git_only` everywhere.
+
 ## [1.0.1] - 2026-04-17
 
 ### Fixed

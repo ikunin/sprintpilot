@@ -119,6 +119,23 @@ Story isolation uses standard `git worktree add` commands, making it compatible 
 
 Many coding agents (including Claude Code) flag `git add -A` as potentially dangerous. Explicit staging also prevents accidentally committing secrets, large files, or build artifacts.
 
+## Developer setup (one-time)
+
+Enable the pre-push hook so Biome + the fast test suite run before every push:
+
+```bash
+git config core.hooksPath .githooks
+cd tests && npm install
+```
+
+The hook (at `.githooks/pre-push`) runs `biome ci .` then `npm run test:fast`. CI runs the test suite independently on push/PR, so the hook is just a locally-caught safety net.
+
+Auto-fix Biome findings:
+
+```bash
+./tests/node_modules/.bin/biome check --write .
+```
+
 ## Commit Convention
 
 ```
