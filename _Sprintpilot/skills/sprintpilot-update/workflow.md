@@ -6,7 +6,7 @@
 
 2. **Check npm registry** for the latest published version:
    ```bash
-   npm view sprintpilot@latest version 2>/dev/null
+   npm view @ikunin/sprintpilot@latest version 2>/dev/null
    ```
    If npm is not available or the command fails, report the error and stop.
 
@@ -16,7 +16,7 @@
 
 4. **Show what's new.** Fetch the changelog summary for the user:
    ```bash
-   npm view sprintpilot@latest readme 2>/dev/null | head -5
+   npm view @ikunin/sprintpilot@latest readme 2>/dev/null | head -5
    ```
    Present to the user:
    ```
@@ -34,7 +34,7 @@
 
 6. **Install the update.** On confirmation, run:
    ```bash
-   npx sprintpilot@{latest} install --yes
+   npx @ikunin/sprintpilot@latest@{latest} install --yes
    ```
    Stream the output so the user can see progress.
 

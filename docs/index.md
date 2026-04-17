@@ -35,7 +35,7 @@
 ## Getting Started
 
 1. **Install BMAD:** `npx bmad-method` in your project
-2. **Install addon:** `npx sprintpilot`
+2. **Install addon:** `npx @ikunin/sprintpilot@latest`
 3. **Start autopilot:** `/sprint-autopilot-on` in your AI coding tool
 
 For detailed setup, see the [Installation Guide](./INSTALLATION.md).

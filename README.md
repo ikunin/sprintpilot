@@ -1,7 +1,7 @@
 # Sprintpilot — Autopilot & Multi-Agent Addon for BMad Method
 
-[![npm version](https://img.shields.io/npm/v/sprintpilot.svg?style=flat)](https://www.npmjs.com/package/sprintpilot)
-[![npm downloads](https://img.shields.io/npm/dm/sprintpilot.svg?style=flat)](https://www.npmjs.com/package/sprintpilot)
+[![npm version](https://img.shields.io/npm/v/@ikunin/sprintpilot.svg?style=flat)](https://www.npmjs.com/package/@ikunin/sprintpilot)
+[![npm downloads](https://img.shields.io/npm/dm/@ikunin/sprintpilot.svg?style=flat)](https://www.npmjs.com/package/@ikunin/sprintpilot)
 [![License Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg?style=flat)](LICENSE)
 [![BMad Method](https://img.shields.io/badge/BMad%20Method-v6.2%2B-green.svg?style=flat)](https://github.com/bmad-code-org/BMAD-METHOD)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D18-brightgreen.svg?style=flat)](https://nodejs.org)
@@ -216,7 +216,7 @@ npx bmad-method install
 
 ```bash
 # 2. Install Sprintpilot (interactive — select your tool when prompted)
-npx sprintpilot
+npx @ikunin/sprintpilot@latest
 
 # 3. Start the autopilot in your IDE
 /sprint-autopilot-on
@@ -242,7 +242,7 @@ Sprintpilot uses the universal SKILL.md format — same skills work across all 9
 
 For non-interactive installs, pass one or more tool keys via `--tools`:
 ```bash
-npx sprintpilot install --tools <tool1>,<tool2> --yes
+npx @ikunin/sprintpilot@latest install --tools <tool1>,<tool2> --yes
 ```
 Valid values: `claude-code`, `cursor`, `windsurf`, `gemini-cli`, `cline`, `roo`, `trae`, `kiro`, `github-copilot`, or `all`.
 

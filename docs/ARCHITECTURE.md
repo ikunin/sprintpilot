@@ -153,7 +153,7 @@ All MA skills follow the same pattern:
 |---------|-----------|
 | BMad Method update overwrites skills | Sprintpilot skills use `sprint-autopilot-*` and `sprintpilot-*` prefixes, not in BMad Method's `skill-manifest.csv` |
 | Source files modified | Source lives in `_Sprintpilot/`, never touched by BMAD |
-| Need to re-install | `npx sprintpilot` restores all skills |
+| Need to re-install | `npx @ikunin/sprintpilot@latest` restores all skills |
 | Rollback | Backups in `.claude/.addon-backups/` (last 3 per skill) |
 
 ## Platform Abstraction

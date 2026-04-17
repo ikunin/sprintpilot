@@ -87,9 +87,9 @@ bash _Sprintpilot/scripts/lock.sh check
 ### Install/Uninstall
 
 ```bash
-npx sprintpilot install --dry-run   # preview
-npx sprintpilot                     # install
-npx sprintpilot uninstall           # uninstall
+npx @ikunin/sprintpilot@latest install --dry-run   # preview
+npx @ikunin/sprintpilot@latest                     # install
+npx @ikunin/sprintpilot@latest uninstall           # uninstall
 ```
 
 ### Skills

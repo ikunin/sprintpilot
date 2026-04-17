@@ -11,7 +11,7 @@ Throughout this document, "legacy" refers to any `bmad-autopilot-addon` install 
 npm uninstall -g bmad-autopilot-addon
 
 # 2. Install Sprintpilot
-npm install -g sprintpilot
+npm install -g @ikunin/sprintpilot
 
 # 3. Run inside your BMad Method project — auto-migrates legacy artifacts
 sprintpilot install
@@ -32,7 +32,7 @@ sprintpilot install --migrate-v1 --yes --tools claude-code
 | legacy | sprintpilot |
 |--------|-------------|
 | `bmad-autopilot-addon` on npm | `sprintpilot` on npm |
-| `npx bmad-autopilot-addon` | `npx sprintpilot` |
+| `npx bmad-autopilot-addon` | `npx @ikunin/sprintpilot@latest` |
 | bin: `bmad-autopilot-addon` | bin: `sprintpilot` |
 
 ### Project directory

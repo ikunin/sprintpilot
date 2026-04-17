@@ -72,7 +72,7 @@ Check for updates and install them from within your coding agent:
 /sprintpilot-update
 ```
 
-This compares your installed version against npm, shows what's new, and asks for confirmation before updating. You can also check from the terminal: `npx sprintpilot check-update`.
+This compares your installed version against npm, shows what's new, and asks for confirmation before updating. You can also check from the terminal: `npx @ikunin/sprintpilot@latest check-update`.
 
 ### Session Management
 

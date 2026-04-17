@@ -56,14 +56,14 @@ describe("check-update + --version", () => {
     const r = runCli(["check-update"], { cwd: dir, env: { BMAD_PROJECT_ROOT: dir } });
     expect(r.status).toBe(0);
     expect(r.stdout).toContain("Update available");
-    expect(r.stdout).toContain("npx sprintpilot@latest");
+    expect(r.stdout).toContain("npx @ikunin/sprintpilot@latest");
   });
 
   it("check-update shows up-to-date when versions match", () => {
     if (!which("npm")) return;
     let latest = "";
     try {
-      latest = execFileSync("npm", ["view", "sprintpilot@latest", "version"], { encoding: "utf8" }).trim();
+      latest = execFileSync("npm", ["view", "@ikunin/sprintpilot@latest", "version"], { encoding: "utf8" }).trim();
     } catch { return; }
     if (!latest) return;
     writeFileSync(

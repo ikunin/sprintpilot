@@ -50,7 +50,7 @@ To pre-select tools non-interactively, add `--tools <tool1>,<tool2> --yes`. See 
 ### Via npx (recommended)
 
 ```bash
-npx sprintpilot
+npx @ikunin/sprintpilot@latest
 ```
 
 The installer will:
@@ -65,13 +65,13 @@ The installer will:
 
 ```bash
 # Single tool
-npx sprintpilot install --tools <tool>
+npx @ikunin/sprintpilot@latest install --tools <tool>
 
 # Multiple tools
-npx sprintpilot install --tools <tool1>,<tool2>,<tool3>
+npx @ikunin/sprintpilot@latest install --tools <tool1>,<tool2>,<tool3>
 
 # All supported tools
-npx sprintpilot install --tools all
+npx @ikunin/sprintpilot@latest install --tools all
 ```
 
 Replace `<tool>` with one of the keys from [Supported Tools](#supported-tools) below.
@@ -79,19 +79,19 @@ Replace `<tool>` with one of the keys from [Supported Tools](#supported-tools) b
 ### Non-Interactive (CI/CD)
 
 ```bash
-npx sprintpilot install --tools <tool1>,<tool2> --yes
+npx @ikunin/sprintpilot@latest install --tools <tool1>,<tool2> --yes
 ```
 
 ### Dry Run (preview without changes)
 
 ```bash
-npx sprintpilot install --tools <tool1>,<tool2> --dry-run
+npx @ikunin/sprintpilot@latest install --tools <tool1>,<tool2> --dry-run
 ```
 
 ### Force Install (skip backups)
 
 ```bash
-npx sprintpilot install --tools <tool> --force
+npx @ikunin/sprintpilot@latest install --tools <tool> --force
 ```
 
 ### Supported Tools
@@ -150,13 +150,13 @@ Once verified, start the autopilot in your AI tool:
 Check if a newer version is available:
 
 ```bash
-npx sprintpilot check-update
+npx @ikunin/sprintpilot@latest check-update
 ```
 
 Upgrade to the latest version:
 
 ```bash
-npx sprintpilot@latest
+npx @ikunin/sprintpilot@latest
 ```
 
 This backs up existing skills before overwriting. Your configuration in `_Sprintpilot/modules/` is preserved. Previous skill versions are kept in `.claude/.addon-backups/` (last 3 per skill).
@@ -168,13 +168,13 @@ The installer also shows an update notice after installation if a newer version 
 BMAD updates may regenerate `.claude/skills/`. The add-on's skills use prefixes not in BMAD's manifest, so they typically survive. If any are lost:
 
 ```bash
-npx sprintpilot@latest
+npx @ikunin/sprintpilot@latest
 ```
 
 ## Uninstall
 
 ```bash
-npx sprintpilot uninstall
+npx @ikunin/sprintpilot@latest uninstall
 ```
 
 This will:
@@ -185,7 +185,7 @@ This will:
 
 Use `--force` to remove dirty worktrees without prompting:
 ```bash
-npx sprintpilot uninstall --force
+npx @ikunin/sprintpilot@latest uninstall --force
 ```
 
 BMAD's own skills are never affected.
@@ -306,7 +306,7 @@ Or wait 30 minutes for automatic stale lock removal.
 Use `npx` to install (requires Node.js and [Git for Windows](https://git-scm.com/download/win), which provides Git Bash):
 
 ```bash
-npx sprintpilot
+npx @ikunin/sprintpilot@latest
 ```
 
 The launcher explicitly prefers Git Bash over WSL bash, so this works from CMD, PowerShell, or Git Bash.

@@ -178,8 +178,8 @@ bash _Sprintpilot/scripts/detect-platform.sh
 
 ```bash
 # Dry run
-npx sprintpilot install --dry-run
+npx @ikunin/sprintpilot@latest install --dry-run
 
 # Force reinstall
-npx sprintpilot install --force --tools claude-code
+npx @ikunin/sprintpilot@latest install --force --tools claude-code
 ```
