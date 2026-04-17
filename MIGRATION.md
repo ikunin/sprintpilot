@@ -10,11 +10,8 @@ Throughout this document, "legacy" refers to any `bmad-autopilot-addon` install 
 # 1. Remove the old global package (permission prompt is normal)
 npm uninstall -g bmad-autopilot-addon
 
-# 2. Install Sprintpilot
-npm install -g @ikunin/sprintpilot
-
-# 3. Run inside your BMad Method project — auto-migrates legacy artifacts
-sprintpilot install
+# 2. Run inside your BMad Method project — auto-migrates legacy artifacts
+npx @ikunin/sprintpilot@latest
 ```
 
 The installer auto-detects the legacy `_bmad-addons/` directory, carries over your `modules/git/config.yaml`, `modules/ma/config.yaml`, `modules/autopilot/config.yaml` values (and any customized templates), strips the legacy agent-rules block from `AGENTS.md` / IDE rule files, removes the legacy skill directories from all configured tool skill folders, and installs the new layout at `_Sprintpilot/`.
@@ -22,7 +19,7 @@ The installer auto-detects the legacy `_bmad-addons/` directory, carries over yo
 In CI / non-interactive environments, **`--migrate-v1` is required** alongside `--yes` — `-y` alone will refuse to migrate (it won't silently destroy your legacy footprint):
 
 ```bash
-sprintpilot install --migrate-v1 --yes --tools claude-code
+npx @ikunin/sprintpilot@latest install --migrate-v1 --yes --tools claude-code
 ```
 
 ## What changes
@@ -87,7 +84,7 @@ mv _bmad-addons/modules _Sprintpilot/modules
 rm -rf _bmad-addons
 
 # Let the installer write the new skills + Sprintpilot.md + manifest
-sprintpilot install
+npx @ikunin/sprintpilot@latest
 ```
 
 ## What migration does not do
