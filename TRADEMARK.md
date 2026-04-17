@@ -2,19 +2,6 @@
 
 **Sprintpilot** is an independent, open-source project and is **not affiliated with, endorsed by, or certified by BMad Code, LLC**.
 
-## BMad Code, LLC trademarks
-
-The following names and logos are trademarks of BMad Code, LLC:
-
-- **BMad™**
-- **BMad Method™**
-- **BMad Core™**
-- **BMAD-METHOD™**
-
-Trademark protection covers all casings and variations (including *BMAD*, *bmad*, *BMadMethod*, etc.). These trademarks are **not licensed** under this project's Apache 2.0 license; the Apache 2.0 license covers the source code of Sprintpilot only.
-
-See the upstream policy at <https://github.com/bmad-code-org/BMAD-METHOD/blob/main/TRADEMARK.md>.
-
 ## How Sprintpilot uses BMad Code, LLC marks
 
 Sprintpilot uses references to BMad Method **only as permitted descriptive/nominative use**:

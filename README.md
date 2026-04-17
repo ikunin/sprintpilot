@@ -10,7 +10,7 @@
 
 Sprintpilot is an autonomous delivery addon **compatible with [BMad Method](https://github.com/bmad-code-org/BMAD-METHOD) v6**. One command takes your project from sprint plan to reviewed, tested, PR-ready code — with full git workflow and multi-agent intelligence.
 
-> **Independent project.** Sprintpilot is not affiliated with or endorsed by BMad Code, LLC. "BMad™", "BMad Method™", and "BMAD-METHOD™" are trademarks of BMad Code, LLC. See [TRADEMARK.md](TRADEMARK.md).
+> **Independent project.** Sprintpilot is not affiliated with or endorsed by BMad Code, LLC. See [TRADEMARK.md](TRADEMARK.md).
 
 > **Migrating from `bmad-autopilot-addon` v1?** See [MIGRATION.md](MIGRATION.md). `sprintpilot install` auto-detects v1 and cleanly replaces it.
 

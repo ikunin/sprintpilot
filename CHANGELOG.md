@@ -63,7 +63,7 @@ Flags:
 
 ### Acknowledgments
 
-"BMad™", "BMad Method™", and "BMAD-METHOD™" are trademarks of BMad Code, LLC. Sprintpilot is an independent, unaffiliated project. See [TRADEMARK.md](TRADEMARK.md).
+Sprintpilot is an independent, unaffiliated project. See [TRADEMARK.md](TRADEMARK.md).
 
 ---
 

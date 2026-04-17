@@ -118,4 +118,4 @@ The legacy layout is independent of the new layout, so you can always fall back.
 
 ## Why the rename?
 
-"BMad", "BMad Method", and variants are trademarks of BMad Code, LLC; their policy prohibits using these marks in product, package, company, or domain names. The legacy name `bmad-autopilot-addon` was inconsistent with that policy. Sprintpilot is a distinct mark that respects the trademark while describing the product's function. See [TRADEMARK.md](TRADEMARK.md) for details.
+The legacy name `bmad-autopilot-addon` was inconsistent with BMad Code, LLC's policy on naming third-party projects. Sprintpilot is a distinct mark that describes the product's function while respecting that policy. See [TRADEMARK.md](TRADEMARK.md) for details.
