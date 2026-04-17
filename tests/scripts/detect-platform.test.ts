@@ -1,8 +1,30 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { dirname } from "node:path";
+import { mkdtempSync, mkdirSync, rmSync, symlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { execFileSync } from "node:child_process";
 import { createTempRepo, gitIn, type TempRepo } from "./helpers/repo.js";
 import { runScript } from "./helpers/run.js";
+
+// Build a PATH containing ONLY symlinks to git + node — nothing else from
+// /usr/bin or similar. Needed because CI runners (GitHub Actions) have
+// platform CLIs like `gh` in /usr/bin, which would leak into detection and
+// break the "no known CLI" test premise.
+function makeGitNodeOnlyPath(): { path: string; cleanup: () => void } {
+  const which = (cmd: string) => {
+    try { return execFileSync("which", [cmd], { encoding: "utf8" }).trim(); }
+    catch { return null; }
+  };
+  const gitReal = which("git");
+  const nodeReal = which("node");
+  const binDir = mkdtempSync(join(tmpdir(), "gitnode-only-"));
+  if (gitReal) symlinkSync(gitReal, join(binDir, "git"));
+  if (nodeReal) symlinkSync(nodeReal, join(binDir, "node"));
+  return {
+    path: binDir,
+    cleanup: () => { try { rmSync(binDir, { recursive: true, force: true }); } catch { /* */ } },
+  };
+}
 
 describe("detect-platform", () => {
   let repo: TempRepo;
@@ -44,17 +66,17 @@ describe("detect-platform", () => {
   });
 
   it("no remote and no known CLI falls back to git_only", () => {
-    const gitPath = execFileSync("which", ["git"], { encoding: "utf8" }).trim();
-    const nodePath = execFileSync("which", ["node"], { encoding: "utf8" }).trim();
-    const minimalPath = [dirname(gitPath), dirname(nodePath), "/usr/bin", "/bin"]
-      .filter(Boolean)
-      .join(":");
-    const r = runScript("detect-platform", [], {
-      cwd: repo.dir,
-      env: { PATH: minimalPath },
-    });
-    expect(r.status).toBe(0);
-    expect(r.stdout).toContain("git_only");
+    const { path, cleanup } = makeGitNodeOnlyPath();
+    try {
+      const r = runScript("detect-platform", [], {
+        cwd: repo.dir,
+        env: { PATH: path },
+      });
+      expect(r.status).toBe(0);
+      expect(r.stdout).toContain("git_only");
+    } finally {
+      cleanup();
+    }
   });
 
   it("help flag shows usage", () => {
