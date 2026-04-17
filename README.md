@@ -148,7 +148,7 @@ Output files (`_bmad-output/codebase-analysis/`):
 | `concerns-analysis.md` | TODOs/FIXMEs, security issues, dead code, deprecated patterns, error handling gaps |
 | `integrations-analysis.md` | External APIs, databases, message queues, cloud services, env vars |
 
-Scanned file types: TypeScript, JavaScript, Python, Java, Go, Rust, Ruby, C#, SQL, PL/SQL (`.sps`, `.spb`), XML, Shell.
+Scanned file types: TypeScript, JavaScript, Python, Java, Go, Rust, Ruby, C, C++, C#, SQL, PL/SQL (`.sps`, `.spb`), XML, Shell.
 
 **`/sprintpilot-assess`** — 3 parallel agents produce actionable findings:
 - Dependency Auditor (CVEs, outdated packages, upgrade paths)
