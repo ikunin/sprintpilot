@@ -7,7 +7,7 @@ Throughout this document, "legacy" refers to any `bmad-autopilot-addon` install 
 ## TL;DR (automated migration)
 
 ```bash
-# 1. Remove the old global package (permission prompt is normal)
+# 1. Only if you installed the legacy package globally (skip for npx users):
 npm uninstall -g bmad-autopilot-addon
 
 # 2. Run inside your BMad Method project — auto-migrates legacy artifacts
