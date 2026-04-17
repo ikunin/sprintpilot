@@ -9,6 +9,8 @@
  * Run: npm run test:e2e:brownfield
  */
 
+import './harness/git-env.js';
+
 import { execSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -68,6 +70,8 @@ describe('Brownfield: json-server analysis + auth feature', () => {
     exec('git init --initial-branch=main');
     exec('git config user.email "test@bmad-e2e.com"');
     exec('git config user.name "BMAD E2E Test"');
+    exec('git config commit.gpgsign false');
+    exec('git config tag.gpgsign false');
     exec('git add .');
     exec('git commit -m "import json-server v0.17.3"');
 

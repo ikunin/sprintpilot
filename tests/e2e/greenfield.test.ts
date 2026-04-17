@@ -15,6 +15,8 @@
  * Run: npm run test:e2e:greenfield
  */
 
+import './harness/git-env.js';
+
 import { execSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -438,7 +440,15 @@ describe('Greenfield: Tic Tac Toe via Sprintpilot', () => {
     const sprintStatus = join(dir, '_bmad-output/implementation-artifacts/sprint-status.yaml');
     assertFileExists(sprintStatus);
     assertFileNotEmpty(sprintStatus);
-    assertFileContains(sprintStatus, /epic-\d+:\s*done/);
+    // Epic must be marked done. Accept both legacy `epic-N: done` and the
+    // current list form:
+    //   epics:
+    //     - id: N
+    //       status: done
+    assertFileContains(
+      sprintStatus,
+      /epic-\d+:\s*done|-\s*id:\s*\d+[\s\S]*?status:\s*done/,
+    );
     console.log('[Artifacts] sprint-status.yaml ✓');
 
     // Epics — must exist with epic sections and BDD acceptance criteria
