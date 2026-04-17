@@ -14,7 +14,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-      - name: Install test dependencies
-        run: cd tests && npm ci || npm install
+      - name: Install root dependencies (CLI runtime: commander, fs-extra, …)
+        run: npm install
+      - name: Install test dependencies (vitest, typescript)
+        run: cd tests && npm install
       - name: Run fast test suite (unit + scripts)
         run: cd tests && npm run test:fast
