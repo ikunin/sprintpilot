@@ -2,26 +2,26 @@
 
 ## System Prompt Enforcement
 
-After installation, every AI agent session starts with BMAD awareness. The installer creates system prompt files that tell the agent:
+After installation, every AI agent session starts with BMad Method awareness. The installer creates system prompt files that tell the agent:
 
 - This project uses the BMad Method
 - The 7-step story sequence is **mandatory** — no skipping steps
 - Git safety rules are enforced (no `git add -A`, no secrets)
 - Available skills and how to get started
 
-This means you don't need to tell the agent about BMAD — it already knows. If you ask the agent to "implement feature X", it will follow the BMAD story sequence automatically.
+This means you don't need to tell the agent about BMad Method — it already knows. If you ask the agent to "implement feature X", it will follow the BMad Method story sequence automatically.
 
 ### How it works per tool
 
 **Claude Code** uses a two-file pattern:
 - `CLAUDE.md` contains a single line: `@AGENTS.md` (an include directive)
-- `AGENTS.md` contains the BMAD enforcement rules (the 7-step sequence, git rules, skill reference)
+- `AGENTS.md` contains the BMad Method enforcement rules (the 7-step sequence, git rules, skill reference)
 
 **Cursor, Roo, Kiro, Trae** get a dedicated `bmad.md` file in their rules directory (e.g., `.cursor/rules/bmad.md`).
 
 **Windsurf, Cline, Gemini CLI, GitHub Copilot** get the enforcement block appended to their shared system prompt file with markers for safe update/removal.
 
-All tools reference `_Sprintpilot/BMAD.md` for the full skill catalog. The enforcement rules are in `_Sprintpilot/templates/agent-rules.md`.
+All tools reference `_Sprintpilot/Sprintpilot.md` for the full skill catalog. The enforcement rules are in `_Sprintpilot/templates/agent-rules.md`.
 
 ---
 
@@ -83,7 +83,7 @@ The autopilot checkpoints after every 3 stories (configurable). It saves state t
 ```
 
 The state file tracks:
-- Current story and BMAD step in progress
+- Current story and BMad Method step in progress
 - Stories completed this session
 - Remaining stories in the sprint
 - Next skill to invoke
@@ -169,7 +169,7 @@ Extracts architecture from existing code. Launches 3 agents:
 - **Data Flow Tracer** — request lifecycle, state management, async flows
 - **Pattern Extractor** — design patterns, conventions, error handling
 
-Produces BMAD-compatible `architecture.md` that feeds into `bmad-create-epics-and-stories`.
+Produces BMad Method-compatible `architecture.md` that feeds into `bmad-create-epics-and-stories`.
 
 ### Migration Planning
 
@@ -186,7 +186,7 @@ Launches 4 agents across steps:
 - **Test Parity Analyzer** (step 9)
 - **Risk Assessor** (step 10)
 
-Produces `migration-plan.md`, `migration-epics.md` (BMAD-compatible), and `migration-tracking.yaml`.
+Produces `migration-plan.md`, `migration-epics.md` (BMad Method-compatible), and `migration-tracking.yaml`.
 
 ### Parallel Research
 
@@ -202,7 +202,7 @@ Provide a list of research topics with types (technical/domain/market). Each top
 /sprintpilot-party-mode
 ```
 
-Select 2-3 BMAD personas (architect, PM, QA, dev, etc.) and a topic. Each persona runs as a parallel agent. Supports multiple discussion rounds where personas respond to each other.
+Select 2-3 BMad Method personas (architect, PM, QA, dev, etc.) and a topic. Each persona runs as a parallel agent. Supports multiple discussion rounds where personas respond to each other.
 
 ---
 

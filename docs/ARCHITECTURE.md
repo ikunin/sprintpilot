@@ -2,7 +2,7 @@
 
 ## Design Principles
 
-1. **Additive** — never modifies BMAD's own files; survives BMAD updates
+1. **Additive** — never modifies BMad Method's own files; survives BMad Method updates
 2. **Graceful degradation** — every feature fails safely (no git? skip git ops. No CLI? print manual commands)
 3. **Skills as prompts** — skills are markdown instructions, not executable code. Scripts handle complex logic.
 4. **Session-aware** — all state lives in files, enabling crash recovery across sessions
@@ -11,9 +11,9 @@
 
 ```
 _Sprintpilot/
-├── manifest.yaml              # Version, BMAD compatibility, module flags
-├── BMAD.md                    # Comprehensive skill reference (permanent home)
-├── install.sh / uninstall.sh   # Lifecycle scripts (multi-tool, system prompts)
+├── manifest.yaml              # Version, BMad Method compatibility, module flags
+├── Sprintpilot.md                    # Comprehensive skill reference (permanent home)
+├── bin/sprintpilot.js (install / uninstall)   # Lifecycle scripts (multi-tool, system prompts)
 ├── .secrets-allowlist          # Patterns exempt from secrets scanning
 │
 ├── templates/
@@ -27,17 +27,17 @@ _Sprintpilot/
 │   └── ma/
 │       └── config.yaml         # Multi-agent configuration
 │
-├── scripts/                    # Bash helpers called by workflow.md
-│   ├── detect-platform.sh      # Platform auto-detection
-│   ├── sanitize-branch.sh      # Story key → valid branch name
-│   ├── lock.sh                 # Session lock management
-│   ├── stage-and-commit.sh     # Explicit staging with pre-commit checks
-│   ├── sync-status.sh          # Worktree → project root status sync
-│   ├── lint-changed.sh         # Multi-language linting
-│   ├── health-check.sh         # Orphaned worktree detection
-│   └── create-pr.sh            # PR/MR creation
+├── scripts/                    # Node.js helpers invoked by workflow.md
+│   ├── detect-platform.js      # Platform auto-detection
+│   ├── sanitize-branch.js      # Story key → valid branch name
+│   ├── lock.js                 # Session lock management
+│   ├── stage-and-commit.js     # Explicit staging with pre-commit checks
+│   ├── sync-status.js          # Worktree → project root status sync
+│   ├── lint-changed.js         # Multi-language linting
+│   ├── health-check.js         # Orphaned worktree detection
+│   └── create-pr.js            # PR/MR creation
 │
-└── skills/                     # Installed to .claude/skills/ by install.sh
+└── skills/                     # Installed to .claude/skills/ by bin/sprintpilot.js install
     ├── sprint-autopilot-on/      # Enhanced autopilot (git + MA)
     ├── sprint-autopilot-off/     # Enhanced disengage
     ├── sprintpilot-code-review/    # 3 parallel review agents
@@ -53,7 +53,7 @@ _Sprintpilot/
 
 ### System Prompt Enforcement
 
-The add-on installs **system prompt files** that make every AI agent session aware of BMAD from the first message. Without this, agents would only learn about BMAD when explicitly told.
+The add-on installs **system prompt files** that make every AI agent session aware of BMad Method from the first message. Without this, agents would only learn about BMad Method when explicitly told.
 
 **Three-file architecture:**
 
@@ -61,16 +61,16 @@ The add-on installs **system prompt files** that make every AI agent session awa
 CLAUDE.md          →  @AGENTS.md (include directive)
 AGENTS.md          →  enforcement block (self-sufficient, ~40 lines)
                        "NEVER write code without the 7-step sequence"
-                       References _Sprintpilot/BMAD.md for full catalog
+                       References _Sprintpilot/Sprintpilot.md for full catalog
 _Sprintpilot/
-  BMAD.md          ←  comprehensive skill reference (permanent, not copied)
+  Sprintpilot.md          ←  comprehensive skill reference (permanent, not copied)
   templates/
     agent-rules.md ←  source template for the enforcement block
 ```
 
-**Why self-sufficient:** Tools other than Claude Code can't `@include` files. The enforcement block inlines all critical rules (mandatory 7-step sequence, git rules, autopilot commands) so it works even if the agent never reads `BMAD.md`.
+**Why self-sufficient:** Tools other than Claude Code can't `@include` files. The enforcement block inlines all critical rules (mandatory 7-step sequence, git rules, autopilot commands) so it works even if the agent never reads `Sprintpilot.md`.
 
-**Marker-based updates:** The block is wrapped in `<!-- BEGIN:bmad-workflow-rules -->` / `<!-- END:bmad-workflow-rules -->` HTML comment markers. The installer can replace it without touching user content. The uninstaller removes only the BMAD section.
+**Marker-based updates:** The block is wrapped in `<!-- BEGIN:sprintpilot-rules -->` / `<!-- END:sprintpilot-rules -->` HTML comment markers. The installer can replace it without touching user content. The uninstaller removes only the BMad Method section.
 
 **Per-tool strategies:**
 - **Claude Code**: `CLAUDE.md` → `@AGENTS.md` include → `AGENTS.md` has the rules block
@@ -96,21 +96,21 @@ cd <project-root>
 
 ### File Ownership: sprint-status.yaml vs git-status.yaml
 
-The addon **never modifies** `sprint-status.yaml` — that file is owned by BMAD. Instead, the addon tracks git metadata in its own `git-status.yaml`:
+The addon **never modifies** `sprint-status.yaml` — that file is owned by BMad Method. Instead, the addon tracks git metadata in its own `git-status.yaml`:
 
 | File | Owner | Contains |
 |------|-------|----------|
-| `sprint-status.yaml` | BMAD | Story status, phase, epic structure |
+| `sprint-status.yaml` | BMad Method | Story status, phase, epic structure |
 | `git-status.yaml` | Addon | Branch, commit SHA, PR URL, push status, lint result, worktree path |
 
 Both live in `_bmad-output/implementation-artifacts/`. The autopilot reads `sprint-status.yaml` for story selection and writes git fields to `git-status.yaml`.
 
 ```
-[In worktree] bmad-dev-story updates sprint-status.yaml (BMAD-owned)
+[In worktree] bmad-dev-story updates sprint-status.yaml (BMad Method-owned)
                      ↓
 [cd project-root] returns to project root
                      ↓
-[sync-status.sh] writes git fields to git-status.yaml (addon-owned)
+[sync-status.js] writes git fields to git-status.yaml (addon-owned)
                  atomic write (tmp + mv), never touches sprint-status
 ```
 
@@ -152,14 +152,14 @@ All MA skills follow the same pattern:
 | Concern | Protection |
 |---------|-----------|
 | BMad Method update overwrites skills | Sprintpilot skills use `sprint-autopilot-*` and `sprintpilot-*` prefixes, not in BMad Method's `skill-manifest.csv` |
-| Source files modified | Source lives in `_Sprintpilot/`, never touched by BMAD |
+| Source files modified | Source lives in `_Sprintpilot/`, never touched by BMad Method |
 | Need to re-install | `npx @ikunin/sprintpilot@latest` restores all skills |
 | Rollback | Backups in `.claude/.addon-backups/` (last 3 per skill) |
 
 ## Platform Abstraction
 
 ```
-detect-platform.sh:
+detect-platform.js:
   1. Explicit config (provider: github) → use it
   2. CLI detection (gh --version, glab --version) → first found
   3. Remote URL regex (github.com, gitlab.) → pattern match

@@ -182,13 +182,13 @@ Commands use YAML `|` literal blocks to preserve HEREDOC formatting.
 
 ## System Prompt Files
 
-These are created by `install.sh` and enforce BMAD workflows from the first agent message.
+These are created by `bin/sprintpilot.js install` and enforce BMad Method workflows from the first agent message.
 
 ### Source Files (in `_Sprintpilot/`)
 
 | File | Purpose | Editable? |
 |------|---------|-----------|
-| `BMAD.md` | Comprehensive skill reference by lifecycle phase | Yes — add skills, update descriptions |
+| `Sprintpilot.md` | Comprehensive skill reference by lifecycle phase | Yes — add skills, update descriptions |
 | `templates/agent-rules.md` | Enforcement block injected into system prompts | Yes — add constraints, update rules |
 
 ### Generated Files (per tool)
@@ -207,13 +207,13 @@ These are created by `install.sh` and enforce BMAD workflows from the first agen
 
 ### Customizing Rules
 
-Edit `_Sprintpilot/templates/agent-rules.md` to change enforcement rules. Keep the `<!-- BEGIN:bmad-workflow-rules -->` and `<!-- END:bmad-workflow-rules -->` markers — they are required for idempotent updates and clean uninstall.
+Edit `_Sprintpilot/templates/agent-rules.md` to change enforcement rules. Keep the `<!-- BEGIN:sprintpilot-rules -->` and `<!-- END:sprintpilot-rules -->` markers — they are required for idempotent updates and clean uninstall.
 
-After editing, re-run `install.sh` to propagate changes to all tool system prompts.
+After editing, re-run `bin/sprintpilot.js install` to propagate changes to all tool system prompts.
 
 ## Git Status File (`git-status.yaml`)
 
-The addon tracks git metadata in its own file at `_bmad-output/implementation-artifacts/git-status.yaml`. It never modifies BMAD's `sprint-status.yaml`.
+The addon tracks git metadata in its own file at `_bmad-output/implementation-artifacts/git-status.yaml`. It never modifies BMad Method's `sprint-status.yaml`.
 
 Example schema:
 

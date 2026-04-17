@@ -93,15 +93,15 @@ cd tests && npm test
 
 ## Making Changes
 
-### Adding a New Shell Script
+### Adding a New Script
 
-1. Create the script in `_Sprintpilot/scripts/`
-2. Make it executable: `chmod +x _Sprintpilot/scripts/your-script.sh`
+1. Create the script in `_Sprintpilot/scripts/your-script.js`
+2. Use the `#!/usr/bin/env node` shebang
 3. Follow conventions:
-   - `set -e` at the top
-   - Support `--help` flag
+   - `'use strict';` at the top
+   - Support `--help` flag (parse via `_Sprintpilot/lib/runtime/args.js`)
    - Exit codes: 0=success, 1=expected failure, 2=error
-   - Self-contained — no sourcing other addon scripts
+   - Zero external runtime deps — Node built-ins only; import shared helpers from `_Sprintpilot/lib/runtime/` if needed
 4. Add BATS tests in `tests/scripts/your-script.bats`
 
 ### Adding a New Skill
@@ -110,7 +110,7 @@ cd tests && npm test
 2. Add `SKILL.md` (metadata) and `workflow.md` (instructions)
 3. For multi-agent skills, add prompts in `agents/` subdirectory
 4. Register in `_Sprintpilot/manifest.yaml` under `installed_skills`
-5. Update `install.sh` if the skill needs special handling
+5. Update `bin/sprintpilot.js install` if the skill needs special handling
 
 ### Adding a New Platform
 
@@ -143,7 +143,7 @@ Co-Authored-By: Claude <tool>@anthropic.com
 | Inlined agent prompts (not files) | Subagents can't read files from disk |
 | EnterWorktree over manual git worktree | Claude Code manages cleanup and paths |
 | Explicit file staging | Prevents accidental secret/binary commits |
-| Separate git-status.yaml | Never modify BMAD's sprint-status.yaml |
+| Separate git-status.yaml | Never modify BMad Method's sprint-status.yaml |
 
 ## Debugging
 
@@ -151,17 +151,17 @@ Co-Authored-By: Claude <tool>@anthropic.com
 
 ```bash
 # Check lock status
-bash _Sprintpilot/scripts/lock.sh status
+node _Sprintpilot/scripts/lock.js status
 
 # Force release
-bash _Sprintpilot/scripts/lock.sh release
+node _Sprintpilot/scripts/lock.js release
 ```
 
 ### Worktree Issues
 
 ```bash
 # Check worktree health
-bash _Sprintpilot/scripts/health-check.sh
+node _Sprintpilot/scripts/health-check.js
 
 # List all worktrees
 git worktree list
@@ -171,7 +171,7 @@ git worktree list
 
 ```bash
 # Test platform detection
-bash _Sprintpilot/scripts/detect-platform.sh
+node _Sprintpilot/scripts/detect-platform.js
 ```
 
 ### Installer

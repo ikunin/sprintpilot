@@ -6,14 +6,14 @@ The operational backbone of the add-on. All scripts are in `_Sprintpilot/scripts
 
 | Script | Lines | Purpose | Dependencies |
 |--------|-------|---------|-------------|
-| `lock.sh` | 112 | Mutex lock with stale timeout | Core Unix tools |
-| `health-check.sh` | 108 | Worktree state classification | Git |
-| `stage-and-commit.sh` | 169 | Explicit staging with pre-commit validation | Git |
-| `sanitize-branch.sh` | 84 | Story key to branch name conversion | Git, sha256sum/shasum |
-| `detect-platform.sh` | 90 | Git hosting platform auto-detection | Platform CLIs (optional) |
-| `create-pr.sh` | 199 | PR/MR creation across platforms | Platform CLI or API tokens |
-| `sync-status.sh` | 139 | Git metadata tracking in YAML | awk |
-| `lint-changed.sh` | 293 | Multi-language linting of changed files | Language-specific linters |
+| `lock.js` | 112 | Mutex lock with stale timeout | Core Unix tools |
+| `health-check.js` | 108 | Worktree state classification | Git |
+| `stage-and-commit.js` | 169 | Explicit staging with pre-commit validation | Git |
+| `sanitize-branch.js` | 84 | Story key to branch name conversion | Git, sha256sum/shasum |
+| `detect-platform.js` | 90 | Git hosting platform auto-detection | Platform CLIs (optional) |
+| `create-pr.js` | 199 | PR/MR creation across platforms | Platform CLI or API tokens |
+| `sync-status.js` | 139 | Git metadata tracking in YAML | awk |
+| `lint-changed.js` | 293 | Multi-language linting of changed files | Language-specific linters |
 
 **Total:** 8 scripts, ~1,194 lines
 
@@ -75,8 +75,8 @@ Skills are markdown-based prompts interpreted by AI tools. All source skills are
 
 | File | Purpose |
 |------|---------|
-| `_Sprintpilot/install.sh` | Multi-tool installer supporting 9 AI coding tools |
-| `_Sprintpilot/uninstall.sh` | Clean removal with worktree cleanup |
+| `bin/sprintpilot.js (install subcommand)` | Multi-tool installer supporting 9 AI coding tools |
+| `bin/sprintpilot.js (uninstall subcommand)` | Clean removal with worktree cleanup |
 | `_Sprintpilot/templates/agent-rules.md` | Template for system prompt generation |
 | `_Sprintpilot/.secrets-allowlist` | Patterns excluded from secrets scanning |
 
@@ -110,7 +110,7 @@ Skills are markdown-based prompts interpreted by AI tools. All source skills are
 |--------|---------|
 | `claude-runner.ts` | Spawns Claude Code CLI, captures JSON output |
 | `assertions.ts` | File system, YAML, and git state assertions |
-| `temp-project.ts` | Temporary project factory with BMAD setup |
+| `temp-project.ts` | Temporary project factory with BMad Method setup |
 | `cost-tracker.ts` | API cost tracking and reporting |
 
 ## Platform Support Matrix

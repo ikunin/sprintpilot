@@ -8,7 +8,7 @@ One command (`/sprint-autopilot-on`) takes a project from sprint plan to reviewe
 
 ## Purpose
 
-BMAD provides a structured AI-driven development workflow with 50+ skills and agent personas. Using it manually means invoking each skill one at a time, navigating menus, and handling git operations yourself. The Autopilot Add-On automates the entire sprint lifecycle: story creation, TDD implementation, code review, patching, linting, git branching, PR creation, and session management.
+BMad Method provides a structured AI-driven development workflow with 50+ skills and agent personas. Using it manually means invoking each skill one at a time, navigating menus, and handling git operations yourself. The Autopilot Add-On automates the entire sprint lifecycle: story creation, TDD implementation, code review, patching, linting, git branching, PR creation, and session management.
 
 ## Project Type
 
@@ -34,7 +34,7 @@ BMAD provides a structured AI-driven development workflow with 50+ skills and ag
 
 ## Architecture
 
-- **Additive design**: Layers on top of BMAD without modifying core BMAD files
+- **Additive design**: Layers on top of BMad Method without modifying core BMad Method files
 - **Skills as prompts**: Skill definitions are markdown files interpreted by AI tools
 - **Scripts as infrastructure**: Shell scripts handle deterministic operations (git, lint, staging)
 - **Multi-tool support**: Installs into 9 AI coding tools (Claude Code, Cursor, Windsurf, Cline, Roo, Trae, Kiro, GitHub Copilot, Gemini CLI)

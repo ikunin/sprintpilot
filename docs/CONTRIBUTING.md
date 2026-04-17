@@ -5,9 +5,9 @@
 The add-on consists of four layers:
 
 1. **Skills** (`skills/`) — Markdown prompts that instruct the AI agent. User-facing interface.
-2. **Scripts** (`scripts/`) — Bash helpers for complex operations. Called by skills via the Bash tool.
+2. **Scripts** (`scripts/`) — Node.js helpers for complex operations. Invoked by skills via `node <script>.js`.
 3. **Config** (`modules/`) — YAML configuration read by skills at runtime.
-4. **System Prompts** (`BMAD.md` + `templates/agent-rules.md`) — Enforce BMAD workflows from session start.
+4. **System Prompts** (`Sprintpilot.md` + `templates/agent-rules.md`) — Enforce BMad Method workflows from session start.
 
 ## Adding a New Skill
 
@@ -16,9 +16,9 @@ The add-on consists of four layers:
 3. Add `workflow.md` with the full workflow instructions
 4. If the skill uses subagents, add agent prompts to `agents/`
 5. Add the skill name to `manifest.yaml` under `installed_skills`
-6. If the skill is part of the mandatory workflow, add it to `_Sprintpilot/BMAD.md`
+6. If the skill is part of the mandatory workflow, add it to `_Sprintpilot/Sprintpilot.md`
 7. If it introduces new constraints, add rules to `templates/agent-rules.md`
-8. Run `install.sh` to deploy
+8. Run `bin/sprintpilot.js install` to deploy
 
 ### SKILL.md Template
 
@@ -42,27 +42,26 @@ Follow the instructions in ./workflow.md.
 ## Adding a Script
 
 Scripts should be:
-- Self-contained (no dependencies beyond standard Unix tools + git)
+- Plain Node.js — **zero runtime dependencies** beyond Node built-ins (`fs`, `child_process`, `crypto`, `https`, …) and `git`. Shared zero-dep helpers live in `_Sprintpilot/lib/runtime/` (arg parsing, YAML-lite, git wrapper, secrets scan, etc.)
 - Support `--help` for usage information
 - Use clear exit codes (0 = success, 1 = expected failure, 2 = error)
 - Write warnings to stderr, primary output to stdout
 - Handle edge cases gracefully (missing files, empty input)
+- Use `#!/usr/bin/env node` shebang for CLI entry points
 
-## Shell Compatibility
+## Runtime Compatibility
 
-All scripts require **Bash 3.2+** (stock macOS). They also work on:
-- Linux (Bash 4+/5+)
-- Windows Git Bash
-- WSL (Windows Subsystem for Linux)
-
-No associative arrays (Bash 4+ only). No `set -u` (some variables are intentionally unset). Use `#!/bin/bash` shebang. The repo has `.gitattributes` enforcing LF line endings for scripts.
+Scripts run on **Node.js 18+** (matches `package.json` `engines.node`). This covers:
+- macOS (system Node or via `nvm`)
+- Linux (distro package, `nvm`, etc.)
+- Windows (native `node.exe` — no Bash dependency, so the historical WSL/Git-Bash PATH issues don't apply at runtime)
 
 ## Multi-Tool Compatibility
 
 Skills must work across all 9 supported tools. Guidelines:
 - Don't assume `.claude/` directory structure — other tools use `.cursor/`, `.windsurf/`, etc.
 - Don't invoke the `Skill` tool from subagent prompts (subagents can't use it)
-- System prompt changes in `templates/agent-rules.md` must keep the `<!-- BEGIN/END:bmad-workflow-rules -->` markers for idempotent install/uninstall
+- System prompt changes in `templates/agent-rules.md` must keep the `<!-- BEGIN/END:sprintpilot-rules -->` markers for idempotent install/uninstall
 - Don't rename existing config keys (breaks user customizations) — add new keys instead
 
 ## Exit Code Convention
@@ -79,9 +78,9 @@ All scripts should follow this convention:
 Each script supports `--help` and can be tested standalone:
 
 ```bash
-bash _Sprintpilot/scripts/detect-platform.sh
-bash _Sprintpilot/scripts/sanitize-branch.sh "test-story-key"
-bash _Sprintpilot/scripts/lock.sh check
+node _Sprintpilot/scripts/detect-platform.js
+node _Sprintpilot/scripts/sanitize-branch.js "test-story-key"
+node _Sprintpilot/scripts/lock.js check
 ```
 
 ### Install/Uninstall
@@ -101,12 +100,12 @@ Skills are tested by invoking them in your coding agent of choice:
 
 ## Design Decisions
 
-### Why scripts instead of inline Bash in workflow.md?
+### Why separate scripts instead of inline steps in workflow.md?
 
-Skills are markdown prompts interpreted by an LLM. Complex multi-step Bash embedded in markdown is fragile — the LLM may misinterpret, skip steps, or introduce errors. Scripts are:
-- Testable independently
-- Deterministic (Bash, not LLM interpretation)
-- Maintainable (edit script, not a 500-line workflow)
+Skills are markdown prompts interpreted by an LLM. Complex multi-step logic embedded in markdown is fragile — the LLM may misinterpret, skip steps, or introduce errors. Scripts are:
+- Testable independently (Vitest unit + integration coverage)
+- Deterministic (Node execution, not LLM interpretation)
+- Maintainable (edit one script, not a 500-line workflow)
 
 ### Why inlined agent prompts instead of Skill references?
 
@@ -125,11 +124,9 @@ Many coding agents (including Claude Code) flag `git add -A` as potentially dang
 ```
 feat({scope}): description     # new feature
 fix({scope}): description      # bug fix
-docs: description               # documentation
-refactor({scope}): description  # code change without feature/fix
+docs: description              # documentation
+refactor({scope}): description # code change without feature/fix
+chore({scope}): description    # non-user-facing maintenance
 ```
 
-Include co-authorship:
-```
-Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
-```
+Use `!` for breaking changes (`refactor!: …`, `feat!: …`).

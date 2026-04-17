@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-1. **Node.js 18+** and **npm** — required for BMAD installer and most projects
+1. **Node.js 18+** and **npm** — required for BMad Method installer and most projects
 2. **Git** — [git-scm.com/downloads](https://git-scm.com/downloads)
 3. **A supported AI code agent** — Claude Code, Cursor, Windsurf, etc. (see [Supported Tools](#supported-tools))
 4. **Platform CLI** (optional) — `gh` for GitHub, `glab` for GitLab, etc. (see [Platform CLI Setup](#platform-cli-setup))
@@ -29,7 +29,7 @@ git clone https://github.com/your-org/your-project.git
 cd your-project
 ```
 
-## Step 2: Install BMAD
+## Step 2: Install BMad Method
 
 Run interactively and pick your coding agent when prompted:
 
@@ -54,8 +54,8 @@ npx @ikunin/sprintpilot@latest
 ```
 
 The installer will:
-1. Verify BMAD is installed
-2. Auto-detect which tools have BMAD configured
+1. Verify BMad Method is installed
+2. Auto-detect which tools have BMad Method configured
 3. Prompt you to select target tools (or press Enter to use detected ones)
 4. Install 10 skills to each selected tool's skills directory
 5. Back up any existing skills before overwriting
@@ -126,7 +126,7 @@ You should see 10 skill directories per tool:
 - `sprintpilot-reverse-architect`, `sprintpilot-migrate`
 - `sprintpilot-research`, `sprintpilot-party-mode`
 
-The installer also creates **system prompt files** that enforce BMAD workflows:
+The installer also creates **system prompt files** that enforce BMad Method workflows:
 
 | Tool | File Created |
 |------|-------------|
@@ -137,7 +137,7 @@ The installer also creates **system prompt files** that enforce BMAD workflows:
 | Gemini CLI | Appends to `GEMINI.md` |
 | Others | Tool-specific rules file |
 
-These files tell the AI agent about BMAD's mandatory workflow, preventing it from skipping steps or writing code without a story.
+These files tell the AI agent about BMad Method's mandatory workflow, preventing it from skipping steps or writing code without a story.
 
 Once verified, start the autopilot in your AI tool:
 
@@ -163,9 +163,9 @@ This backs up existing skills before overwriting. Your configuration in `_Sprint
 
 The installer also shows an update notice after installation if a newer version exists on npm.
 
-## After a BMAD Update
+## After a BMad Method Update
 
-BMAD updates may regenerate `.claude/skills/`. The add-on's skills use prefixes not in BMAD's manifest, so they typically survive. If any are lost:
+BMad Method updates may regenerate `.claude/skills/`. The add-on's skills use prefixes not in BMad Method's manifest, so they typically survive. If any are lost:
 
 ```bash
 npx @ikunin/sprintpilot@latest
@@ -188,7 +188,7 @@ Use `--force` to remove dirty worktrees without prompting:
 npx @ikunin/sprintpilot@latest uninstall --force
 ```
 
-BMAD's own skills are never affected.
+BMad Method's own skills are never affected.
 
 ## Platform CLI Setup
 
@@ -279,9 +279,9 @@ git:
 
 ## Troubleshooting
 
-### "BMAD not found"
+### "BMad Method not found"
 
-Ensure BMAD is installed in the project root (`_bmad/_config/manifest.yaml` must exist).
+Ensure BMad Method is installed in the project root (`_bmad/_config/manifest.yaml` must exist).
 
 ### Skills not appearing in your coding agent
 

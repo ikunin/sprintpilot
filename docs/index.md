@@ -10,7 +10,7 @@
 ### Quick Reference
 
 - **Framework:** BMad Method >=6.2.0
-- **Entry Point:** `_Sprintpilot/install.sh` (installation), `/sprint-autopilot-on` (execution)
+- **Entry Point:** `bin/sprintpilot.js (install subcommand)` (installation), `/sprint-autopilot-on` (execution)
 - **Architecture Pattern:** Skills-as-prompts + shell script infrastructure
 - **Test Suite:** 80 BATS unit tests + 2 Vitest e2e suites
 
@@ -34,7 +34,7 @@
 
 ## Getting Started
 
-1. **Install BMAD:** `npx bmad-method` in your project
+1. **Install BMad Method:** `npx bmad-method` in your project
 2. **Install addon:** `npx @ikunin/sprintpilot@latest`
 3. **Start autopilot:** `/sprint-autopilot-on` in your AI coding tool
 

@@ -1,6 +1,6 @@
 # Extending the Add-On
 
-> **Windows note:** All addon scripts (`scripts/*.sh`, `install.sh`, `uninstall.sh`) run under **Git Bash**, which ships with [Git for Windows](https://git-scm.com/download/win). The launcher explicitly prefers Git Bash over WSL bash, so Windows-style paths (`C:\...`) work transparently. When extending the addon on Windows, edit the `.sh` files in Git Bash (or any editor with LF line endings) and use forward slashes inside scripts.
+> **Windows note:** All addon scripts (`scripts/*.js`, `bin/sprintpilot.js install`, `bin/sprintpilot.js uninstall`) run under **Node.js 18+** with no Bash dependency. Any native `node.exe` (PATH, `nvm-windows`, Scoop, etc.) works; WSL and Git Bash are not required. Use forward slashes in paths — Node handles Windows path separators transparently.
 
 ## Adding a New Git Platform
 
@@ -28,7 +28,7 @@ The addon supports GitHub, GitLab, Bitbucket, and Gitea. To add another platform
           -d '{"base":"{base_branch}","head":"{branch}","title":"{title}","body":"{body}"}'
 ```
 
-### 2. Add to `scripts/detect-platform.sh`
+### 2. Add to `scripts/detect-platform.js`
 
 Add CLI detection:
 ```bash
@@ -49,7 +49,7 @@ if echo "$REMOTE_URL" | grep -qE 'myplatform\.com[:/]'; then
 fi
 ```
 
-### 3. Add to `scripts/create-pr.sh`
+### 3. Add to `scripts/create-pr.js`
 
 Add a case block:
 ```bash
@@ -97,7 +97,7 @@ Under `lint.linters`, add your language:
       mylang: [linter1, linter2]    # First found wins
 ```
 
-### 2. Add to `scripts/lint-changed.sh`
+### 2. Add to `scripts/lint-changed.js`
 
 Add a detection + run block inside the `detect_and_lint()` function:
 
