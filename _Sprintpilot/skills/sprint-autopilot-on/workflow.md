@@ -177,7 +177,7 @@ Resolve:
     <action>STOP</action>
   </check>
 
-  <action>**Lock file** — run: `bash {{project_root}}/_Sprintpilot/scripts/lock.sh acquire`
+  <action>**Lock file** — run: `node {{project_root}}/_Sprintpilot/scripts/lock.js acquire`
   Output will be one of:
   - `ACQUIRED:<session-id>` → proceed
   - `ACQUIRED_STALE:<session-id>` → stale lock removed, proceed
@@ -189,18 +189,18 @@ Resolve:
   </check>
 
   <action>**Detect platform** — run:
-  `bash {{project_root}}/_Sprintpilot/scripts/detect-platform.sh --provider {{git.platform.provider}}`
+  `node {{project_root}}/_Sprintpilot/scripts/detect-platform.js --provider {{git.platform.provider}}`
   Output: `github`, `gitlab`, or `git_only`. Set `{{platform}}` to the output.
   Log: "Platform detected: {{platform}}"
   </action>
 
   <action>**Worktree health check** — run:
-  `bash {{project_root}}/_Sprintpilot/scripts/health-check.sh --base-branch {{base_branch}} --status-file {{status_file}}`
+  `node {{project_root}}/_Sprintpilot/scripts/health-check.js --base-branch {{base_branch}} --status-file {{status_file}}`
   Output classifies each worktree as CLEAN_DONE, COMMITTED, STALE, DIRTY, or ORPHAN.
   - CLEAN_DONE: `git worktree remove .worktrees/<name>` + `git worktree prune`
   - COMMITTED: log "Recoverable work found for <name> — will push via git -C"
     Push the branch: `git -C .worktrees/<name> push -u origin <branch> 2>&1`
-    If `{{create_pr}}` is true AND platform != git_only: create PR via `bash {{project_root}}/_Sprintpilot/scripts/create-pr.sh ...`
+    If `{{create_pr}}` is true AND platform != git_only: create PR via `node {{project_root}}/_Sprintpilot/scripts/create-pr.js ...`
     If `{{create_pr}}` is false OR platform is git_only: merge directly — `git checkout -B {{base_branch}} origin/{{base_branch}} && git merge <branch> --no-edit && git push origin {{base_branch}}`
     Then remove worktree.
   - STALE: `git worktree remove .worktrees/<name> --force` + prune
@@ -230,7 +230,7 @@ Resolve:
               **IMPORTANT:** sync-status.sh does full block replacement. If the story already has an entry in `{git_status_file}`, re-read its existing fields and pass ALL of them alongside `--merge-status`. If no entry exists yet, pass at minimum `--branch` and `--push-status "pushed"`.
         - If `{{platform}}` is NOT git_only (github, gitlab, bitbucket, gitea) AND `{{create_pr}}` is true:
           - Check if PR/MR already exists for this branch (platform-specific check via create-pr.sh or CLI)
-          - If no PR: create one via `bash {{project_root}}/_Sprintpilot/scripts/create-pr.sh --platform {{platform}} ...`
+          - If no PR: create one via `node {{project_root}}/_Sprintpilot/scripts/create-pr.js --platform {{platform}} ...`
           - Log: "PR created/found for <story-key>"
           - Update `{git_status_file}` via sync-status.sh: set `--merge-status "pr_pending"` for this story (same full-field requirement as above)
     - If status IS "done" AND branch still exists AND `{{cleanup_on_merge}}` is true:
@@ -427,7 +427,7 @@ Resolve:
 <!-- GIT: Enter worktree before dev-story -->
 <check if="{{git_enabled}} AND {{next_skill}} is bmad-dev-story">
   <action>**Sanitize branch name** — run:
-  `bash {{project_root}}/_Sprintpilot/scripts/sanitize-branch.sh "{{current_story}}" --prefix "{{branch_prefix}}" --max-length 60`
+  `node {{project_root}}/_Sprintpilot/scripts/sanitize-branch.js "{{current_story}}" --prefix "{{branch_prefix}}" --max-length 60`
   Output: sanitized name (without prefix). Set `{{branch_name}}` = output.
   Full branch ref will be `{{branch_prefix}}{{branch_name}}`.
   </action>
@@ -530,7 +530,7 @@ pr_base: {{pr_base}}
   <!-- GIT: Lint, stage, and commit after dev-story -->
   <check if="{{git_enabled}} AND {{in_worktree}}">
     <action>**Lint changed files** — run:
-    `bash {{project_root}}/_Sprintpilot/scripts/lint-changed.sh --limit 100 --output-file lint-output.txt`
+    `node {{project_root}}/_Sprintpilot/scripts/lint-changed.js --limit 100 --output-file lint-output.txt`
     Log the output summary (non-blocking — lint never halts the autopilot).
     Set `{{lint_result}}` from the summary line.
     </action>
@@ -542,7 +542,7 @@ pr_base: {{pr_base}}
     - `{patch-title}` → from review finding title, fallback to "code review fix"
     Read the commit template from `git.commit_templates.story` in config (default: `feat({epic}): {story-title} ({story-key})`).
     Then run:
-    `bash {{project_root}}/_Sprintpilot/scripts/stage-and-commit.sh --message "feat({{epic}}): {{story-title}} ({{current_story}})" --allowlist {{project_root}}/_Sprintpilot/.secrets-allowlist`
+    `node {{project_root}}/_Sprintpilot/scripts/stage-and-commit.js --message "feat({{epic}}): {{story-title}} ({{current_story}})" --allowlist {{project_root}}/_Sprintpilot/.secrets-allowlist`
     Output: commit SHA. Set `{{story_commit}}` = output.
     Warnings (secrets, large files) printed to stderr — review but don't halt unless user says to.
     </action>
@@ -588,7 +588,7 @@ pr_base: {{pr_base}}
   <action>Sanitize branch name for `{{current_story}}` (same logic as step 3)</action>
   <action>Check if branch already registered in `{git_status_file}` for this story → skip if so</action>
   <action>Register branch in `{git_status_file}`:
-  `bash {{project_root}}/_Sprintpilot/scripts/sync-status.sh --story "{{current_story}}" --git-status-file "{{project_root}}/_bmad-output/implementation-artifacts/git-status.yaml" --branch "{{branch_prefix}}{{branch_name}}" --platform "{{platform}}" --base-branch "{{base_branch}}"`
+  `node {{project_root}}/_Sprintpilot/scripts/sync-status.js --story "{{current_story}}" --git-status-file "{{project_root}}/_bmad-output/implementation-artifacts/git-status.yaml" --branch "{{branch_prefix}}{{branch_name}}" --platform "{{platform}}" --base-branch "{{base_branch}}"`
   </action>
 </check>
 
@@ -741,7 +741,7 @@ Instruct: "Re-verify code review for story {{current_story}} — all patch findi
      - `{lint-result}` → `{{lint_result}}`
      - `{test-result}` → from last test run output
      - `{patch-count}` → number of patch commits
-  3. Run: `bash {{project_root}}/_Sprintpilot/scripts/create-pr.sh --platform {{platform}} --branch {{branch_prefix}}{{branch_name}} --base {{pr_base}} --title "{{story-title}} ({{current_story}})" --body "<filled template>"`
+  3. Run: `node {{project_root}}/_Sprintpilot/scripts/create-pr.js --platform {{platform}} --branch {{branch_prefix}}{{branch_name}} --base {{pr_base}} --title "{{story-title}} ({{current_story}})" --body "<filled template>"`
   4. Output: PR URL or "SKIPPED". Set `{{pr_url}}` = output.
   If creation fails → log warning, set `{{pr_url}}` = null, continue.
   </action>
@@ -800,7 +800,7 @@ Instruct: "Re-verify code review for story {{current_story}} — all patch findi
   </action>
 
   <action>**Write git status** to addon's own file (NEVER modify sprint-status.yaml) — runs AFTER checkout to base branch so the file persists in the working tree for the commit below:
-  `bash {{project_root}}/_Sprintpilot/scripts/sync-status.sh --story "{{current_story}}" --git-status-file "{{project_root}}/_bmad-output/implementation-artifacts/git-status.yaml" --branch "{{branch_prefix}}{{branch_name}}" --commit "{{story_commit}}" --patch-commits "{{patch_commits_csv}}" --push-status "{{push_status}}" --merge-status "{{merge_status}}" --pr-url "{{pr_url}}" --lint-result "{{lint_result}}" --worktree "{{project_root}}/.worktrees/{{current_story}}" --platform "{{platform}}" --base-branch "{{base_branch}}"`
+  `node {{project_root}}/_Sprintpilot/scripts/sync-status.js --story "{{current_story}}" --git-status-file "{{project_root}}/_bmad-output/implementation-artifacts/git-status.yaml" --branch "{{branch_prefix}}{{branch_name}}" --commit "{{story_commit}}" --patch-commits "{{patch_commits_csv}}" --push-status "{{push_status}}" --merge-status "{{merge_status}}" --pr-url "{{pr_url}}" --lint-result "{{lint_result}}" --worktree "{{project_root}}/.worktrees/{{current_story}}" --platform "{{platform}}" --base-branch "{{base_branch}}"`
   This writes to `git-status.yaml` (addon-owned). Sprint-status.yaml is BMAD-owned — updated by BMAD skills only.
   </action>
 
@@ -1043,7 +1043,7 @@ If the skill is not available or fails, generate a minimal README.md:
 
 <!-- GIT: Release lock -->
 <check if="{{git_enabled}}">
-  <action>Release lock: `bash {{project_root}}/_Sprintpilot/scripts/lock.sh release`</action>
+  <action>Release lock: `node {{project_root}}/_Sprintpilot/scripts/lock.js release`</action>
 </check>
 
 <action>Delete `{state_file}` — sprint complete</action>

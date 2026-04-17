@@ -1,6 +1,6 @@
 # Git Branching and PR Strategy
 
-How the BMAD autopilot addon manages branches, PRs, and merging across stories.
+How the Sprintpilot manages branches, PRs, and merging across stories.
 
 ## Configuration
 
@@ -96,6 +96,6 @@ Regardless of the merge strategy, implementation artifacts (sprint-status.yaml, 
 
 | File | Owner | Autopilot access |
 |------|-------|-----------------|
-| `sprint-status.yaml` | BMAD (dev-story, sprint-planning, retrospective) | Read only |
+| `sprint-status.yaml` | BMad Method (dev-story, sprint-planning, retrospective) | Read only |
 | `git-status.yaml` | Autopilot addon | Read/write |
 | `autopilot-state.yaml` | Autopilot addon | Read/write |

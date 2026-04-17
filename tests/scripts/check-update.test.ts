@@ -53,6 +53,14 @@ describe("check-update + --version", () => {
 
   it("check-update detects newer version available", () => {
     if (!which("npm")) return;
+    // Overwrite the default fixture (1.0.10) with a version guaranteed to be
+    // lower than anything ever published, so the test stays correct even after
+    // the package rebrand reset the registry version to 1.0.0.
+    writeFileSync(
+      join(dir, "_Sprintpilot", "manifest.yaml"),
+      "addon:\n  name: sprintpilot\n  version: 0.0.1\n",
+      "utf8",
+    );
     const r = runCli(["check-update"], { cwd: dir, env: { BMAD_PROJECT_ROOT: dir } });
     expect(r.status).toBe(0);
     expect(r.stdout).toContain("Update available");

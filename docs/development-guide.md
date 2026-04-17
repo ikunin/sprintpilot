@@ -2,60 +2,51 @@
 
 ## Prerequisites
 
-- **Node.js** 18+ (for test suite)
-- **Git** (with remote configured for e2e tests)
-- **Bash** 3.2+ (ships with macOS; works on Linux, Git Bash, WSL)
-- **BATS** (Bash Automated Testing System, for unit tests)
-- **Claude Code CLI** (for e2e tests)
+- **Node.js** 18+ (both the addon and the test suite run on Node; no Bash dependency)
+- **Git** (with a remote configured for e2e tests)
+- **Claude Code CLI** (for e2e tests only)
 - **Platform CLI** (optional): `gh` (GitHub), `glab` (GitLab), `bb` (Bitbucket), `tea` (Gitea)
 
 ## Setup
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-org/sprintpilot.git
+git clone https://github.com/ikunin/sprintpilot.git
 cd sprintpilot
 
-# Install test dependencies
+# Install test dependencies (root package has no build step)
 cd tests && npm install && cd ..
 ```
 
 ## Project Structure
 
-The add-on has no build step — skills are markdown, scripts are shell. The only compiled code is TypeScript e2e tests.
+The addon has no build step — skills are markdown, scripts are Node.js. The only compiled surface is the TypeScript e2e/integration test layer, compiled by Vitest on the fly.
 
 | Layer | Language | Build |
 |-------|----------|-------|
 | Skills | Markdown | None (interpreted by AI tools) |
-| Scripts | Shell (Bash) | None (executable directly) |
+| Scripts | Node.js | None (run via `node <file>.js`) |
 | Config | YAML / Markdown | None |
-| Unit Tests | BATS (Bash) | None |
-| E2E Tests | TypeScript | Compiled by Vitest on-the-fly |
+| Unit + integration tests | TypeScript (Vitest) | On-the-fly by Vitest |
 
 ## Running Tests
 
-### Unit Tests (BATS)
+### Unit + integration tests (Vitest)
 
-Tests shell scripts in isolation using temporary git repos.
+Tests the installer, runtime helpers, and Node scripts in isolation using temporary git repos.
 
 ```bash
 cd tests
 
-# Run all script tests
-npm run test:scripts
+# Fast suite: unit + scripts (no Claude Code, no network except a couple of check-update tests)
+npm run test:fast
 
-# Run a specific test file
-bats scripts/lock.bats
-bats scripts/stage-and-commit.bats
+# Subsets
+npm run test:unit      # lib/ and _Sprintpilot/lib/runtime/
+npm run test:scripts   # _Sprintpilot/scripts/ and the CLI
 ```
 
-**Test count:** 80 tests across 8 suites
-
-Each BATS test:
-- Creates a temporary git repo via `setup_temp_repo()`
-- Runs the script under test
-- Asserts output and exit codes
-- Cleans up via `teardown_temp_repo()`
+Each test creates a temp git repo + temp project state, runs the code under test, asserts output / exit codes / filesystem side effects, and cleans up.
 
 ### E2E Tests (Vitest)
 
@@ -102,7 +93,7 @@ cd tests && npm test
    - Support `--help` flag (parse via `_Sprintpilot/lib/runtime/args.js`)
    - Exit codes: 0=success, 1=expected failure, 2=error
    - Zero external runtime deps — Node built-ins only; import shared helpers from `_Sprintpilot/lib/runtime/` if needed
-4. Add BATS tests in `tests/scripts/your-script.bats`
+4. Add Vitest tests in `tests/scripts/your-script.test.ts` (or `tests/unit/...` for pure-logic helpers)
 
 ### Adding a New Skill
 
@@ -130,20 +121,17 @@ refactor(scope): description # Code refactoring
 test(scope): description     # Test changes
 ```
 
-Co-authorship line required:
-```
-Co-Authored-By: Claude <tool>@anthropic.com
-```
+Use `!` for breaking changes (`refactor!: …`, `feat!: …`).
 
 ## Key Design Decisions
 
 | Decision | Rationale |
 |----------|-----------|
-| Shell scripts over inline Bash | Deterministic, testable, version-controlled |
-| Inlined agent prompts (not files) | Subagents can't read files from disk |
-| EnterWorktree over manual git worktree | Claude Code manages cleanup and paths |
-| Explicit file staging | Prevents accidental secret/binary commits |
-| Separate git-status.yaml | Never modify BMad Method's sprint-status.yaml |
+| Node.js scripts over inline logic in workflow.md | Deterministic, testable, version-controlled |
+| Inlined agent prompts (not files) | Subagents can't invoke the Skill tool or read arbitrary files |
+| `git worktree add` via standard git commands | Compatible with any coding agent (not Claude-specific) |
+| Explicit file staging | Prevents accidental secret/binary commits; `git add -A` never used |
+| Separate git-status.yaml | Addon tracks git metadata in its own file; never modifies BMad Method's sprint-status.yaml |
 
 ## Debugging
 
