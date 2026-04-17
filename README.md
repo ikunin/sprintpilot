@@ -33,7 +33,7 @@ Sprintpilot is an autonomous delivery addon **compatible with [BMad Method](http
 
 BMad Method provides a structured development workflow with 50+ skills and agent personas. But using it manually means invoking each skill one at a time, navigating menus, making routine decisions, and handling git operations yourself. For a sprint with 10 stories across 3 epics, that's dozens of manual steps, context switches, and session restarts.
 
-## The Solution: Sprintpilot
+## The Solution: Sprint Autopilot
 
 ```
 /sprint-autopilot-on
