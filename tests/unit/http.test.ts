@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
 // @ts-expect-error — CommonJS module
-import httpMod from "../../_bmad-addons/lib/runtime/http.js";
+import httpMod from "../../_Sprintpilot/lib/runtime/http.js";
 
 const { postJson, MAX_RESPONSE_BYTES } = httpMod as {
   postJson: (url: string, body: unknown, opts?: { headers?: Record<string, string>; timeoutMs?: number }) =>

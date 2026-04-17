@@ -1,6 +1,77 @@
 # Changelog
 
-## [1.0.21] - 2026-04-17
+## [1.0.0] - 2026-04-17
+
+Initial public release of **Sprintpilot** — an autonomous story-execution and multi-agent addon for [BMad Method](https://github.com/bmad-code-org/BMAD-METHOD) v6. See [README.md](README.md) for features and [TRADEMARK.md](TRADEMARK.md) for the trademark policy acknowledgment.
+
+### Relationship to `bmad-autopilot-addon`
+
+Sprintpilot succeeds the `bmad-autopilot-addon` npm package (versions 1.0.0 – 1.0.21), which has been deprecated for trademark compliance with the [BMad Code, LLC policy](https://github.com/bmad-code-org/BMAD-METHOD/blob/main/TRADEMARK.md) prohibiting use of "BMad"/"BMAD" in product and package names. Functionality is unchanged; only the product name, package, and skill IDs changed. See [MIGRATION.md](MIGRATION.md) for the upgrade path.
+
+### Package / CLI
+
+- npm package: **`sprintpilot`**
+- CLI binary: **`sprintpilot`**
+
+### Project directory
+
+- `<project>/_Sprintpilot/` — addon runtime, manifest, module configs, bundled skills
+- `<project>/_Sprintpilot/Sprintpilot.md` — full skill catalog and workflow reference
+- `<project>/_Sprintpilot/modules/{git,ma,autopilot}/config.yaml` — user-editable module configs
+
+### Skills (slash commands)
+
+| Skill | Purpose |
+|-------|---------|
+| `sprint-autopilot-on` | Engage autonomous story execution with git integration |
+| `sprint-autopilot-off` | Disengage, show sprint + git status |
+| `sprintpilot-update` | Check for Sprintpilot updates |
+| `sprintpilot-code-review` | Parallel 3-layer adversarial code review |
+| `sprintpilot-codebase-map` | 5-stream brownfield codebase analysis |
+| `sprintpilot-assess` | Tech debt / dependency audit |
+| `sprintpilot-reverse-architect` | Extract architecture from existing code |
+| `sprintpilot-migrate` | Legacy migration planning |
+| `sprintpilot-research` | Parallel web research |
+| `sprintpilot-party-mode` | Multi-persona agent discussions |
+
+### Agent-rules marker
+
+Sprintpilot upserts a `<!-- BEGIN:sprintpilot-rules --> ... <!-- END:sprintpilot-rules -->` block into per-tool rule files (`AGENTS.md`, `GEMINI.md`, `.windsurfrules`, `.clinerules`, `.github/copilot-instructions.md`) so agents stay aware of the BMad Method workflow guardrails.
+
+### Legacy migration from `bmad-autopilot-addon`
+
+`sprintpilot install` detects a legacy `_bmad-addons/` layout automatically and cleanly replaces it:
+
+- Snapshots the full `_bmad-addons/modules/<mod>/` tree (config.yaml + user-customized templates) into memory.
+- Strips legacy `<!-- BEGIN/END:bmad-workflow-rules -->` blocks from rule files, writing atomic backups to `<file>.bak-sprintpilot-migration`.
+- Removes legacy skill directories from all project-level tool skill folders (project-scoped; user-global `~/.claude/skills/` is untouched).
+- Removes the `_bmad-addons/` directory.
+- Reapplies the v1 snapshot on top of the freshly-installed v2 bundled resources, preserving user config values.
+- If post-install reapply fails, persists the snapshot to `.sprintpilot-v1-snapshot.json` for manual recovery.
+- Advises removing the legacy global npm package `bmad-autopilot-addon` if detected.
+- Adds `*.bak-sprintpilot-migration` and `.sprintpilot-v1-snapshot*.json` to the project `.gitignore`.
+
+Flags:
+
+- `--migrate-v1` — required under `--yes` for destructive migration (so CI can't silently rewrite a repo's legacy footprint).
+- Interactive confirmation with `initialValue: false` for manual runs.
+
+### Core library (new)
+
+- `lib/core/v1-detect.js` — shared legacy-detection module used by install and uninstall.
+- `lib/core/markers.js` — first-END span semantics with iterative duplicate cleanup; legacy-marker helpers (`stripLegacyBlock`, `hasLegacyBlock`) for migration-time rewriting.
+
+### Acknowledgments
+
+"BMad™", "BMad Method™", and "BMAD-METHOD™" are trademarks of BMad Code, LLC. Sprintpilot is an independent, unaffiliated project. See [TRADEMARK.md](TRADEMARK.md).
+
+---
+
+## Historical changelog from the legacy `bmad-autopilot-addon` package
+
+The entries below document the final versions of the now-deprecated `bmad-autopilot-addon` npm package. They are retained for reference; new development continues under `sprintpilot@1.0.0` above.
+
+## [bmad-autopilot-addon 1.0.21] - 2026-04-17
 
 ### Changed
 - **License: MIT → Apache 2.0.** Full Apache 2.0 text in `LICENSE`, `"license": "Apache-2.0"` in `package.json`, badges and references updated.
@@ -79,13 +150,13 @@
 ### Notes
 - Minimum Node version bumped to 18 (required by `@clack/prompts`).
 
-## [1.0.20] - 2026-04-16
+## [bmad-autopilot-addon 1.0.20] - 2026-04-16
 
 ### Fixed
 - Windows: shell wrapper used `exec bash` which resolved to WSL's bash instead of Git Bash, causing `execvpe(/bin/bash) failed` errors. Now uses `$BASH` to stay in the same Git Bash instance the Node.js launcher resolved.
 - Windows: Git Bash resolver now finds Git installed via Scoop, Chocolatey, or custom paths by deriving the bash location from `git.exe` in PATH (fallback when standard install directories don't match).
 
-## [1.0.18] - 2026-04-14
+## [bmad-autopilot-addon 1.0.18] - 2026-04-14
 
 ### Added
 - `/bmad-addon-update` skill — check for updates and install the latest version from within your coding agent
@@ -95,7 +166,7 @@
 ### Fixed
 - `--version` and `check-update` now read from the project's installed manifest, not the npx-cached package
 
-## [1.0.17] - 2026-04-14
+## [bmad-autopilot-addon 1.0.17] - 2026-04-14
 
 ### Fixed
 - Autopilot state file lost `stories_remaining` and `next_skill` across sessions — all state writes now persist the complete field set
@@ -107,7 +178,7 @@
 - State file checkpoint (step 9) now uses explicit schema instead of ambiguous "full current state"
 - `stories_remaining` list is actively maintained — entries removed as stories complete
 
-## [1.0.16] - 2026-04-14
+## [bmad-autopilot-addon 1.0.16] - 2026-04-14
 
 ### Added
 - `/ship` and `/publish` project commands (moved from published skills to `.claude/commands/`)
@@ -122,22 +193,22 @@
 ### Changed
 - Added tests for `--merge-status` flag in `sync-status.sh`
 
-## [1.0.13] - 2026-04-08
+## [bmad-autopilot-addon 1.0.13] - 2026-04-08
 
 ### Fixed
 - Windows: launcher now explicitly prefers Git Bash over WSL's bash, which cannot resolve `C:/...` paths and broke `npx bmad-autopilot-addon` when both were installed.
 
-## [1.0.12] - 2026-04-08
+## [bmad-autopilot-addon 1.0.12] - 2026-04-08
 
 ### Fixed
 - Windows: `npx bmad-autopilot-addon` failed because Git Bash interpreted backslashes in the launcher script path as escapes. Path is now normalized to forward slashes.
 
-## [1.0.11] - 2026-04-04
+## [bmad-autopilot-addon 1.0.11] - 2026-04-04
 
 ### Fixed
 - npm website showing stale README (re-publish with updated metadata)
 
-## [1.0.10] - 2026-04-03
+## [bmad-autopilot-addon 1.0.10] - 2026-04-03
 
 ### Added
 - Automated npm publishing via GitHub Actions trusted publishers (OIDC, no tokens needed)
@@ -152,7 +223,7 @@
 ### Fixed
 - GitHub Actions publish workflow: Node 24 for npm 11.5.1+ OIDC support, removed `registry-url` that conflicted with trusted publishing
 
-## [1.0.7] - 2026-04-03
+## [bmad-autopilot-addon 1.0.7] - 2026-04-03
 
 ### Fixed
 - Bin script symlink resolution for npx compatibility
@@ -169,7 +240,7 @@
 ### Changed
 - Updated all documentation to reference `npx bmad-autopilot-addon` installation method
 
-## [1.0.0] - 2026-03-29
+## [bmad-autopilot-addon 1.0.0] - 2026-03-29
 
 ### Added
 

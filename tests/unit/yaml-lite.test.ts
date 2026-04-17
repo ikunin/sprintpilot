@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 // @ts-expect-error — CommonJS module
-import yamlMod from "../../_bmad-addons/lib/runtime/yaml-lite.js";
+import yamlMod from "../../_Sprintpilot/lib/runtime/yaml-lite.js";
 
 const {
   yamlSafe,

@@ -1,5 +1,5 @@
 /**
- * E2E Greenfield Test: Tic Tac Toe via BMAD Autopilot
+ * E2E Greenfield Test: Tic Tac Toe via Sprintpilot
  *
  * Pure observer test — validates that the autopilot correctly:
  * - Plans and implements a complete game
@@ -36,7 +36,7 @@ import {
 import { costTracker } from "./harness/cost-tracker.js";
 
 const FIXTURES_DIR = join(import.meta.dirname, "fixtures/greenfield");
-const ADDON_SOURCE = join(import.meta.dirname, "../../_bmad-addons");
+const ADDON_SOURCE = join(import.meta.dirname, "../../_Sprintpilot");
 
 const MAX_SESSIONS = 8;
 const BUDGET_PER_SESSION = 20;
@@ -179,7 +179,7 @@ function getTestCount(dir: string): { files: number; tests: number; error?: stri
   }
 }
 
-describe("Greenfield: Tic Tac Toe via BMAD Autopilot", () => {
+describe("Greenfield: Tic Tac Toe via Sprintpilot", () => {
   beforeAll(() => {
     project = createTempProject({
       remoteUrl: REMOTE_URL,
@@ -200,9 +200,9 @@ describe("Greenfield: Tic Tac Toe via BMAD Autopilot", () => {
   afterAll(async () => {
     // Ensure autopilot lock is released even if sprint didn't complete
     if (project && existsSync(join(project.dir, ".autopilot.lock"))) {
-      console.log("[Cleanup] Lock still exists — running /bmad-autopilot-off to release");
+      console.log("[Cleanup] Lock still exists — running /sprint-autopilot-off to release");
       try {
-        await runClaude("/bmad-autopilot-off", {
+        await runClaude("/sprint-autopilot-off", {
           cwd: project.dir,
           maxBudget: 2,
           model: MODEL,
@@ -221,7 +221,7 @@ describe("Greenfield: Tic Tac Toe via BMAD Autopilot", () => {
   // ── Phase 1: Run the autopilot until game is complete ──
 
   it("setup is valid", () => {
-    assertDirectoryExists(join(project.dir, "_bmad-addons"));
+    assertDirectoryExists(join(project.dir, "_Sprintpilot"));
     assertDirectoryExists(join(project.dir, "_bmad"));
     assertFileExists(join(project.dir, "_bmad-output/planning-artifacts/product-brief.md"));
     assertFileContains(join(project.dir, ".gitignore"), /\.autopilot\.lock/);
@@ -265,7 +265,7 @@ describe("Greenfield: Tic Tac Toe via BMAD Autopilot", () => {
 
       console.log(`\n[Session ${session}/${MAX_SESSIONS}] Starting autopilot...`);
 
-      const result = await runClaude("/bmad-autopilot-on", {
+      const result = await runClaude("/sprint-autopilot-on", {
         cwd: project.dir,
         maxBudget: BUDGET_PER_SESSION,
         model: MODEL,

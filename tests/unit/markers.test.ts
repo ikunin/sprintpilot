@@ -5,23 +5,44 @@ import markersMod from "../../lib/core/markers.js";
 const {
   BEGIN,
   END,
+  LEGACY_BEGIN,
+  LEGACY_END,
   stripBlock,
+  stripLegacyBlock,
   upsertBlock,
   hasBlock,
+  hasLegacyBlock,
 } = markersMod as {
   BEGIN: string;
   END: string;
+  LEGACY_BEGIN: string;
+  LEGACY_END: string;
   stripBlock: (text: string) => string;
+  stripLegacyBlock: (text: string) => string;
   upsertBlock: (text: string, block: string) => string;
   hasBlock: (text: string) => boolean;
+  hasLegacyBlock: (text: string) => boolean;
 };
 
-const block = `${BEGIN}\n# BMAD rules\nrule 1\nrule 2\n${END}`;
+const block = `${BEGIN}\n# Sprintpilot rules\nrule 1\nrule 2\n${END}`;
 
 describe("markers", () => {
   it("exports canonical marker strings", () => {
-    expect(BEGIN).toBe("<!-- BEGIN:bmad-workflow-rules -->");
-    expect(END).toBe("<!-- END:bmad-workflow-rules -->");
+    expect(BEGIN).toBe("<!-- BEGIN:sprintpilot-rules -->");
+    expect(END).toBe("<!-- END:sprintpilot-rules -->");
+    expect(LEGACY_BEGIN).toBe("<!-- BEGIN:bmad-workflow-rules -->");
+    expect(LEGACY_END).toBe("<!-- END:bmad-workflow-rules -->");
+  });
+
+  it("recognizes and strips legacy v1 marker blocks", () => {
+    const legacyBlock = `${LEGACY_BEGIN}\nold rules\n${LEGACY_END}`;
+    const doc = `# Header\n\n${legacyBlock}\n\n# Footer`;
+    expect(hasLegacyBlock(doc)).toBe(true);
+    const stripped = stripLegacyBlock(doc);
+    expect(stripped).not.toContain(LEGACY_BEGIN);
+    expect(stripped).not.toContain(LEGACY_END);
+    expect(stripped).toContain("# Header");
+    expect(stripped).toContain("# Footer");
   });
 
   it("hasBlock detects presence", () => {
@@ -73,9 +94,10 @@ describe("markers", () => {
   });
 
   // Regression: duplicate/nested BEGIN markers from a prior bad install must
-  // collapse cleanly — find first BEGIN to last END and strip the whole span.
-  it("duplicate BEGIN markers are cleaned up on next upsert", () => {
-    const corrupted = `# Top\n${BEGIN}\nfirst\n${END}\n\nmiddle\n\n${BEGIN}\nsecond\n${END}\n`;
+  // collapse cleanly. First-END strip semantics iterate until no blocks
+  // remain, so unrelated user content between two blocks is preserved.
+  it("duplicate BEGIN markers are cleaned up, preserving unrelated content between", () => {
+    const corrupted = `# Top\n${BEGIN}\nfirst\n${END}\n\nmiddle user notes\n\n${BEGIN}\nsecond\n${END}\n`;
     const out = upsertBlock(corrupted, `${BEGIN}\nFRESH\n${END}`);
     const beginCount = (out.match(new RegExp(BEGIN.replace(/[-/]/g, "\\$&"), "g")) || []).length;
     const endCount = (out.match(new RegExp(END.replace(/[-/]/g, "\\$&"), "g")) || []).length;
@@ -84,6 +106,8 @@ describe("markers", () => {
     expect(out).toContain("FRESH");
     expect(out).not.toContain("first");
     expect(out).not.toContain("second");
+    // Unrelated content between the two corrupted blocks survives.
+    expect(out).toContain("middle user notes");
   });
 
   // Regression: marker strings mentioned as plain text inside user code

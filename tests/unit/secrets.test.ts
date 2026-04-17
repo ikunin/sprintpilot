@@ -3,7 +3,7 @@ import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 // @ts-expect-error — CommonJS module
-import secretsMod from "../../_bmad-addons/lib/runtime/secrets.js";
+import secretsMod from "../../_Sprintpilot/lib/runtime/secrets.js";
 
 const {
   globToRegex,

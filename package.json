@@ -1,23 +1,23 @@
 {
-  "name": "bmad-autopilot-addon",
-  "version": "1.0.21",
-  "description": "Autonomous end-to-end software delivery powered by the BMAD Method — git workflow, multi-agent skills, and autopilot execution",
+  "name": "sprintpilot",
+  "version": "1.0.0",
+  "description": "Sprintpilot — autopilot and multi-agent addon for BMad Method v6: git workflow, parallel agents, autonomous story execution",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/ikunin/bmad-autopilot-addon.git"
+    "url": "git+https://github.com/ikunin/sprintpilot.git"
   },
-  "homepage": "https://github.com/ikunin/bmad-autopilot-addon",
+  "homepage": "https://github.com/ikunin/sprintpilot",
   "bin": {
-    "bmad-autopilot-addon": "bin/bmad-autopilot-addon.js"
+    "sprintpilot": "bin/sprintpilot.js"
   },
   "files": [
     "bin/",
     "lib/",
-    "_bmad-addons/"
+    "_Sprintpilot/"
   ],
   "keywords": [
-    "bmad",
+    "sprintpilot",
     "autopilot",
     "orchestrator",
     "ai-development",
@@ -27,7 +27,8 @@
     "windsurf",
     "cline",
     "git-workflow",
-    "multi-agent"
+    "multi-agent",
+    "bmad-method-addon"
   ],
   "engines": {
     "node": ">=18.0.0"
@@ -42,6 +43,7 @@
     "semver": "^7.6.3"
   },
   "publishConfig": {
+    "access": "public",
     "provenance": true
   }
 }

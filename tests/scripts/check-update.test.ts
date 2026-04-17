@@ -25,10 +25,10 @@ describe("check-update + --version", () => {
 
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), "bmad-cu-"));
-    mkdirSync(join(dir, "_bmad-addons"), { recursive: true });
+    mkdirSync(join(dir, "_Sprintpilot"), { recursive: true });
     writeFileSync(
-      join(dir, "_bmad-addons", "manifest.yaml"),
-      "addon:\n  name: bmad-ma-git\n  version: 1.0.10\n  description: test manifest\n",
+      join(dir, "_Sprintpilot", "manifest.yaml"),
+      "addon:\n  name: sprintpilot\n  version: 1.0.10\n  description: test manifest\n",
       "utf8",
     );
   });
@@ -56,18 +56,18 @@ describe("check-update + --version", () => {
     const r = runCli(["check-update"], { cwd: dir, env: { BMAD_PROJECT_ROOT: dir } });
     expect(r.status).toBe(0);
     expect(r.stdout).toContain("Update available");
-    expect(r.stdout).toContain("npx bmad-autopilot-addon@latest");
+    expect(r.stdout).toContain("npx sprintpilot@latest");
   });
 
   it("check-update shows up-to-date when versions match", () => {
     if (!which("npm")) return;
     let latest = "";
     try {
-      latest = execFileSync("npm", ["view", "bmad-autopilot-addon@latest", "version"], { encoding: "utf8" }).trim();
+      latest = execFileSync("npm", ["view", "sprintpilot@latest", "version"], { encoding: "utf8" }).trim();
     } catch { return; }
     if (!latest) return;
     writeFileSync(
-      join(dir, "_bmad-addons", "manifest.yaml"),
+      join(dir, "_Sprintpilot", "manifest.yaml"),
       `addon:\n  version: ${latest}\n`,
       "utf8",
     );
@@ -92,7 +92,7 @@ describe("check-update + --version", () => {
   });
 
   it("check-update falls back to package manifest when no project manifest", () => {
-    rmSync(join(dir, "_bmad-addons"), { recursive: true, force: true });
+    rmSync(join(dir, "_Sprintpilot"), { recursive: true, force: true });
     const r = runCli(["check-update"], { cwd: dir, env: { BMAD_PROJECT_ROOT: dir } });
     expect(r.status).toBe(0);
     expect(r.stdout).toContain("No project installation found");
@@ -106,7 +106,7 @@ describe("check-update + --version", () => {
   });
 
   it("--version falls back to package manifest when no project", () => {
-    rmSync(join(dir, "_bmad-addons"), { recursive: true, force: true });
+    rmSync(join(dir, "_Sprintpilot"), { recursive: true, force: true });
     const r = runCli(["--version"], { cwd: dir, env: { BMAD_PROJECT_ROOT: dir } });
     expect(r.status).toBe(0);
     expect(r.stdout.length).toBeGreaterThan(0);

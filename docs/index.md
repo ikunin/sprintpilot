@@ -4,13 +4,13 @@
 
 - **Type:** Monolith — CLI tool / AI coding tool add-on
 - **Primary Languages:** Shell (Bash), Markdown
-- **Architecture:** Additive add-on layered on BMAD Method
+- **Architecture:** Additive add-on layered on BMad Method
 - **Supported Tools:** Claude Code, Cursor, Windsurf, Cline, Roo, Trae, Kiro, GitHub Copilot, Gemini CLI
 
 ### Quick Reference
 
-- **Framework:** BMAD Method >=6.2.0
-- **Entry Point:** `_bmad-addons/install.sh` (installation), `/bmad-autopilot-on` (execution)
+- **Framework:** BMad Method >=6.2.0
+- **Entry Point:** `_Sprintpilot/install.sh` (installation), `/sprint-autopilot-on` (execution)
 - **Architecture Pattern:** Skills-as-prompts + shell script infrastructure
 - **Test Suite:** 80 BATS unit tests + 2 Vitest e2e suites
 
@@ -35,7 +35,7 @@
 ## Getting Started
 
 1. **Install BMAD:** `npx bmad-method` in your project
-2. **Install addon:** `npx bmad-autopilot-addon`
-3. **Start autopilot:** `/bmad-autopilot-on` in your AI coding tool
+2. **Install addon:** `npx sprintpilot`
+3. **Start autopilot:** `/sprint-autopilot-on` in your AI coding tool
 
 For detailed setup, see the [Installation Guide](./INSTALLATION.md).

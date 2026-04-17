@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 // @ts-expect-error — CommonJS module
-import spawnMod from "../../_bmad-addons/lib/runtime/spawn.js";
+import spawnMod from "../../_Sprintpilot/lib/runtime/spawn.js";
 
 const { run, tryRun } = spawnMod as {
   run: (file: string, args: string[], opts?: unknown) => Promise<{ stdout: string; stderr: string; exitCode: number }>;

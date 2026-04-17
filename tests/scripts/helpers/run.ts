@@ -2,8 +2,8 @@ import { spawnSync, type SpawnSyncOptions } from "node:child_process";
 import { join } from "node:path";
 
 const REPO_ROOT = join(import.meta.dirname, "..", "..", "..");
-export const SCRIPTS_DIR = join(REPO_ROOT, "_bmad-addons", "scripts");
-export const BIN_CLI = join(REPO_ROOT, "bin", "bmad-autopilot-addon.js");
+export const SCRIPTS_DIR = join(REPO_ROOT, "_Sprintpilot", "scripts");
+export const BIN_CLI = join(REPO_ROOT, "bin", "sprintpilot.js");
 
 export interface RunResult {
   stdout: string;

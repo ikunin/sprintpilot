@@ -10,13 +10,13 @@ Steps:
 
 2. **Update version in ALL of these files:**
    - `package.json` — the `"version"` field
-   - `README.md` — the heading `# BMAD Autopilot Add-On v<version>`
-   - `_bmad-addons/manifest.yaml` — the `version:` field under `addon:`
+   - `README.md` — the main heading (keep it branded "Sprintpilot — ...")
+   - `_Sprintpilot/manifest.yaml` — the `version:` field under `addon:`
    - `CHANGELOG.md` — prepend a new `## [<version>] - <today's date>` section at the top (after the `# Changelog` heading). Leave the body as `### Changed\n- <summarize unreleased changes from git log since last tag>`.
 
 3. **Stage and commit** (explicitly by filename, never `git add -A`):
    ```
-   git add package.json README.md _bmad-addons/manifest.yaml CHANGELOG.md
+   git add package.json README.md _Sprintpilot/manifest.yaml CHANGELOG.md
    git commit -m "release: v<version>"
    ```
 

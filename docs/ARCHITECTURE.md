@@ -10,7 +10,7 @@
 ## Directory Structure
 
 ```
-_bmad-addons/
+_Sprintpilot/
 ├── manifest.yaml              # Version, BMAD compatibility, module flags
 ├── BMAD.md                    # Comprehensive skill reference (permanent home)
 ├── install.sh / uninstall.sh   # Lifecycle scripts (multi-tool, system prompts)
@@ -38,15 +38,15 @@ _bmad-addons/
 │   └── create-pr.sh            # PR/MR creation
 │
 └── skills/                     # Installed to .claude/skills/ by install.sh
-    ├── bmad-autopilot-on/      # Enhanced autopilot (git + MA)
-    ├── bmad-autopilot-off/     # Enhanced disengage
-    ├── bmad-ma-code-review/    # 3 parallel review agents
-    ├── bmad-ma-codebase-map/   # 5 parallel analysis agents
-    ├── bmad-ma-assess/         # 3 parallel assessment agents
-    ├── bmad-ma-reverse-architect/ # 3 parallel extraction agents
-    ├── bmad-ma-migrate/        # 12-step workflow, 4 agents
-    ├── bmad-ma-research/       # N parallel research agents
-    └── bmad-ma-party-mode/     # 2-3 parallel persona agents
+    ├── sprint-autopilot-on/      # Enhanced autopilot (git + MA)
+    ├── sprint-autopilot-off/     # Enhanced disengage
+    ├── sprintpilot-code-review/    # 3 parallel review agents
+    ├── sprintpilot-codebase-map/   # 5 parallel analysis agents
+    ├── sprintpilot-assess/         # 3 parallel assessment agents
+    ├── sprintpilot-reverse-architect/ # 3 parallel extraction agents
+    ├── sprintpilot-migrate/        # 12-step workflow, 4 agents
+    ├── sprintpilot-research/       # N parallel research agents
+    └── sprintpilot-party-mode/     # 2-3 parallel persona agents
 ```
 
 ## Key Mechanisms
@@ -61,8 +61,8 @@ The add-on installs **system prompt files** that make every AI agent session awa
 CLAUDE.md          →  @AGENTS.md (include directive)
 AGENTS.md          →  enforcement block (self-sufficient, ~40 lines)
                        "NEVER write code without the 7-step sequence"
-                       References _bmad-addons/BMAD.md for full catalog
-_bmad-addons/
+                       References _Sprintpilot/BMAD.md for full catalog
+_Sprintpilot/
   BMAD.md          ←  comprehensive skill reference (permanent, not copied)
   templates/
     agent-rules.md ←  source template for the enforcement block
@@ -151,9 +151,9 @@ All MA skills follow the same pattern:
 
 | Concern | Protection |
 |---------|-----------|
-| BMAD update overwrites skills | Add-on skills use `bmad-autopilot-*` and `bmad-ma-*` prefixes, not in BMAD's `skill-manifest.csv` |
-| Source files modified | Source lives in `_bmad-addons/`, never touched by BMAD |
-| Need to re-install | `npx bmad-autopilot-addon` restores all skills |
+| BMad Method update overwrites skills | Sprintpilot skills use `sprint-autopilot-*` and `sprintpilot-*` prefixes, not in BMad Method's `skill-manifest.csv` |
+| Source files modified | Source lives in `_Sprintpilot/`, never touched by BMAD |
+| Need to re-install | `npx sprintpilot` restores all skills |
 | Rollback | Backups in `.claude/.addon-backups/` (last 3 per skill) |
 
 ## Platform Abstraction

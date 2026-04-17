@@ -1,10 +1,10 @@
 # Project Overview
 
-## BMAD Autopilot Add-On
+## Sprintpilot
 
-**Autonomous end-to-end software delivery powered by the BMAD Method.**
+**Autonomous end-to-end software delivery powered by the BMad Method.**
 
-One command (`/bmad-autopilot-on`) takes a project from sprint plan to reviewed, tested, PR-ready code — with full git workflow and multi-agent intelligence.
+One command (`/sprint-autopilot-on`) takes a project from sprint plan to reviewed, tested, PR-ready code — with full git workflow and multi-agent intelligence.
 
 ## Purpose
 
@@ -24,7 +24,7 @@ BMAD provides a structured AI-driven development workflow with 50+ skills and ag
 |----------|-----------|---------|---------|
 | Runtime | Bash | 3.2+ | Script execution (macOS compatible) |
 | Skill Engine | Markdown | - | AI prompt-based skill definitions |
-| Base Framework | BMAD Method | >=6.2.0 | Structured AI development workflow |
+| Base Framework | BMad Method | >=6.2.0 | Structured AI development workflow |
 | Test Runner (unit) | BATS | - | Shell script unit testing |
 | Test Runner (e2e) | Vitest | ^3.0.0 | End-to-end integration testing |
 | Test Language | TypeScript | ^5.7.0 | E2E test implementation |
@@ -53,10 +53,10 @@ BMAD provides a structured AI-driven development workflow with 50+ skills and ag
 
 | Directory | Purpose |
 |-----------|---------|
-| `_bmad-addons/` | All addon source code (scripts, skills, modules, config) |
-| `_bmad-addons/scripts/` | 8 shell scripts — git operations backbone |
-| `_bmad-addons/skills/` | 9 skill definitions with 19 subagent prompts |
-| `_bmad-addons/modules/` | Module configuration (git, multi-agent) |
+| `_Sprintpilot/` | All addon source code (scripts, skills, modules, config) |
+| `_Sprintpilot/scripts/` | 8 shell scripts — git operations backbone |
+| `_Sprintpilot/skills/` | 9 skill definitions with 19 subagent prompts |
+| `_Sprintpilot/modules/` | Module configuration (git, multi-agent) |
 | `docs/` | Project documentation |
 | `tests/scripts/` | 80+ BATS unit tests for shell scripts |
 | `tests/e2e/` | End-to-end integration tests (greenfield + brownfield) |

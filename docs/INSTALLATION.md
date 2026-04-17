@@ -50,7 +50,7 @@ To pre-select tools non-interactively, add `--tools <tool1>,<tool2> --yes`. See 
 ### Via npx (recommended)
 
 ```bash
-npx bmad-autopilot-addon
+npx sprintpilot
 ```
 
 The installer will:
@@ -65,13 +65,13 @@ The installer will:
 
 ```bash
 # Single tool
-npx bmad-autopilot-addon install --tools <tool>
+npx sprintpilot install --tools <tool>
 
 # Multiple tools
-npx bmad-autopilot-addon install --tools <tool1>,<tool2>,<tool3>
+npx sprintpilot install --tools <tool1>,<tool2>,<tool3>
 
 # All supported tools
-npx bmad-autopilot-addon install --tools all
+npx sprintpilot install --tools all
 ```
 
 Replace `<tool>` with one of the keys from [Supported Tools](#supported-tools) below.
@@ -79,19 +79,19 @@ Replace `<tool>` with one of the keys from [Supported Tools](#supported-tools) b
 ### Non-Interactive (CI/CD)
 
 ```bash
-npx bmad-autopilot-addon install --tools <tool1>,<tool2> --yes
+npx sprintpilot install --tools <tool1>,<tool2> --yes
 ```
 
 ### Dry Run (preview without changes)
 
 ```bash
-npx bmad-autopilot-addon install --tools <tool1>,<tool2> --dry-run
+npx sprintpilot install --tools <tool1>,<tool2> --dry-run
 ```
 
 ### Force Install (skip backups)
 
 ```bash
-npx bmad-autopilot-addon install --tools <tool> --force
+npx sprintpilot install --tools <tool> --force
 ```
 
 ### Supported Tools
@@ -117,14 +117,14 @@ After install, check that skills are available in your tool's directory:
 ```bash
 # Replace <tool-dir> with your tool's skills directory from the table above
 # (e.g. .claude/skills, .cursor/skills, .windsurf/skills, ...)
-ls <tool-dir>/bmad-autopilot-* <tool-dir>/bmad-ma-*
+ls <tool-dir>/sprint-autopilot-* <tool-dir>/sprintpilot-*
 ```
 
 You should see 10 skill directories per tool:
-- `bmad-autopilot-on`, `bmad-autopilot-off`, `bmad-addon-update`
-- `bmad-ma-code-review`, `bmad-ma-codebase-map`, `bmad-ma-assess`
-- `bmad-ma-reverse-architect`, `bmad-ma-migrate`
-- `bmad-ma-research`, `bmad-ma-party-mode`
+- `sprint-autopilot-on`, `sprint-autopilot-off`, `sprintpilot-update`
+- `sprintpilot-code-review`, `sprintpilot-codebase-map`, `sprintpilot-assess`
+- `sprintpilot-reverse-architect`, `sprintpilot-migrate`
+- `sprintpilot-research`, `sprintpilot-party-mode`
 
 The installer also creates **system prompt files** that enforce BMAD workflows:
 
@@ -142,7 +142,7 @@ These files tell the AI agent about BMAD's mandatory workflow, preventing it fro
 Once verified, start the autopilot in your AI tool:
 
 ```
-/bmad-autopilot-on
+/sprint-autopilot-on
 ```
 
 ## Updating
@@ -150,16 +150,16 @@ Once verified, start the autopilot in your AI tool:
 Check if a newer version is available:
 
 ```bash
-npx bmad-autopilot-addon check-update
+npx sprintpilot check-update
 ```
 
 Upgrade to the latest version:
 
 ```bash
-npx bmad-autopilot-addon@latest
+npx sprintpilot@latest
 ```
 
-This backs up existing skills before overwriting. Your configuration in `_bmad-addons/modules/` is preserved. Previous skill versions are kept in `.claude/.addon-backups/` (last 3 per skill).
+This backs up existing skills before overwriting. Your configuration in `_Sprintpilot/modules/` is preserved. Previous skill versions are kept in `.claude/.addon-backups/` (last 3 per skill).
 
 The installer also shows an update notice after installation if a newer version exists on npm.
 
@@ -168,13 +168,13 @@ The installer also shows an update notice after installation if a newer version 
 BMAD updates may regenerate `.claude/skills/`. The add-on's skills use prefixes not in BMAD's manifest, so they typically survive. If any are lost:
 
 ```bash
-npx bmad-autopilot-addon@latest
+npx sprintpilot@latest
 ```
 
 ## Uninstall
 
 ```bash
-npx bmad-autopilot-addon uninstall
+npx sprintpilot uninstall
 ```
 
 This will:
@@ -185,7 +185,7 @@ This will:
 
 Use `--force` to remove dirty worktrees without prompting:
 ```bash
-npx bmad-autopilot-addon uninstall --force
+npx sprintpilot uninstall --force
 ```
 
 BMAD's own skills are never affected.
@@ -257,7 +257,7 @@ tea login add
 # Option 2: API token (no CLI needed, any platform)
 export GITEA_TOKEN="your_token"
 # Windows (PowerShell): $env:GITEA_TOKEN="your_token"
-# Also set in _bmad-addons/modules/git/config.yaml:
+# Also set in _Sprintpilot/modules/git/config.yaml:
 #   platform:
 #     provider: gitea
 #     base_url: https://git.example.com
@@ -271,7 +271,7 @@ The add-on works without any platform CLI (`git_only` mode). Git branches are cr
 
 To skip PRs even when a CLI is installed, set `create_pr: false` in config:
 ```yaml
-# _bmad-addons/modules/git/config.yaml
+# _Sprintpilot/modules/git/config.yaml
 git:
   push:
     create_pr: false  # merge directly to main, no PRs
@@ -306,7 +306,7 @@ Or wait 30 minutes for automatic stale lock removal.
 Use `npx` to install (requires Node.js and [Git for Windows](https://git-scm.com/download/win), which provides Git Bash):
 
 ```bash
-npx bmad-autopilot-addon
+npx sprintpilot
 ```
 
 The launcher explicitly prefers Git Bash over WSL bash, so this works from CMD, PowerShell, or Git Bash.
@@ -319,7 +319,7 @@ If the autopilot creates PRs on the wrong platform:
 
 1. Check which CLIs are installed: `which gh glab bb tea`
 2. If multiple CLIs are present, the remote URL is used as tiebreaker
-3. Override explicitly in `_bmad-addons/modules/git/config.yaml`:
+3. Override explicitly in `_Sprintpilot/modules/git/config.yaml`:
    ```yaml
    platform:
      provider: github  # or gitlab, bitbucket, gitea, git_only

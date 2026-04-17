@@ -13,8 +13,8 @@
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-org/bmad-autopilot-addon.git
-cd bmad-autopilot-addon
+git clone https://github.com/your-org/sprintpilot.git
+cd sprintpilot
 
 # Install test dependencies
 cd tests && npm install && cd ..
@@ -95,8 +95,8 @@ cd tests && npm test
 
 ### Adding a New Shell Script
 
-1. Create the script in `_bmad-addons/scripts/`
-2. Make it executable: `chmod +x _bmad-addons/scripts/your-script.sh`
+1. Create the script in `_Sprintpilot/scripts/`
+2. Make it executable: `chmod +x _Sprintpilot/scripts/your-script.sh`
 3. Follow conventions:
    - `set -e` at the top
    - Support `--help` flag
@@ -106,10 +106,10 @@ cd tests && npm test
 
 ### Adding a New Skill
 
-1. Create directory in `_bmad-addons/skills/your-skill/`
+1. Create directory in `_Sprintpilot/skills/your-skill/`
 2. Add `SKILL.md` (metadata) and `workflow.md` (instructions)
 3. For multi-agent skills, add prompts in `agents/` subdirectory
-4. Register in `_bmad-addons/manifest.yaml` under `installed_skills`
+4. Register in `_Sprintpilot/manifest.yaml` under `installed_skills`
 5. Update `install.sh` if the skill needs special handling
 
 ### Adding a New Platform
@@ -151,17 +151,17 @@ Co-Authored-By: Claude <tool>@anthropic.com
 
 ```bash
 # Check lock status
-bash _bmad-addons/scripts/lock.sh status
+bash _Sprintpilot/scripts/lock.sh status
 
 # Force release
-bash _bmad-addons/scripts/lock.sh release
+bash _Sprintpilot/scripts/lock.sh release
 ```
 
 ### Worktree Issues
 
 ```bash
 # Check worktree health
-bash _bmad-addons/scripts/health-check.sh
+bash _Sprintpilot/scripts/health-check.sh
 
 # List all worktrees
 git worktree list
@@ -171,15 +171,15 @@ git worktree list
 
 ```bash
 # Test platform detection
-bash _bmad-addons/scripts/detect-platform.sh
+bash _Sprintpilot/scripts/detect-platform.sh
 ```
 
 ### Installer
 
 ```bash
 # Dry run
-npx bmad-autopilot-addon install --dry-run
+npx sprintpilot install --dry-run
 
 # Force reinstall
-npx bmad-autopilot-addon install --force --tools claude-code
+npx sprintpilot install --force --tools claude-code
 ```

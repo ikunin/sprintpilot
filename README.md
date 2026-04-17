@@ -1,38 +1,42 @@
-# BMAD Autopilot Add-On v1.0.21
+# Sprintpilot — Autopilot & Multi-Agent Addon for BMad Method
 
-[![npm version](https://img.shields.io/npm/v/bmad-autopilot-addon.svg?style=flat)](https://www.npmjs.com/package/bmad-autopilot-addon)
-[![npm downloads](https://img.shields.io/npm/dm/bmad-autopilot-addon.svg?style=flat)](https://www.npmjs.com/package/bmad-autopilot-addon)
+[![npm version](https://img.shields.io/npm/v/sprintpilot.svg?style=flat)](https://www.npmjs.com/package/sprintpilot)
+[![npm downloads](https://img.shields.io/npm/dm/sprintpilot.svg?style=flat)](https://www.npmjs.com/package/sprintpilot)
 [![License Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg?style=flat)](LICENSE)
-[![BMAD Method](https://img.shields.io/badge/BMAD-v6.2%2B-green.svg?style=flat)](https://github.com/bmad-code-org/BMAD-METHOD)
-[![Node.js](https://img.shields.io/badge/node-%3E%3D14-brightgreen.svg?style=flat)](https://nodejs.org)
+[![BMad Method](https://img.shields.io/badge/BMad%20Method-v6.2%2B-green.svg?style=flat)](https://github.com/bmad-code-org/BMAD-METHOD)
+[![Node.js](https://img.shields.io/badge/node-%3E%3D18-brightgreen.svg?style=flat)](https://nodejs.org)
 [![Tools](https://img.shields.io/badge/tools-9%20supported-orange.svg?style=flat)](#supported-tools)
-[![GitHub stars](https://img.shields.io/github/stars/ikunin/bmad-autopilot-addon.svg?style=flat)](https://github.com/ikunin/bmad-autopilot-addon/stargazers)
+[![GitHub stars](https://img.shields.io/github/stars/ikunin/sprintpilot.svg?style=flat)](https://github.com/ikunin/sprintpilot/stargazers)
 
-Autonomous end-to-end software delivery powered by the [BMAD Method](https://github.com/bmad-code-org/BMAD-METHOD). One command takes your project from sprint plan to reviewed, tested, PR-ready code — with full git workflow and multi-agent intelligence.
+Sprintpilot is an autonomous delivery addon **compatible with [BMad Method](https://github.com/bmad-code-org/BMAD-METHOD) v6**. One command takes your project from sprint plan to reviewed, tested, PR-ready code — with full git workflow and multi-agent intelligence.
+
+> **Independent project.** Sprintpilot is not affiliated with or endorsed by BMad Code, LLC. "BMad™", "BMad Method™", and "BMAD-METHOD™" are trademarks of BMad Code, LLC. See [TRADEMARK.md](TRADEMARK.md).
+
+> **Migrating from `bmad-autopilot-addon` v1?** See [MIGRATION.md](MIGRATION.md). `sprintpilot install` auto-detects v1 and cleanly replaces it.
 
 ## Included Skills
 
 | Skill | Description |
 |-------|-------------|
-| `/bmad-autopilot-on` | Engage autonomous sprint execution |
-| `/bmad-autopilot-off` | Disengage and show status |
-| `/bmad-addon-update` | Check for updates and install the latest version |
-| `/bmad-ma-code-review` | Parallel 3-layer adversarial code review |
-| `/bmad-ma-codebase-map` | 5-stream brownfield codebase analysis |
-| `/bmad-ma-assess` | Tech debt and dependency audit |
-| `/bmad-ma-reverse-architect` | Extract architecture from existing code |
-| `/bmad-ma-migrate` | Legacy migration planning |
-| `/bmad-ma-research` | Parallel web research fan-out |
-| `/bmad-ma-party-mode` | Multi-persona agent discussions |
+| `/sprint-autopilot-on` | Engage autonomous sprint execution |
+| `/sprint-autopilot-off` | Disengage and show status |
+| `/sprintpilot-update` | Check for updates and install the latest version |
+| `/sprintpilot-code-review` | Parallel 3-layer adversarial code review |
+| `/sprintpilot-codebase-map` | 5-stream brownfield codebase analysis |
+| `/sprintpilot-assess` | Tech debt and dependency audit |
+| `/sprintpilot-reverse-architect` | Extract architecture from existing code |
+| `/sprintpilot-migrate` | Legacy migration planning |
+| `/sprintpilot-research` | Parallel web research fan-out |
+| `/sprintpilot-party-mode` | Multi-persona agent discussions |
 
 ## The Problem
 
-BMAD provides a structured development workflow with 50+ skills and agent personas. But using it manually means invoking each skill one at a time, navigating menus, making routine decisions, and handling git operations yourself. For a sprint with 10 stories across 3 epics, that's dozens of manual steps, context switches, and session restarts.
+BMad Method provides a structured development workflow with 50+ skills and agent personas. But using it manually means invoking each skill one at a time, navigating menus, making routine decisions, and handling git operations yourself. For a sprint with 10 stories across 3 epics, that's dozens of manual steps, context switches, and session restarts.
 
-## The Solution: BMAD Autopilot
+## The Solution: Sprintpilot
 
 ```
-/bmad-autopilot-on
+/sprint-autopilot-on
 ```
 
 That's it. The autopilot takes over and drives your entire sprint to completion:
@@ -55,9 +59,9 @@ That's it. The autopilot takes over and drives your entire sprint to completion:
 
 The autopilot handles everything that normally requires you to be present:
 
-- **Menu navigation** — BMAD skills present menus, confirmations, and choices. The autopilot auto-selects "Continue", "Create Mode", and makes context-appropriate decisions from your PRD and architecture docs.
+- **Menu navigation** — BMad Method skills present menus, confirmations, and choices. The autopilot auto-selects "Continue", "Create Mode", and makes context-appropriate decisions from your PRD and architecture docs.
 - **Decision making** — when a skill asks a design question, the autopilot derives the answer from existing project artifacts (PRD, architecture, story specs). Only truly unanswerable questions pause execution.
-- **Session management** — after 3 stories, the autopilot checkpoints state to disk and tells you to start a fresh session. `/bmad-autopilot-on` in the new session resumes exactly where it left off. No work is ever repeated.
+- **Session management** — after 3 stories, the autopilot checkpoints state to disk and tells you to start a fresh session. `/sprint-autopilot-on` in the new session resumes exactly where it left off. No work is ever repeated.
 - **Crash recovery** — if a session crashes mid-story, the next boot detects orphaned worktrees, recovers committed work (pushes it), and cleans up stale state.
 
 ### When it stops (and only when)
@@ -74,7 +78,7 @@ Everything else — it decides, documents the decision in one sentence, and move
 
 ### The git workflow in detail
 
-Controlled by `git.push.create_pr` in `_bmad-addons/modules/git/config.yaml`:
+Controlled by `git.push.create_pr` in `_Sprintpilot/modules/git/config.yaml`:
 
 **PR flow** (`create_pr: true`, default) — stories are pushed and PRs are created. No auto-merge. Code reaches `main` only after PR approval.
 
@@ -99,17 +103,17 @@ When previous stories have pending PRs, the autopilot creates **stacked PRs** �
 main ── story/1-1 ──→ merge ── story/1-2 ──→ merge ── story/1-3 ──→ merge
 ```
 
-Each story is fully isolated in its own worktree. No half-finished code on `main`. The autopilot tracks git metadata in its own `git-status.yaml` (commit SHA, push status, PR URL, lint results) — it never modifies BMAD's `sprint-status.yaml`. Implementation artifacts (sprint status, story files, planning docs) are always committed to `main` after each story, regardless of merge strategy.
+Each story is fully isolated in its own worktree. No half-finished code on `main`. The autopilot tracks git metadata in its own `git-status.yaml` (commit SHA, push status, PR URL, lint results) — it never modifies BMad Method's `sprint-status.yaml`. Implementation artifacts (sprint status, story files, planning docs) are always committed to `main` after each story, regardless of merge strategy.
 
-See [`modules/git/branching-and-pr-strategy.md`](_bmad-addons/modules/git/branching-and-pr-strategy.md) for the full branching and PR decision matrix.
+See [`modules/git/branching-and-pr-strategy.md`](_Sprintpilot/modules/git/branching-and-pr-strategy.md) for the full branching and PR decision matrix.
 
 ---
 
 ## Multi-Agent Intelligence
 
-Beyond the autopilot, the add-on includes 7 multi-agent skills that launch parallel subagents for tasks that benefit from diverse perspectives:
+Beyond the autopilot, Sprintpilot includes 7 multi-agent skills that launch parallel subagents for tasks that benefit from diverse perspectives:
 
-### Parallel Code Review (`/bmad-ma-code-review`)
+### Parallel Code Review (`/sprintpilot-code-review`)
 
 Three independent reviewers run simultaneously on the same diff:
 
@@ -123,11 +127,11 @@ Results are triaged: duplicates merged, contradictions flagged, findings classif
 
 ### Brownfield Analysis Pipeline
 
-> Codebase mapping inspired by [GSD's map-codebase](https://github.com/gsd-build/get-shit-done). Adapted with distinct output format, enriched agent prompts, and BMAD-specific downstream integration.
+> Codebase mapping inspired by [GSD's map-codebase](https://github.com/gsd-build/get-shit-done). Adapted with distinct output format, enriched agent prompts, and BMad Method-specific downstream integration.
 
 For existing codebases, three skills chain together:
 
-**`/bmad-ma-codebase-map`** — 5 parallel agents scan the codebase simultaneously:
+**`/sprintpilot-codebase-map`** — 5 parallel agents scan the codebase simultaneously:
 - Stack Analyzer (languages, frameworks, versions)
 - Architecture Mapper (modules, patterns, data flow)
 - Quality Assessor (tests, CI/CD, conventions)
@@ -146,21 +150,21 @@ Output files (`_bmad-output/codebase-analysis/`):
 
 Scanned file types: TypeScript, JavaScript, Python, Java, Go, Rust, Ruby, C#, SQL, PL/SQL (`.sps`, `.spb`), XML, Shell.
 
-**`/bmad-ma-assess`** — 3 parallel agents produce actionable findings:
+**`/sprintpilot-assess`** — 3 parallel agents produce actionable findings:
 - Dependency Auditor (CVEs, outdated packages, upgrade paths)
 - Debt Classifier (prioritized tech debt with effort estimates)
 - Migration Analyzer (framework upgrade paths and phased roadmap)
 
 Output file: `_bmad-output/codebase-analysis/brownfield-assessment.md` — prioritized findings with severity, confidence, effort, and migration paths.
 
-**`/bmad-ma-reverse-architect`** — 3 parallel agents extract architecture from code:
+**`/sprintpilot-reverse-architect`** — 3 parallel agents extract architecture from code:
 - Component Mapper (module boundaries, dependency graph)
 - Data Flow Tracer (request lifecycle, state management)
 - Pattern Extractor (design patterns, conventions, error handling)
 
-Output file: `{planning_artifacts}/architecture.md` — BMAD-compatible architecture document that feeds directly into `bmad-create-epics-and-stories`.
+Output file: `{planning_artifacts}/architecture.md` — architecture document compatible with BMad Method that feeds directly into `bmad-create-epics-and-stories`.
 
-### Migration Planning (`/bmad-ma-migrate`)
+### Migration Planning (`/sprintpilot-migrate`)
 
 A 12-step workflow for taking a codebase from one stack to another. 4 subagent fan-outs across the process:
 
@@ -174,7 +178,7 @@ A 12-step workflow for taking a codebase from one stack to another. 4 subagent f
 8. Design API compatibility (versioning, deprecation timeline)
 9. **Parallel**: Test Parity Analyzer maps old tests to new equivalents
 10. **Parallel**: Risk Assessor produces per-phase risk matrix with rollback triggers
-11. Generate BMAD-compatible epics for sprint planning
+11. Generate BMad Method-compatible epics for sprint planning
 12. Finalize migration plan, epics, and tracking artifacts
 
 Output files:
@@ -182,27 +186,27 @@ Output files:
 | File | Location | Content |
 |------|----------|---------|
 | `migration-plan.md` | `{planning_artifacts}/` | Full plan: strategy, compatibility matrix, coexistence design, phased roadmap, component cards, data/API migration, risk matrix |
-| `migration-epics.md` | `{planning_artifacts}/` | BMAD-compatible epics with stories, acceptance criteria, and effort estimates |
+| `migration-epics.md` | `{planning_artifacts}/` | Epics with stories, acceptance criteria, and effort estimates (BMad Method-compatible) |
 | `migration-tracking.yaml` | `{implementation_artifacts}/` | Phase-by-phase progress tracking for sprint execution |
 
 ### Research and Discussion
 
-**`/bmad-ma-research`** — Fan out research across multiple topics in parallel, each with web search access. Results synthesized into a unified report.
+**`/sprintpilot-research`** — Fan out research across multiple topics in parallel, each with web search access. Results synthesized into a unified report.
 
-**`/bmad-ma-party-mode`** — Launch 2-3 BMAD personas (architect, PM, QA, dev, etc.) as parallel agents debating a topic. Multiple rounds where personas respond to each other. Produces consensus points, disagreements, and action items.
+**`/sprintpilot-party-mode`** — Launch 2-3 BMad Method personas (architect, PM, QA, dev, etc.) as parallel agents debating a topic. Multiple rounds where personas respond to each other. Produces consensus points, disagreements, and action items.
 
 ---
 
 ## Quick Start
 
 ```bash
-# 1. Install BMAD with the core method and Test Architect module
+# 1. Install BMad Method with the core method and Test Architect module
 #    (interactive — you'll be prompted to pick your tool)
 npx bmad-method install --modules bmm,tea
 ```
 
 This installs:
-- **BMM** (BMad Method) — the core development workflow with 34+ skills
+- **BMM** (BMad Method core) — the core development workflow with 34+ skills
 - **TEA** (Test Architect Enterprise) — risk-based test strategy, ATDD, CI quality gates, test framework scaffolding
 
 For full interactive setup (module *and* tool selection):
@@ -211,18 +215,18 @@ npx bmad-method install
 ```
 
 ```bash
-# 2. Install the autopilot add-on (interactive — select your tool when prompted)
-npx bmad-autopilot-addon
+# 2. Install Sprintpilot (interactive — select your tool when prompted)
+npx sprintpilot
 
 # 3. Start the autopilot in your IDE
-/bmad-autopilot-on
+/sprint-autopilot-on
 ```
 
 See [Supported Tools](#supported-tools) below for the full list of `--tools` values if you prefer non-interactive installs.
 
 ## Supported Tools
 
-The add-on uses the universal SKILL.md format — same skills work across all 9 tools:
+Sprintpilot uses the universal SKILL.md format — same skills work across all 9 tools:
 
 | Tool | Directory |
 |------|-----------|
@@ -238,7 +242,7 @@ The add-on uses the universal SKILL.md format — same skills work across all 9 
 
 For non-interactive installs, pass one or more tool keys via `--tools`:
 ```bash
-npx bmad-autopilot-addon install --tools <tool1>,<tool2> --yes
+npx sprintpilot install --tools <tool1>,<tool2> --yes
 ```
 Valid values: `claude-code`, `cursor`, `windsurf`, `gemini-cli`, `cline`, `roo`, `trae`, `kiro`, `github-copilot`, or `all`.
 
@@ -255,7 +259,7 @@ No CLI installed? The addon falls back to **git_only mode** (direct merge, no PR
 
 To explicitly choose between PR and direct merge regardless of platform:
 ```yaml
-# _bmad-addons/modules/git/config.yaml
+# _Sprintpilot/modules/git/config.yaml
 git:
   push:
     create_pr: true   # PR flow (default) — push + PR, no auto-merge
@@ -279,7 +283,7 @@ First found wins per language. Multi-language projects (monorepos) lint all lang
 
 All settings live in two YAML files — edit after install to customize behavior.
 
-### Git Workflow (`_bmad-addons/modules/git/config.yaml`)
+### Git Workflow (`_Sprintpilot/modules/git/config.yaml`)
 
 | Setting | Default | Description |
 |---------|---------|-------------|
@@ -294,7 +298,7 @@ All settings live in two YAML files — edit after install to customize behavior
 | `git.lock.stale_timeout_minutes` | `30` | Auto-remove orphaned lock files |
 | `git.worktree.cleanup_on_merge` | `true` | Delete worktrees after merge |
 
-### Multi-Agent (`_bmad-addons/modules/ma/config.yaml`)
+### Multi-Agent (`_Sprintpilot/modules/ma/config.yaml`)
 
 | Setting | Default | Description |
 |---------|---------|-------------|
@@ -306,7 +310,7 @@ See the [Configuration Reference](docs/CONFIGURATION.md) for the full list.
 
 ## Requirements
 
-- [BMAD Method](https://github.com/bmad-code-org/BMAD-METHOD) v6.2.0+
+- [BMad Method](https://github.com/bmad-code-org/BMAD-METHOD) v6.2.0+
 - A supported AI code agent (see table above)
 - Git repository with at least one commit
 - Platform CLI for PR creation (optional — see table above)

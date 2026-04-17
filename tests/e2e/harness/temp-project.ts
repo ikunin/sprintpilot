@@ -7,7 +7,7 @@ import { execSync, execFileSync } from "node:child_process";
 import { join, dirname } from "node:path";
 import { tmpdir } from "node:os";
 
-const ADDON_DIR = join(import.meta.dirname, "../../../_bmad-addons");
+const ADDON_DIR = join(import.meta.dirname, "../../../_Sprintpilot");
 
 export interface TempProject {
   /** Absolute path to the temporary project directory */
@@ -91,11 +91,11 @@ export function createTempProject(options: TempProjectOptions = {}): TempProject
 
   // Install the addon
   if (installAddon && installBmadCore) {
-    // Copy _bmad-addons into the temp project
-    const destAddons = join(dir, "_bmad-addons");
+    // Copy _Sprintpilot into the temp project
+    const destAddons = join(dir, "_Sprintpilot");
     cpSync(ADDON_DIR, destAddons, { recursive: true });
 
-    const installerCli = join(import.meta.dirname, "../../../bin/bmad-autopilot-addon.js");
+    const installerCli = join(import.meta.dirname, "../../../bin/sprintpilot.js");
     try {
       execFileSync("node", [installerCli, "install", "--tools", "claude-code", "--yes"], {
         cwd: dir,

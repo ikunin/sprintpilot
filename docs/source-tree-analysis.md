@@ -7,8 +7,8 @@ Monolith — single cohesive codebase (CLI tool / add-on)
 ## Annotated Directory Tree
 
 ```
-bmad-autopilot-addon/
-├── _bmad-addons/                    # ADD-ON SOURCE — all addon code lives here
+sprintpilot/
+├── _Sprintpilot/                    # ADD-ON SOURCE — all addon code lives here
 │   ├── manifest.yaml                # Addon metadata: name, version, BMAD compat, installed skills
 │   ├── install.sh                   # Multi-tool installer (9 supported AI tools)
 │   ├── uninstall.sh                 # Clean uninstaller with worktree cleanup
@@ -37,41 +37,41 @@ bmad-autopilot-addon/
 │   │   └── lint-changed.sh          # Multi-language linting on changed files (293 lines)
 │   │
 │   ├── skills/                      # Skill definitions (markdown-based prompts)
-│   │   ├── bmad-autopilot-on/       # Autonomous sprint execution orchestrator
+│   │   ├── sprint-autopilot-on/       # Autonomous sprint execution orchestrator
 │   │   │   ├── SKILL.md             # Skill metadata
 │   │   │   └── workflow.md          # Full autopilot workflow (10 steps)
-│   │   ├── bmad-autopilot-off/      # Graceful exit with status report
+│   │   ├── sprint-autopilot-off/      # Graceful exit with status report
 │   │   │   ├── SKILL.md
 │   │   │   └── workflow.md
-│   │   ├── bmad-ma-code-review/     # 3-layer parallel code review
+│   │   ├── sprintpilot-code-review/     # 3-layer parallel code review
 │   │   │   ├── SKILL.md
 │   │   │   ├── workflow.md
 │   │   │   └── agents/              # Subagent prompts
 │   │   │       ├── blind-hunter.md
 │   │   │       ├── edge-case-hunter.md
 │   │   │       └── acceptance-auditor.md
-│   │   ├── bmad-ma-codebase-map/    # 5-stream parallel codebase analysis
+│   │   ├── sprintpilot-codebase-map/    # 5-stream parallel codebase analysis
 │   │   │   ├── SKILL.md
 │   │   │   ├── workflow.md
 │   │   │   └── agents/              # 5 subagent prompts
-│   │   ├── bmad-ma-assess/          # Tech debt + dependency audit (3 agents)
+│   │   ├── sprintpilot-assess/          # Tech debt + dependency audit (3 agents)
 │   │   │   ├── SKILL.md
 │   │   │   ├── workflow.md
 │   │   │   └── agents/              # 3 subagent prompts
-│   │   ├── bmad-ma-reverse-architect/ # Bottom-up architecture extraction (3 agents)
+│   │   ├── sprintpilot-reverse-architect/ # Bottom-up architecture extraction (3 agents)
 │   │   │   ├── SKILL.md
 │   │   │   ├── workflow.md
 │   │   │   └── agents/              # 3 subagent prompts
-│   │   ├── bmad-ma-migrate/         # Full-lifecycle migration planning (4 agents)
+│   │   ├── sprintpilot-migrate/         # Full-lifecycle migration planning (4 agents)
 │   │   │   ├── SKILL.md
 │   │   │   ├── workflow.md
 │   │   │   ├── agents/              # 4 subagent prompts
 │   │   │   ├── resources/           # Strategy and pattern references
 │   │   │   └── templates/           # Migration plan templates
-│   │   ├── bmad-ma-research/        # Parallel research fan-out
+│   │   ├── sprintpilot-research/        # Parallel research fan-out
 │   │   │   ├── SKILL.md
 │   │   │   └── workflow.md
-│   │   └── bmad-ma-party-mode/      # Multi-agent group discussions
+│   │   └── sprintpilot-party-mode/      # Multi-agent group discussions
 │   │       ├── SKILL.md
 │   │       └── workflow.md
 │   │
@@ -138,10 +138,10 @@ bmad-autopilot-addon/
 
 | Entry Point | Purpose |
 |-------------|---------|
-| `_bmad-addons/install.sh` | Primary installation entry — sets up all skills and system prompts |
-| `_bmad-addons/skills/bmad-autopilot-on/workflow.md` | Autopilot orchestrator — the main execution engine |
-| `_bmad-addons/scripts/stage-and-commit.sh` | Git commit pipeline with safety checks |
-| `_bmad-addons/scripts/create-pr.sh` | PR/MR creation across 5 platforms |
+| `_Sprintpilot/install.sh` | Primary installation entry — sets up all skills and system prompts |
+| `_Sprintpilot/skills/sprint-autopilot-on/workflow.md` | Autopilot orchestrator — the main execution engine |
+| `_Sprintpilot/scripts/stage-and-commit.sh` | Git commit pipeline with safety checks |
+| `_Sprintpilot/scripts/create-pr.sh` | PR/MR creation across 5 platforms |
 | `AGENTS.md` | System prompt enforcement — loaded by Claude Code on every session |
 
 ## Key Design Patterns

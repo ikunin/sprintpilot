@@ -1,6 +1,6 @@
 # Configuration Reference
 
-All configuration lives in `_bmad-addons/modules/`. Changes take effect on the next `/bmad-autopilot-on` invocation.
+All configuration lives in `_Sprintpilot/modules/`. Changes take effect on the next `/sprint-autopilot-on` invocation.
 
 ## Git Configuration (`modules/git/config.yaml`)
 
@@ -184,7 +184,7 @@ Commands use YAML `|` literal blocks to preserve HEREDOC formatting.
 
 These are created by `install.sh` and enforce BMAD workflows from the first agent message.
 
-### Source Files (in `_bmad-addons/`)
+### Source Files (in `_Sprintpilot/`)
 
 | File | Purpose | Editable? |
 |------|---------|-----------|
@@ -207,7 +207,7 @@ These are created by `install.sh` and enforce BMAD workflows from the first agen
 
 ### Customizing Rules
 
-Edit `_bmad-addons/templates/agent-rules.md` to change enforcement rules. Keep the `<!-- BEGIN:bmad-workflow-rules -->` and `<!-- END:bmad-workflow-rules -->` markers — they are required for idempotent updates and clean uninstall.
+Edit `_Sprintpilot/templates/agent-rules.md` to change enforcement rules. Keep the `<!-- BEGIN:bmad-workflow-rules -->` and `<!-- END:bmad-workflow-rules -->` markers — they are required for idempotent updates and clean uninstall.
 
 After editing, re-run `install.sh` to propagate changes to all tool system prompts.
 
@@ -218,7 +218,7 @@ The addon tracks git metadata in its own file at `_bmad-output/implementation-ar
 Example schema:
 
 ```yaml
-# BMAD Autopilot Add-On — Git Status
+# Sprintpilot — Git Status
 git_integration:
   enabled: true
   base_branch: main

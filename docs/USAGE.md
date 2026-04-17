@@ -4,7 +4,7 @@
 
 After installation, every AI agent session starts with BMAD awareness. The installer creates system prompt files that tell the agent:
 
-- This project uses the BMAD Method
+- This project uses the BMad Method
 - The 7-step story sequence is **mandatory** — no skipping steps
 - Git safety rules are enforced (no `git add -A`, no secrets)
 - Available skills and how to get started
@@ -21,7 +21,7 @@ This means you don't need to tell the agent about BMAD — it already knows. If 
 
 **Windsurf, Cline, Gemini CLI, GitHub Copilot** get the enforcement block appended to their shared system prompt file with markers for safe update/removal.
 
-All tools reference `_bmad-addons/BMAD.md` for the full skill catalog. The enforcement rules are in `_bmad-addons/templates/agent-rules.md`.
+All tools reference `_Sprintpilot/BMAD.md` for the full skill catalog. The enforcement rules are in `_Sprintpilot/templates/agent-rules.md`.
 
 ---
 
@@ -32,7 +32,7 @@ All tools reference `_bmad-addons/BMAD.md` for the full skill catalog. The enfor
 In the coding agent of your choice, invoke:
 
 ```
-/bmad-autopilot-on
+/sprint-autopilot-on
 ```
 
 The autopilot will:
@@ -59,7 +59,7 @@ For each story, the autopilot:
 ### Stopping the Autopilot
 
 ```
-/bmad-autopilot-off
+/sprint-autopilot-off
 ```
 
 This produces a status report with git information and releases the lock.
@@ -69,17 +69,17 @@ This produces a status report with git information and releases the lock.
 Check for updates and install them from within your coding agent:
 
 ```
-/bmad-addon-update
+/sprintpilot-update
 ```
 
-This compares your installed version against npm, shows what's new, and asks for confirmation before updating. You can also check from the terminal: `npx bmad-autopilot-addon check-update`.
+This compares your installed version against npm, shows what's new, and asks for confirmation before updating. You can also check from the terminal: `npx sprintpilot check-update`.
 
 ### Session Management
 
 The autopilot checkpoints after every 3 stories (configurable). It saves state to `_bmad-output/implementation-artifacts/autopilot-state.yaml` and asks you to start a new session:
 
 ```
-/bmad-autopilot-on    # resumes exactly where it left off
+/sprint-autopilot-on    # resumes exactly where it left off
 ```
 
 The state file tracks:
@@ -101,7 +101,7 @@ If your project uses git submodules (`.gitmodules` present), the autopilot autom
 
 ### Crash Recovery
 
-If a session crashes, the next `/bmad-autopilot-on` will:
+If a session crashes, the next `/sprint-autopilot-on` will:
 
 1. **Remove stale locks** — locks older than 30 minutes are auto-removed
 2. **Health check worktrees** — scans `.worktrees/` for orphaned directories
@@ -120,7 +120,7 @@ If a session crashes, the next `/bmad-autopilot-on` will:
 ### Parallel Code Review
 
 ```
-/bmad-ma-code-review
+/sprintpilot-code-review
 ```
 
 Launches 3 review agents simultaneously:
@@ -133,7 +133,7 @@ Results are triaged into PATCH (apply), WARN (note), DISMISS (false positive), o
 ### Codebase Analysis (Brownfield)
 
 ```
-/bmad-ma-codebase-map
+/sprintpilot-codebase-map
 ```
 
 Launches 5 analysis agents in parallel:
@@ -148,10 +148,10 @@ Outputs to `_bmad-output/codebase-analysis/`.
 ### Tech Debt Assessment
 
 ```
-/bmad-ma-assess
+/sprintpilot-assess
 ```
 
-Runs after `bmad-ma-codebase-map`. Launches 3 agents:
+Runs after `sprintpilot-codebase-map`. Launches 3 agents:
 - **Dependency Auditor** — CVEs, outdated packages, deprecations
 - **Debt Classifier** — categorizes and prioritizes tech debt
 - **Migration Analyzer** — framework upgrade paths and effort
@@ -161,7 +161,7 @@ Produces `brownfield-assessment.md` with prioritized action items.
 ### Reverse Architecture
 
 ```
-/bmad-ma-reverse-architect
+/sprintpilot-reverse-architect
 ```
 
 Extracts architecture from existing code. Launches 3 agents:
@@ -174,12 +174,12 @@ Produces BMAD-compatible `architecture.md` that feeds into `bmad-create-epics-an
 ### Migration Planning
 
 ```
-/bmad-ma-migrate
+/sprintpilot-migrate
 ```
 
 12-step migration workflow for moving from current stack to a target stack. Requires:
 - Target stack specification (from user)
-- Codebase analysis outputs (from `bmad-ma-codebase-map`)
+- Codebase analysis outputs (from `sprintpilot-codebase-map`)
 
 Launches 4 agents across steps:
 - **Stack Mapper** + **Dependency Analyzer** (step 3, parallel)
@@ -191,7 +191,7 @@ Produces `migration-plan.md`, `migration-epics.md` (BMAD-compatible), and `migra
 ### Parallel Research
 
 ```
-/bmad-ma-research
+/sprintpilot-research
 ```
 
 Provide a list of research topics with types (technical/domain/market). Each topic gets its own agent with `WebSearch`/`WebFetch` access. Results are collected and synthesized.
@@ -199,7 +199,7 @@ Provide a list of research topics with types (technical/domain/market). Each top
 ### Party Mode (Parallel)
 
 ```
-/bmad-ma-party-mode
+/sprintpilot-party-mode
 ```
 
 Select 2-3 BMAD personas (architect, PM, QA, dev, etc.) and a topic. Each persona runs as a parallel agent. Supports multiple discussion rounds where personas respond to each other.
@@ -212,21 +212,21 @@ Select 2-3 BMAD personas (architect, PM, QA, dev, etc.) and a topic. Each person
 
 ```
 bmad-product-brief → bmad-create-prd → bmad-create-architecture
-    → bmad-create-epics-and-stories → /bmad-autopilot-on
+    → bmad-create-epics-and-stories → /sprint-autopilot-on
 ```
 
 ### Brownfield Project
 
 ```
-/bmad-ma-codebase-map → /bmad-ma-assess → /bmad-ma-reverse-architect
+/sprintpilot-codebase-map → /sprintpilot-assess → /sprintpilot-reverse-architect
     → bmad-create-prd (informed by analysis)
-    → bmad-create-epics-and-stories → /bmad-autopilot-on
+    → bmad-create-epics-and-stories → /sprint-autopilot-on
 ```
 
 ### Migration Project
 
 ```
-/bmad-ma-codebase-map → /bmad-ma-assess → /bmad-ma-migrate
+/sprintpilot-codebase-map → /sprintpilot-assess → /sprintpilot-migrate
     → bmad-sprint-planning (from migration epics)
-    → /bmad-autopilot-on
+    → /sprint-autopilot-on
 ```

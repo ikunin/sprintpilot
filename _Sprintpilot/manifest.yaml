@@ -1,0 +1,26 @@
+addon:
+  name: sprintpilot
+  version: 1.0.0
+  description: Sprintpilot — autopilot and multi-agent addon for BMad Method (git workflow, parallel agents, autonomous story execution)
+  bmad_compatibility: ">=6.2.0"
+  modules:
+    git:
+      enabled: true
+      config: modules/git/config.yaml
+    ma:
+      enabled: true
+      config: modules/ma/config.yaml
+    autopilot:
+      enabled: true
+      config: modules/autopilot/config.yaml
+  installed_skills:
+    - sprint-autopilot-on
+    - sprint-autopilot-off
+    - sprintpilot-update
+    - sprintpilot-code-review
+    - sprintpilot-codebase-map
+    - sprintpilot-assess
+    - sprintpilot-reverse-architect
+    - sprintpilot-migrate
+    - sprintpilot-research
+    - sprintpilot-party-mode

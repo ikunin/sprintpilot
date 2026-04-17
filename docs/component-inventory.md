@@ -2,7 +2,7 @@
 
 ## Shell Scripts
 
-The operational backbone of the add-on. All scripts are in `_bmad-addons/scripts/`.
+The operational backbone of the add-on. All scripts are in `_Sprintpilot/scripts/`.
 
 | Script | Lines | Purpose | Dependencies |
 |--------|-------|---------|-------------|
@@ -26,26 +26,26 @@ The operational backbone of the add-on. All scripts are in `_bmad-addons/scripts
 
 ## Skill Definitions
 
-Skills are markdown-based prompts interpreted by AI tools. All source skills are in `_bmad-addons/skills/`.
+Skills are markdown-based prompts interpreted by AI tools. All source skills are in `_Sprintpilot/skills/`.
 
 ### Autopilot Skills
 
 | Skill | Files | Purpose |
 |-------|-------|---------|
-| `bmad-autopilot-on` | SKILL.md, workflow.md | Full autonomous sprint execution (10-step orchestrator) |
-| `bmad-autopilot-off` | SKILL.md, workflow.md | Graceful exit with status report |
+| `sprint-autopilot-on` | SKILL.md, workflow.md | Full autonomous sprint execution (10-step orchestrator) |
+| `sprint-autopilot-off` | SKILL.md, workflow.md | Graceful exit with status report |
 
 ### Multi-Agent Skills
 
 | Skill | Agents | Purpose | Output |
 |-------|--------|---------|--------|
-| `bmad-ma-code-review` | 3 | Parallel adversarial code review | Prioritized findings |
-| `bmad-ma-codebase-map` | 5 | Full codebase analysis | 5 analysis files |
-| `bmad-ma-assess` | 3 | Tech debt + dependency audit | brownfield-assessment.md |
-| `bmad-ma-reverse-architect` | 3 | Bottom-up architecture extraction | architecture.md |
-| `bmad-ma-migrate` | 4 | Migration planning | migration-plan.md |
-| `bmad-ma-research` | 3 | Parallel research fan-out | Research report |
-| `bmad-ma-party-mode` | 2-3 | Multi-persona group discussions | Discussion summary |
+| `sprintpilot-code-review` | 3 | Parallel adversarial code review | Prioritized findings |
+| `sprintpilot-codebase-map` | 5 | Full codebase analysis | 5 analysis files |
+| `sprintpilot-assess` | 3 | Tech debt + dependency audit | brownfield-assessment.md |
+| `sprintpilot-reverse-architect` | 3 | Bottom-up architecture extraction | architecture.md |
+| `sprintpilot-migrate` | 4 | Migration planning | migration-plan.md |
+| `sprintpilot-research` | 3 | Parallel research fan-out | Research report |
+| `sprintpilot-party-mode` | 2-3 | Multi-persona group discussions | Discussion summary |
 
 **Total:** 9 skills, 19 subagent prompts
 
@@ -63,22 +63,22 @@ Skills are markdown-based prompts interpreted by AI tools. All source skills are
 
 | File | Purpose |
 |------|---------|
-| `_bmad-addons/manifest.yaml` | Addon metadata and skill registry |
-| `_bmad-addons/modules/git/config.yaml` | Git workflow configuration (branches, commits, lint, push, PR, worktree, lock, platform) |
-| `_bmad-addons/modules/ma/config.yaml` | Multi-agent parallelism limits |
-| `_bmad-addons/modules/git/templates/pr-body.md` | PR body template |
-| `_bmad-addons/modules/git/templates/commit-story.txt` | Story commit message template |
-| `_bmad-addons/modules/git/templates/commit-patch.txt` | Patch commit message template |
-| `_bmad-addons/modules/git/branching-and-pr-strategy.md` | Branching strategy documentation |
+| `_Sprintpilot/manifest.yaml` | Addon metadata and skill registry |
+| `_Sprintpilot/modules/git/config.yaml` | Git workflow configuration (branches, commits, lint, push, PR, worktree, lock, platform) |
+| `_Sprintpilot/modules/ma/config.yaml` | Multi-agent parallelism limits |
+| `_Sprintpilot/modules/git/templates/pr-body.md` | PR body template |
+| `_Sprintpilot/modules/git/templates/commit-story.txt` | Story commit message template |
+| `_Sprintpilot/modules/git/templates/commit-patch.txt` | Patch commit message template |
+| `_Sprintpilot/modules/git/branching-and-pr-strategy.md` | Branching strategy documentation |
 
 ## Installation Components
 
 | File | Purpose |
 |------|---------|
-| `_bmad-addons/install.sh` | Multi-tool installer supporting 9 AI coding tools |
-| `_bmad-addons/uninstall.sh` | Clean removal with worktree cleanup |
-| `_bmad-addons/templates/agent-rules.md` | Template for system prompt generation |
-| `_bmad-addons/.secrets-allowlist` | Patterns excluded from secrets scanning |
+| `_Sprintpilot/install.sh` | Multi-tool installer supporting 9 AI coding tools |
+| `_Sprintpilot/uninstall.sh` | Clean removal with worktree cleanup |
+| `_Sprintpilot/templates/agent-rules.md` | Template for system prompt generation |
+| `_Sprintpilot/.secrets-allowlist` | Patterns excluded from secrets scanning |
 
 ## Test Components
 

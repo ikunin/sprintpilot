@@ -11,12 +11,12 @@ The add-on consists of four layers:
 
 ## Adding a New Skill
 
-1. Create a directory under `_bmad-addons/skills/bmad-ma-{name}/`
+1. Create a directory under `_Sprintpilot/skills/sprintpilot-{name}/`
 2. Add `SKILL.md` with frontmatter (name, description) and a pointer to `workflow.md`
 3. Add `workflow.md` with the full workflow instructions
 4. If the skill uses subagents, add agent prompts to `agents/`
 5. Add the skill name to `manifest.yaml` under `installed_skills`
-6. If the skill is part of the mandatory workflow, add it to `_bmad-addons/BMAD.md`
+6. If the skill is part of the mandatory workflow, add it to `_Sprintpilot/BMAD.md`
 7. If it introduces new constraints, add rules to `templates/agent-rules.md`
 8. Run `install.sh` to deploy
 
@@ -24,7 +24,7 @@ The add-on consists of four layers:
 
 ```markdown
 ---
-name: bmad-ma-{name}
+name: sprintpilot-{name}
 description: 'One-line description of what the skill does and when to use it.'
 ---
 
@@ -79,24 +79,24 @@ All scripts should follow this convention:
 Each script supports `--help` and can be tested standalone:
 
 ```bash
-bash _bmad-addons/scripts/detect-platform.sh
-bash _bmad-addons/scripts/sanitize-branch.sh "test-story-key"
-bash _bmad-addons/scripts/lock.sh check
+bash _Sprintpilot/scripts/detect-platform.sh
+bash _Sprintpilot/scripts/sanitize-branch.sh "test-story-key"
+bash _Sprintpilot/scripts/lock.sh check
 ```
 
 ### Install/Uninstall
 
 ```bash
-npx bmad-autopilot-addon install --dry-run   # preview
-npx bmad-autopilot-addon                     # install
-npx bmad-autopilot-addon uninstall           # uninstall
+npx sprintpilot install --dry-run   # preview
+npx sprintpilot                     # install
+npx sprintpilot uninstall           # uninstall
 ```
 
 ### Skills
 
 Skills are tested by invoking them in your coding agent of choice:
 ```
-/bmad-ma-{name}
+/sprintpilot-{name}
 ```
 
 ## Design Decisions

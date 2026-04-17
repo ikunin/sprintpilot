@@ -21,7 +21,7 @@ import {
 import { costTracker } from "./harness/cost-tracker.js";
 
 const FIXTURES_DIR = join(import.meta.dirname, "fixtures/brownfield");
-const ADDON_SOURCE = join(import.meta.dirname, "../../_bmad-addons");
+const ADDON_SOURCE = join(import.meta.dirname, "../../_Sprintpilot");
 
 /** Model to use — override via BMAD_TEST_MODEL env var (e.g. "opus") */
 const MODEL = process.env.BMAD_TEST_MODEL ?? "sonnet";
@@ -90,7 +90,7 @@ describe("Brownfield: json-server analysis + auth feature", () => {
     );
 
     // Copy addon
-    cpSync(ADDON_SOURCE, join(projectDir, "_bmad-addons"), {
+    cpSync(ADDON_SOURCE, join(projectDir, "_Sprintpilot"), {
       recursive: true,
     });
 
@@ -115,7 +115,7 @@ describe("Brownfield: json-server analysis + auth feature", () => {
     // Add gitignore
     writeFileSync(
       join(projectDir, ".gitignore"),
-      ".autopilot.lock\n_bmad-output/\n_bmad-addons/\n_bmad/\n.claude/\n"
+      ".autopilot.lock\n_bmad-output/\n_Sprintpilot/\n_bmad/\n.claude/\n"
     );
     exec("git add .gitignore && git commit -m 'add gitignore'");
 
@@ -151,7 +151,7 @@ describe("Brownfield: json-server analysis + auth feature", () => {
   }, 60_000);
 
   it("B1: codebase-map produces 5 analysis files", async () => {
-    const result = await runClaude("/bmad-ma-codebase-map", {
+    const result = await runClaude("/sprintpilot-codebase-map", {
       cwd: projectDir,
       maxBudget: 10,
       model: MODEL,
@@ -200,7 +200,7 @@ describe("Brownfield: json-server analysis + auth feature", () => {
   }, 700_000);
 
   it("B2: assess produces brownfield assessment", async () => {
-    const result = await runClaude("/bmad-ma-assess", {
+    const result = await runClaude("/sprintpilot-assess", {
       cwd: projectDir,
       maxBudget: 8,
       model: MODEL,
@@ -234,7 +234,7 @@ describe("Brownfield: json-server analysis + auth feature", () => {
   }, 700_000);
 
   it("B3: reverse-architect produces architecture doc", async () => {
-    const result = await runClaude("/bmad-ma-reverse-architect", {
+    const result = await runClaude("/sprintpilot-reverse-architect", {
       cwd: projectDir,
       maxBudget: 8,
       model: MODEL,
@@ -283,7 +283,7 @@ describe("Brownfield: json-server analysis + auth feature", () => {
 
   it("B4: migrate produces migration plan (optional)", async () => {
     const result = await runClaude(
-      '/bmad-ma-migrate\n\nTarget: Migrate from Express to Fastify',
+      '/sprintpilot-migrate\n\nTarget: Migrate from Express to Fastify',
       {
         cwd: projectDir,
         maxBudget: 10,

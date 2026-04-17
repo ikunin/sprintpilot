@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 // @ts-expect-error — CommonJS module without types
-import argsMod from "../../_bmad-addons/lib/runtime/args.js";
+import argsMod from "../../_Sprintpilot/lib/runtime/args.js";
 const { parseArgs } = argsMod as {
   parseArgs: (argv: string[], opts?: { booleanFlags?: string[]; positionalActions?: string[] }) =>
     { opts: Record<string, unknown>; positional: string[]; actions: string[] };

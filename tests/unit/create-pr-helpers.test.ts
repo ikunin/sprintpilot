@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 // @ts-expect-error — CommonJS module
-import createPrMod from "../../_bmad-addons/scripts/create-pr.js";
+import createPrMod from "../../_Sprintpilot/scripts/create-pr.js";
 
 const { parseGitRemote, redactAuth } = createPrMod as {
   parseGitRemote: (url: string) => { host: string; path: string } | null;
