@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // Extract timestamp() from install.js by re-requiring after stubbing Date —
 // install.js is a CommonJS module with `timestamp` only in closure scope.
@@ -8,26 +8,30 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // expected UTC digits.
 
 // @ts-expect-error — CommonJS module
-import installMod from "../../lib/commands/install.js";
+import installMod from '../../lib/commands/install.js';
 
 // install.js doesn't export timestamp, so we assert on backup directory
 // naming via file-ops.backupSkill which is exported. Easiest: just assert
 // install.js's `timestamp()` could be reconstructed from the source.
 
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
-const INSTALL_SRC = readFileSync(join(import.meta.dirname, "..", "..", "lib", "commands", "install.js"), "utf8");
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
-describe("install timestamp()", () => {
-  it("uses getUTC* methods exclusively — no local-time getters", () => {
+const INSTALL_SRC = readFileSync(
+  join(import.meta.dirname, '..', '..', 'lib', 'commands', 'install.js'),
+  'utf8',
+);
+
+describe('install timestamp()', () => {
+  it('uses getUTC* methods exclusively — no local-time getters', () => {
     // All UTC accessors used in timestamp() must be present.
     for (const fn of [
-      "getUTCFullYear",
-      "getUTCMonth",
-      "getUTCDate",
-      "getUTCHours",
-      "getUTCMinutes",
-      "getUTCSeconds",
+      'getUTCFullYear',
+      'getUTCMonth',
+      'getUTCDate',
+      'getUTCHours',
+      'getUTCMinutes',
+      'getUTCSeconds',
     ]) {
       expect(INSTALL_SRC).toContain(fn);
     }

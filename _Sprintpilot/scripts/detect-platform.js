@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-'use strict';
 
 const { parseArgs } = require('../lib/runtime/args');
 const { tryRun } = require('../lib/runtime/spawn');
@@ -17,7 +16,10 @@ async function hasCli(name) {
 
 async function main() {
   const { opts } = parseArgs(process.argv.slice(2));
-  if (opts.help) { help(); process.exit(0); }
+  if (opts.help) {
+    help();
+    process.exit(0);
+  }
   const provider = opts.provider || 'auto';
 
   if (provider !== 'auto') {
@@ -45,16 +47,39 @@ async function main() {
 
   const remote = (await tryGitStdout(['remote', 'get-url', 'origin'])) || '';
 
-  if (/github\.com[:/]/i.test(remote)) { log.out('github'); return; }
-  if (/gitlab\./i.test(remote)) { log.out('gitlab'); return; }
-  if (/bitbucket\.org[:/]/i.test(remote)) { log.out('bitbucket'); return; }
+  if (/github\.com[:/]/i.test(remote)) {
+    log.out('github');
+    return;
+  }
+  if (/gitlab\./i.test(remote)) {
+    log.out('gitlab');
+    return;
+  }
+  if (/bitbucket\.org[:/]/i.test(remote)) {
+    log.out('bitbucket');
+    return;
+  }
 
-  if (hasTea) { log.out('gitea'); return; }
-  if (hasGh) { log.out('github'); return; }
-  if (hasGlab) { log.out('gitlab'); return; }
-  if (hasBb) { log.out('bitbucket'); return; }
+  if (hasTea) {
+    log.out('gitea');
+    return;
+  }
+  if (hasGh) {
+    log.out('github');
+    return;
+  }
+  if (hasGlab) {
+    log.out('gitlab');
+    return;
+  }
+  if (hasBb) {
+    log.out('bitbucket');
+    return;
+  }
 
-  log.err("WARN: no platform CLI found (gh, glab, bb, tea) and remote URL didn't match known platforms");
+  log.err(
+    "WARN: no platform CLI found (gh, glab, bb, tea) and remote URL didn't match known platforms",
+  );
   log.out('git_only');
 }
 

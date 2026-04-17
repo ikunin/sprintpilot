@@ -1,5 +1,3 @@
-'use strict';
-
 const fs = require('node:fs');
 
 // Keyword-based fuzzy matches (high false-positive rate, but useful as a
@@ -10,20 +8,20 @@ const SECRET_KEYWORD = /API_KEY|SECRET|TOKEN|PASSWORD|aws_access|private_key/i;
 // secrets actually look like. Matching here is much less noisy than the
 // keyword list above.
 const SECRET_FORMATS = [
-  /\bAKIA[0-9A-Z]{16}\b/,                  // AWS Access Key ID
-  /\bASIA[0-9A-Z]{16}\b/,                  // AWS temporary Access Key ID
-  /\bghp_[A-Za-z0-9]{30,}\b/,              // GitHub personal access token
-  /\bgho_[A-Za-z0-9]{30,}\b/,              // GitHub OAuth token
-  /\bghu_[A-Za-z0-9]{30,}\b/,              // GitHub user-to-server token
-  /\bghs_[A-Za-z0-9]{30,}\b/,              // GitHub server-to-server token
-  /\bghr_[A-Za-z0-9]{30,}\b/,              // GitHub refresh token
-  /\bgithub_pat_[A-Za-z0-9_]{20,}\b/,      // GitHub fine-grained PAT
-  /\bsk-[A-Za-z0-9_-]{20,}\b/,             // OpenAI / Anthropic-like
-  /\bsk_live_[A-Za-z0-9]{20,}\b/,          // Stripe live secret
-  /\bsk_test_[A-Za-z0-9]{20,}\b/,          // Stripe test secret
-  /\bxox[baprs]-[A-Za-z0-9-]{10,}\b/,      // Slack tokens
-  /\bAIza[0-9A-Za-z_-]{35,99}\b/,          // Google API key (standard is 39 chars = AIza + 35)
-  /-----BEGIN [A-Z ]*PRIVATE KEY-----/,    // PEM private key header
+  /\bAKIA[0-9A-Z]{16}\b/, // AWS Access Key ID
+  /\bASIA[0-9A-Z]{16}\b/, // AWS temporary Access Key ID
+  /\bghp_[A-Za-z0-9]{30,}\b/, // GitHub personal access token
+  /\bgho_[A-Za-z0-9]{30,}\b/, // GitHub OAuth token
+  /\bghu_[A-Za-z0-9]{30,}\b/, // GitHub user-to-server token
+  /\bghs_[A-Za-z0-9]{30,}\b/, // GitHub server-to-server token
+  /\bghr_[A-Za-z0-9]{30,}\b/, // GitHub refresh token
+  /\bgithub_pat_[A-Za-z0-9_]{20,}\b/, // GitHub fine-grained PAT
+  /\bsk-[A-Za-z0-9_-]{20,}\b/, // OpenAI / Anthropic-like
+  /\bsk_live_[A-Za-z0-9]{20,}\b/, // Stripe live secret
+  /\bsk_test_[A-Za-z0-9]{20,}\b/, // Stripe test secret
+  /\bxox[baprs]-[A-Za-z0-9-]{10,}\b/, // Slack tokens
+  /\bAIza[0-9A-Za-z_-]{35,99}\b/, // Google API key (standard is 39 chars = AIza + 35)
+  /-----BEGIN [A-Z ]*PRIVATE KEY-----/, // PEM private key header
 ];
 
 // Deprecated: callers should use `matchesSecret(line)` which applies both

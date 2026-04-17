@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# Sprintpilot pre-push hook
+# - Runs Biome (format + lint) on changed files
+# - Runs the fast test suite (unit + scripts)
+# Enable once per clone: `git config core.hooksPath .githooks`
+
+set -e
+
+ROOT="$(git rev-parse --show-toplevel)"
+cd "$ROOT"
+
+# Ensure Biome is installed (lives in tests/ devDeps)
+if [ ! -x tests/node_modules/.bin/biome ]; then
+  echo "pre-push: Biome not installed, running 'cd tests && npm install'..."
+  (cd tests && npm install --silent)
+fi
+
+echo "pre-push: biome check ."
+./tests/node_modules/.bin/biome ci . || {
+  echo ""
+  echo "✗ Biome found errors. Auto-fix: ./tests/node_modules/.bin/biome check --write ."
+  exit 1
+}
+
+echo "pre-push: running fast test suite"
+(cd tests && npm run test:fast --silent) || {
+  echo ""
+  echo "✗ Test suite failed. Fix tests before pushing."
+  exit 1
+}
+
+echo "pre-push: ✓ all checks passed"

@@ -1,9 +1,9 @@
-import { spawnSync, type SpawnSyncOptions } from "node:child_process";
-import { join } from "node:path";
+import { type SpawnSyncOptions, spawnSync } from 'node:child_process';
+import { join } from 'node:path';
 
-const REPO_ROOT = join(import.meta.dirname, "..", "..", "..");
-export const SCRIPTS_DIR = join(REPO_ROOT, "_Sprintpilot", "scripts");
-export const BIN_CLI = join(REPO_ROOT, "bin", "sprintpilot.js");
+const REPO_ROOT = join(import.meta.dirname, '..', '..', '..');
+export const SCRIPTS_DIR = join(REPO_ROOT, '_Sprintpilot', 'scripts');
+export const BIN_CLI = join(REPO_ROOT, 'bin', 'sprintpilot.js');
 
 export interface RunResult {
   stdout: string;
@@ -12,14 +12,18 @@ export interface RunResult {
 }
 
 function normalize(buf: string | Buffer | null): string {
-  if (buf == null) return "";
-  return (typeof buf === "string" ? buf : buf.toString("utf8")).replace(/\s+$/, "");
+  if (buf == null) return '';
+  return (typeof buf === 'string' ? buf : buf.toString('utf8')).replace(/\s+$/, '');
 }
 
-export function runScript(name: string, args: string[] = [], opts: SpawnSyncOptions = {}): RunResult {
+export function runScript(
+  name: string,
+  args: string[] = [],
+  opts: SpawnSyncOptions = {},
+): RunResult {
   const scriptPath = join(SCRIPTS_DIR, `${name}.js`);
-  const res = spawnSync("node", [scriptPath, ...args], {
-    encoding: "utf8",
+  const res = spawnSync('node', [scriptPath, ...args], {
+    encoding: 'utf8',
     timeout: 30_000,
     ...opts,
     env: { ...process.env, ...(opts.env as Record<string, string> | undefined) },
@@ -35,8 +39,8 @@ export function runScript(name: string, args: string[] = [], opts: SpawnSyncOpti
 }
 
 export function runCli(args: string[] = [], opts: SpawnSyncOptions = {}): RunResult {
-  const res = spawnSync("node", [BIN_CLI, ...args], {
-    encoding: "utf8",
+  const res = spawnSync('node', [BIN_CLI, ...args], {
+    encoding: 'utf8',
     timeout: 60_000,
     ...opts,
     env: { ...process.env, ...(opts.env as Record<string, string> | undefined) },

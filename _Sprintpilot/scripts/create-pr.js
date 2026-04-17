@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-'use strict';
 
 const { parseArgs } = require('../lib/runtime/args');
 const { tryRun, run } = require('../lib/runtime/spawn');
@@ -9,7 +8,9 @@ const { postJson } = require('../lib/runtime/http');
 const log = require('../lib/runtime/log');
 
 function help() {
-  log.out("Usage: create-pr.js --platform <github|gitlab|bitbucket|gitea|git_only> --branch <name> --base <branch> --title 'title' --body 'body' [--base-url <url>]");
+  log.out(
+    "Usage: create-pr.js --platform <github|gitlab|bitbucket|gitea|git_only> --branch <name> --base <branch> --title 'title' --body 'body' [--base-url <url>]",
+  );
 }
 
 async function hasCli(name) {
@@ -80,12 +81,18 @@ function redactAuth(text) {
   return String(text)
     .replace(/("?authorization"?\s*:\s*")[^"]*(")/gi, '$1[REDACTED]$2')
     .replace(/(bearer\s+)\S+/gi, '$1[REDACTED]')
-    .replace(/("?(?:token|access_token|api_key|private_token)"?\s*[:=]\s*")[^"]*(")/gi, '$1[REDACTED]$2');
+    .replace(
+      /("?(?:token|access_token|api_key|private_token)"?\s*[:=]\s*")[^"]*(")/gi,
+      '$1[REDACTED]$2',
+    );
 }
 
 async function main() {
   const { opts } = parseArgs(process.argv.slice(2), { booleanFlags: ['dry-run'] });
-  if (opts.help) { help(); process.exit(0); }
+  if (opts.help) {
+    help();
+    process.exit(0);
+  }
 
   const platform = opts.platform;
   const branch = opts.branch;
@@ -130,13 +137,11 @@ async function main() {
       log.out('SKIPPED');
       process.exit(2);
     }
-    const r = await tryRun('gh', [
-      'pr', 'create',
-      '--base', baseBranch,
-      '--head', branch,
-      '--title', title,
-      '--body', body,
-    ], { timeoutMs: 60_000 });
+    const r = await tryRun(
+      'gh',
+      ['pr', 'create', '--base', baseBranch, '--head', branch, '--title', title, '--body', body],
+      { timeoutMs: 60_000 },
+    );
     const combined = `${r.stdout}${r.stderr}`;
     if (r.exitCode !== 0) {
       log.error(`gh pr create failed: ${combined.trim()}`);
@@ -152,15 +157,24 @@ async function main() {
       log.out('SKIPPED');
       process.exit(2);
     }
-    const r = await tryRun('glab', [
-      'mr', 'create',
-      '--source-branch', branch,
-      '--target-branch', baseBranch,
-      '--title', title,
-      '--description', body,
-      '--remove-source-branch',
-      '--yes',
-    ], { timeoutMs: 60_000 });
+    const r = await tryRun(
+      'glab',
+      [
+        'mr',
+        'create',
+        '--source-branch',
+        branch,
+        '--target-branch',
+        baseBranch,
+        '--title',
+        title,
+        '--description',
+        body,
+        '--remove-source-branch',
+        '--yes',
+      ],
+      { timeoutMs: 60_000 },
+    );
     const combined = `${r.stdout}${r.stderr}`;
     if (r.exitCode !== 0) {
       log.error(`glab mr create failed: ${combined.trim()}`);
@@ -173,13 +187,22 @@ async function main() {
 
   if (platform === 'bitbucket') {
     if (await hasCli('bb')) {
-      const r = await tryRun('bb', [
-        'pr', 'create',
-        '--source', branch,
-        '--destination', baseBranch,
-        '--title', title,
-        '--description', body,
-      ], { timeoutMs: 60_000 });
+      const r = await tryRun(
+        'bb',
+        [
+          'pr',
+          'create',
+          '--source',
+          branch,
+          '--destination',
+          baseBranch,
+          '--title',
+          title,
+          '--description',
+          body,
+        ],
+        { timeoutMs: 60_000 },
+      );
       const combined = `${r.stdout}${r.stderr}`;
       if (r.exitCode !== 0) {
         log.error(`bb pr create failed: ${combined.trim()}`);
@@ -200,11 +223,14 @@ async function main() {
             destination: { branch: { name: baseBranch } },
             description: body,
           },
-          { headers: { Authorization: `Bearer ${process.env.BITBUCKET_TOKEN}` } }
+          { headers: { Authorization: `Bearer ${process.env.BITBUCKET_TOKEN}` } },
         );
         if (res.statusCode === 201) {
           const href = res.json?.links?.html?.href;
-          if (href) { log.out(href); return; }
+          if (href) {
+            log.out(href);
+            return;
+          }
           log.out('CREATED (URL not extracted from response)');
           return;
         }
@@ -223,13 +249,22 @@ async function main() {
 
   if (platform === 'gitea') {
     if (await hasCli('tea')) {
-      const r = await tryRun('tea', [
-        'pr', 'create',
-        '--base', baseBranch,
-        '--head', branch,
-        '--title', title,
-        '--description', body,
-      ], { timeoutMs: 60_000 });
+      const r = await tryRun(
+        'tea',
+        [
+          'pr',
+          'create',
+          '--base',
+          baseBranch,
+          '--head',
+          branch,
+          '--title',
+          title,
+          '--description',
+          body,
+        ],
+        { timeoutMs: 60_000 },
+      );
       const combined = `${r.stdout}${r.stderr}`;
       if (r.exitCode !== 0) {
         log.error(`tea pr create failed: ${combined.trim()}`);
@@ -245,11 +280,14 @@ async function main() {
         const res = await postJson(
           `${baseUrl.replace(/\/+$/, '')}/api/v1/repos/${ownerRepo}/pulls`,
           { base: baseBranch, head: branch, title, body },
-          { headers: { Authorization: `token ${process.env.GITEA_TOKEN}` } }
+          { headers: { Authorization: `token ${process.env.GITEA_TOKEN}` } },
         );
         if (res.statusCode === 201) {
           const href = res.json?.html_url;
-          if (href) { log.out(href); return; }
+          if (href) {
+            log.out(href);
+            return;
+          }
           log.out('CREATED (URL not extracted from response)');
           return;
         }

@@ -2,7 +2,7 @@
  * Claude Code test runner — spawns `claude -p` as a subprocess
  * and captures structured output.
  */
-import { spawn, type ChildProcess } from "node:child_process";
+import { type ChildProcess, spawn } from 'node:child_process';
 
 export interface ClaudeRunOptions {
   /** Working directory for the Claude session */
@@ -52,12 +52,12 @@ export interface ClaudeRunResult {
  */
 export async function runClaude(
   prompt: string,
-  options: ClaudeRunOptions
+  options: ClaudeRunOptions,
 ): Promise<ClaudeRunResult> {
   const {
     cwd,
     maxBudget = 15,
-    model = "sonnet",
+    model = 'sonnet',
     addDirs = [],
     timeout = 600_000,
     systemPrompt,
@@ -65,38 +65,38 @@ export async function runClaude(
   } = options;
 
   const args = [
-    "-p",
+    '-p',
     prompt,
-    "--output-format",
-    "json",
-    "--allowedTools",
-    "Bash",
-    "Read",
-    "Write",
-    "Edit",
-    "Glob",
-    "Grep",
-    "Agent",
-    "TodoWrite",
-    "WebSearch",
-    "WebFetch",
-    "--no-session-persistence",
-    "--max-budget-usd",
+    '--output-format',
+    'json',
+    '--allowedTools',
+    'Bash',
+    'Read',
+    'Write',
+    'Edit',
+    'Glob',
+    'Grep',
+    'Agent',
+    'TodoWrite',
+    'WebSearch',
+    'WebFetch',
+    '--no-session-persistence',
+    '--max-budget-usd',
     String(maxBudget),
-    "--model",
+    '--model',
     model,
   ];
 
   for (const dir of addDirs) {
-    args.push("--add-dir", dir);
+    args.push('--add-dir', dir);
   }
 
   if (systemPrompt) {
-    args.push("--system-prompt", systemPrompt);
+    args.push('--system-prompt', systemPrompt);
   }
 
   if (appendSystemPrompt) {
-    args.push("--append-system-prompt", appendSystemPrompt);
+    args.push('--append-system-prompt', appendSystemPrompt);
   }
 
   return new Promise<ClaudeRunResult>((resolve) => {
@@ -108,26 +108,26 @@ export async function runClaude(
       resolve(result);
     };
 
-    const proc: ChildProcess = spawn("claude", args, {
+    const proc: ChildProcess = spawn('claude', args, {
       cwd,
       env: { ...process.env },
-      stdio: ["pipe", "pipe", "pipe"],
+      stdio: ['pipe', 'pipe', 'pipe'],
     });
 
-    let stdout = "";
-    let stderr = "";
+    let stdout = '';
+    let stderr = '';
     let timedOut = false;
 
-    proc.stdout?.on("data", (data: Buffer) => {
+    proc.stdout?.on('data', (data: Buffer) => {
       stdout += data.toString();
     });
 
-    proc.stderr?.on("data", (data: Buffer) => {
+    proc.stderr?.on('data', (data: Buffer) => {
       stderr += data.toString();
     });
 
     // Handle spawn failures (e.g., claude binary not found)
-    proc.on("error", (err) => {
+    proc.on('error', (err) => {
       finish({
         exitCode: 1,
         stdout,
@@ -139,15 +139,19 @@ export async function runClaude(
     const timer = setTimeout(() => {
       timedOut = true;
       // Try SIGTERM first to allow graceful shutdown and JSON output
-      proc.kill("SIGTERM");
+      proc.kill('SIGTERM');
       // Force kill after 10s if SIGTERM is ignored
       setTimeout(() => {
-        try { proc.kill("SIGKILL"); } catch { /* already dead */ }
+        try {
+          proc.kill('SIGKILL');
+        } catch {
+          /* already dead */
+        }
       }, 10_000);
     }, timeout);
 
-    proc.on("close", (code) => {
-      let json: ClaudeRunResult["json"];
+    proc.on('close', (code) => {
+      let json: ClaudeRunResult['json'];
       try {
         json = JSON.parse(stdout);
       } catch {
@@ -176,11 +180,9 @@ export async function runClaude(
  */
 export async function runSkill(
   skillName: string,
-  options: ClaudeRunOptions & { extraPrompt?: string }
+  options: ClaudeRunOptions & { extraPrompt?: string },
 ): Promise<ClaudeRunResult> {
-  const prompt = options.extraPrompt
-    ? `/${skillName}\n\n${options.extraPrompt}`
-    : `/${skillName}`;
+  const prompt = options.extraPrompt ? `/${skillName}\n\n${options.extraPrompt}` : `/${skillName}`;
 
   return runClaude(prompt, options);
 }

@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-'use strict';
 
 const crypto = require('node:crypto');
 
@@ -54,7 +53,10 @@ async function validateRefFormat(fullName) {
 
 async function main() {
   const { opts, positional } = parseArgs(process.argv.slice(2));
-  if (opts.help) { help(); process.exit(0); }
+  if (opts.help) {
+    help();
+    process.exit(0);
+  }
   const storyKey = positional[0];
   const prefix = opts.prefix ?? 'story/';
   const maxLength = parseInt(opts['max-length'] || '60', 10);

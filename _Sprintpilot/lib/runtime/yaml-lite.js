@@ -1,5 +1,3 @@
-'use strict';
-
 // Narrow YAML helper covering the addon-owned shape:
 //   key: value
 //   stories:
@@ -8,7 +6,7 @@
 //       field2: value
 // No deep nesting, no anchors, no flow sequences beyond [a,b,c] literal we pass through.
 
-const SPECIAL_CHARS = /[:{}\[\],&*#?|<>=!%@`\n]|^-|^\s|\s$/;
+const SPECIAL_CHARS = /[:{}[\],&*#?|<>=!%@`\n]|^-|^\s|\s$/;
 
 // YAML 1.1 reserved literals that parsers interpret as booleans/null when
 // unquoted (e.g. "no" -> false). Must be quoted to round-trip as strings.
@@ -81,8 +79,14 @@ function replaceStoryBlock(existing, storyKey, newBlock) {
       // header is part of this block. Blank lines inside the block count
       // as continuations and are also consumed.
       while (i < lines.length) {
-        if (lines[i].length === 0) { i++; continue; }
-        if (indentOf(lines[i]) > headerIndent) { i++; continue; }
+        if (lines[i].length === 0) {
+          i++;
+          continue;
+        }
+        if (indentOf(lines[i]) > headerIndent) {
+          i++;
+          continue;
+        }
         break;
       }
       // Strip any trailing blanks we may have consumed past the block.

@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-'use strict';
 
 const path = require('node:path');
 const { Command } = require('commander');
@@ -42,16 +41,24 @@ async function main() {
 
   program
     .name('sprintpilot')
-    .description('Sprintpilot — autopilot and multi-agent addon for BMad Method: autonomous story execution, parallel agents, git workflow')
+    .description(
+      'Sprintpilot — autopilot and multi-agent addon for BMad Method: autonomous story execution, parallel agents, git workflow',
+    )
     .version(await resolveVersion(), '-v, --version', 'Show version');
 
   program
     .command('install', { isDefault: true })
     .description('Install Sprintpilot into the current BMad Method project')
-    .option('--tools <list>', 'Comma-separated tools (claude-code,cursor,windsurf,cline,roo,trae,kiro,gemini-cli,github-copilot,all)')
+    .option(
+      '--tools <list>',
+      'Comma-separated tools (claude-code,cursor,windsurf,cline,roo,trae,kiro,gemini-cli,github-copilot,all)',
+    )
     .option('--dry-run', 'Preview without making changes')
     .option('--force', 'Skip backup of existing skills')
-    .option('--migrate-v1', 'Migrate from bmad-autopilot-addon v1 (auto-detected; this flag is for non-interactive CI)')
+    .option(
+      '--migrate-v1',
+      'Migrate from bmad-autopilot-addon v1 (auto-detected; this flag is for non-interactive CI)',
+    )
     .option('-y, --yes', 'Non-interactive mode')
     .action(async (options) => {
       try {

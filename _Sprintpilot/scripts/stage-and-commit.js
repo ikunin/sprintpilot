@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-'use strict';
 
 const fs = require('node:fs');
 const path = require('node:path');
@@ -15,7 +14,9 @@ const {
 const log = require('../lib/runtime/log');
 
 function help() {
-  log.out("Usage: stage-and-commit.js --message 'msg' [--allowlist path] [--max-size-mb 1] [--file-list path] [--dry-run]");
+  log.out(
+    "Usage: stage-and-commit.js --message 'msg' [--allowlist path] [--max-size-mb 1] [--file-list path] [--dry-run]",
+  );
 }
 
 function splitOut(out) {
@@ -34,8 +35,9 @@ async function collectChanges() {
   // add-side list so we don't `git add` a path that no longer exists and
   // emit a spurious warning; the dedicated `git rm` loop handles them.
   const deletedSet = new Set(deleted);
-  const all = dedupeSorted([...splitOut(modified), ...splitOut(untracked)])
-    .filter((f) => !deletedSet.has(f));
+  const all = dedupeSorted([...splitOut(modified), ...splitOut(untracked)]).filter(
+    (f) => !deletedSet.has(f),
+  );
   return { all, deleted };
 }
 
@@ -52,7 +54,10 @@ function parseFileListMarkdown(filePath) {
 
 async function main() {
   const { opts } = parseArgs(process.argv.slice(2), { booleanFlags: ['dry-run'] });
-  if (opts.help) { help(); process.exit(0); }
+  if (opts.help) {
+    help();
+    process.exit(0);
+  }
 
   const message = opts.message ?? opts.m;
   const allowlist = opts.allowlist;
@@ -95,7 +100,9 @@ async function main() {
 
       if (!isAllowlisted(file, allowPatterns)) {
         if (lstat.size > MAX_SCAN_BYTES) {
-          warnings.push(`secret scan skipped for ${file} (size ${Math.floor(lstat.size / 1024)} KB > ${MAX_SCAN_BYTES / 1024} KB limit)`);
+          warnings.push(
+            `secret scan skipped for ${file} (size ${Math.floor(lstat.size / 1024)} KB > ${MAX_SCAN_BYTES / 1024} KB limit)`,
+          );
         } else if (!isBinary) {
           try {
             const raw = fs.readFileSync(file, 'utf8');
@@ -126,7 +133,8 @@ async function main() {
   if (fs.existsSync('.gitignore')) {
     // Exact line match — substring tests were fooled by the entry appearing
     // inside a comment (e.g. "# .autopilot.lock is auto-created").
-    const entries = fs.readFileSync('.gitignore', 'utf8')
+    const entries = fs
+      .readFileSync('.gitignore', 'utf8')
       .split(/\r?\n/)
       .map((l) => l.trim())
       .filter((l) => l && !l.startsWith('#'));

@@ -1,5 +1,3 @@
-'use strict';
-
 const { run, tryRun } = require('./spawn');
 
 async function git(args, opts = {}) {

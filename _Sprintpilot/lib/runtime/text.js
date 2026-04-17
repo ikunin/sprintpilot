@@ -1,5 +1,3 @@
-'use strict';
-
 function splitLines(text) {
   if (!text) return [];
   const trimmedTrailing = text.replace(/\r?\n$/, '');

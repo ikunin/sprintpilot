@@ -1,5 +1,3 @@
-'use strict';
-
 function out(msg) {
   process.stdout.write(String(msg));
   if (!String(msg).endsWith('\n')) process.stdout.write('\n');

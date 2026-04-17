@@ -1,5 +1,3 @@
-'use strict';
-
 const child = require('node:child_process');
 
 function run(file, args, { cwd, timeoutMs = 30_000, input, env } = {}) {
@@ -17,7 +15,7 @@ function run(file, args, { cwd, timeoutMs = 30_000, input, env } = {}) {
       (err, stdout, stderr) => {
         if (err) {
           const e = new Error(
-            `${file} ${args.join(' ')} failed with code ${err.code ?? err.signal ?? 'unknown'}`
+            `${file} ${args.join(' ')} failed with code ${err.code ?? err.signal ?? 'unknown'}`,
           );
           e.exitCode = typeof err.code === 'number' ? err.code : 1;
           e.signal = err.signal || null;
@@ -27,16 +25,26 @@ function run(file, args, { cwd, timeoutMs = 30_000, input, env } = {}) {
           return reject(e);
         }
         resolve({ stdout: String(stdout || ''), stderr: String(stderr || ''), exitCode: 0 });
-      }
+      },
     );
     // Rejecting on spawn-time errors (ENOENT etc) ensures the caller sees a
     // rejected Promise rather than hanging, even if `proc.stdin` was never
     // attached. Without this, a missing binary can crash via `proc.stdin.write`.
     proc.on('error', reject);
     if (input !== undefined && proc.stdin) {
-      proc.stdin.on('error', () => { /* ignore EPIPE etc */ });
-      try { proc.stdin.write(input); } catch { /* ignore */ }
-      try { proc.stdin.end(); } catch { /* ignore */ }
+      proc.stdin.on('error', () => {
+        /* ignore EPIPE etc */
+      });
+      try {
+        proc.stdin.write(input);
+      } catch {
+        /* ignore */
+      }
+      try {
+        proc.stdin.end();
+      } catch {
+        /* ignore */
+      }
     }
   });
 }
@@ -60,7 +68,12 @@ function runInherit(file, args, { cwd, env, input } = {}) {
     proc.on('error', reject);
     proc.on('close', (code) => resolve({ exitCode: code ?? 0 }));
     if (input !== undefined && proc.stdin) {
-      try { proc.stdin.write(input); proc.stdin.end(); } catch { /* ignore */ }
+      try {
+        proc.stdin.write(input);
+        proc.stdin.end();
+      } catch {
+        /* ignore */
+      }
     }
   });
 }

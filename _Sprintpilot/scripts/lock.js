@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-'use strict';
 
 const fs = require('node:fs');
 const path = require('node:path');
@@ -88,12 +87,20 @@ function writeLockExclusive(lockFile, id) {
     fs.writeSync(fd, content, 0, 'utf8');
     wrote = true;
   } finally {
-    try { fs.closeSync(fd); } catch { /* ignore */ }
+    try {
+      fs.closeSync(fd);
+    } catch {
+      /* ignore */
+    }
     if (!wrote) {
       // writeSync failed (ENOSPC, EIO): leaving an empty lockfile behind
       // would look "corrupt" to the next acquirer and permanently wedge
       // the autopilot. Unlink so the next try can re-create cleanly.
-      try { fs.unlinkSync(lockFile); } catch { /* ignore */ }
+      try {
+        fs.unlinkSync(lockFile);
+      } catch {
+        /* ignore */
+      }
     }
   }
 }
@@ -143,7 +150,11 @@ function main() {
     // of them gets EEXIST.
     const info = readLockInfo(lockFile, staleSeconds);
     if (info.state === 'STALE') {
-      try { fs.unlinkSync(lockFile); } catch { /* ignore */ }
+      try {
+        fs.unlinkSync(lockFile);
+      } catch {
+        /* ignore */
+      }
       try {
         writeLockExclusive(lockFile, id);
         log.out(`ACQUIRED_STALE:${id}`);
@@ -176,7 +187,11 @@ function main() {
 
   if (action === 'release') {
     if (fs.existsSync(lockFile)) {
-      try { fs.unlinkSync(lockFile); } catch { /* ignore */ }
+      try {
+        fs.unlinkSync(lockFile);
+      } catch {
+        /* ignore */
+      }
       log.out('RELEASED');
     } else {
       log.out('NO_LOCK');
@@ -187,7 +202,8 @@ function main() {
   if (action === 'status') {
     const info = readLockInfo(lockFile, staleSeconds);
     if (info.state === 'FREE') log.out('Lock: free (no active session)');
-    else if (info.state === 'LOCKED') log.out(`Lock: ACTIVE — session ${info.id}, age ${info.ageMin}m`);
+    else if (info.state === 'LOCKED')
+      log.out(`Lock: ACTIVE — session ${info.id}, age ${info.ageMin}m`);
     else log.out(`Lock: STALE — session ${info.id}, age ${info.ageMin}m (will auto-remove)`);
   }
 }

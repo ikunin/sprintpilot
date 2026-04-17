@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-'use strict';
 
 const fs = require('node:fs');
 const path = require('node:path');
@@ -40,12 +39,20 @@ function atomicWrite(targetPath, content) {
       try {
         fs.writeFileSync(targetPath, content, 'utf8');
       } finally {
-        try { fs.unlinkSync(tmp); } catch { /* best effort */ }
+        try {
+          fs.unlinkSync(tmp);
+        } catch {
+          /* best effort */
+        }
       }
       return;
     }
     // Any other error: clean up tmp so we don't leak cruft.
-    try { fs.unlinkSync(tmp); } catch { /* best effort */ }
+    try {
+      fs.unlinkSync(tmp);
+    } catch {
+      /* best effort */
+    }
     throw e;
   }
 }
@@ -78,7 +85,10 @@ function buildHeader(baseBranch, platform) {
 
 function main() {
   const { opts } = parseArgs(process.argv.slice(2));
-  if (opts.help) { help(); process.exit(0); }
+  if (opts.help) {
+    help();
+    process.exit(0);
+  }
 
   const story = opts.story;
   const statusFile = opts['git-status-file'];
@@ -102,12 +112,12 @@ function main() {
   // value", so we must NOT emit the field when the flag is absent. The
   // previous logic defaulted to 'false' and overwrote a prior 'true' every
   // call.
-  const hasWorktreeCleaned = Object.prototype.hasOwnProperty.call(opts, 'worktree-cleaned');
+  const hasWorktreeCleaned = Object.hasOwn(opts, 'worktree-cleaned');
   let worktreeCleaned;
   if (hasWorktreeCleaned) {
     const v = opts['worktree-cleaned'];
     // Accept 'true'/'false' strings (any case) and boolean true.
-    worktreeCleaned = (v === true || String(v).toLowerCase() === 'true') ? 'true' : 'false';
+    worktreeCleaned = v === true || String(v).toLowerCase() === 'true' ? 'true' : 'false';
   }
 
   const fields = [

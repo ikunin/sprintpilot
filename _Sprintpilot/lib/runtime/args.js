@@ -1,5 +1,3 @@
-'use strict';
-
 function parseArgs(argv, { booleanFlags = [], positionalActions = null } = {}) {
   const opts = {};
   const positional = [];

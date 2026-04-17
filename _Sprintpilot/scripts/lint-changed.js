@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-'use strict';
 
 const fs = require('node:fs');
 const path = require('node:path');
@@ -54,7 +53,9 @@ function localBin(name) {
   try {
     const stat = fs.statSync(p);
     if (stat.isFile()) return p;
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
   return null;
 }
 
@@ -72,7 +73,8 @@ async function lintLanguage(lang, files) {
   if (lang === 'python') {
     if (await hasCli('ruff')) return runLinter('ruff', 'ruff', ['check'], files);
     if (await hasCli('flake8')) return runLinter('flake8', 'flake8', [], files);
-    if (await hasCli('pylint')) return runLinter('pylint', 'pylint', ['--output-format=text'], files);
+    if (await hasCli('pylint'))
+      return runLinter('pylint', 'pylint', ['--output-format=text'], files);
     return null;
   }
   if (lang === 'js-ts') {
@@ -83,15 +85,18 @@ async function lintLanguage(lang, files) {
     return null;
   }
   if (lang === 'rust') {
-    if (await hasCli('cargo')) return runLinter('cargo-clippy', 'cargo', ['clippy', '--message-format=short'], []);
+    if (await hasCli('cargo'))
+      return runLinter('cargo-clippy', 'cargo', ['clippy', '--message-format=short'], []);
     return null;
   }
   if (lang === 'go') {
-    if (await hasCli('golangci-lint')) return runLinter('golangci-lint', 'golangci-lint', ['run'], []);
+    if (await hasCli('golangci-lint'))
+      return runLinter('golangci-lint', 'golangci-lint', ['run'], []);
     return null;
   }
   if (lang === 'ruby') {
-    if (await hasCli('rubocop')) return runLinter('rubocop', 'rubocop', ['--format', 'simple'], files);
+    if (await hasCli('rubocop'))
+      return runLinter('rubocop', 'rubocop', ['--format', 'simple'], files);
     return null;
   }
   if (lang === 'java') {
@@ -108,25 +113,35 @@ async function lintLanguage(lang, files) {
     return null;
   }
   if (lang === 'c') {
-    if (await hasCli('cppcheck')) return runLinter('cppcheck', 'cppcheck', ['--enable=warning,style'], files);
+    if (await hasCli('cppcheck'))
+      return runLinter('cppcheck', 'cppcheck', ['--enable=warning,style'], files);
     if (await hasCli('clang-tidy')) return runLinter('clang-tidy', 'clang-tidy', [], files);
     return null;
   }
   if (lang === 'cpp') {
-    if (await hasCli('cppcheck')) return runLinter('cppcheck', 'cppcheck', ['--enable=warning,style', '--language=c++'], files);
+    if (await hasCli('cppcheck'))
+      return runLinter('cppcheck', 'cppcheck', ['--enable=warning,style', '--language=c++'], files);
     if (await hasCli('clang-tidy')) return runLinter('clang-tidy', 'clang-tidy', [], files);
     return null;
   }
   if (lang === 'csharp') {
-    if (await hasCli('dotnet')) return runLinter('dotnet-format', 'dotnet', ['format', '--verify-no-changes', '--diagnostics'], []);
+    if (await hasCli('dotnet'))
+      return runLinter(
+        'dotnet-format',
+        'dotnet',
+        ['format', '--verify-no-changes', '--diagnostics'],
+        [],
+      );
     return null;
   }
   if (lang === 'swift') {
-    if (await hasCli('swiftlint')) return runLinter('swiftlint', 'swiftlint', ['lint', '--quiet'], files);
+    if (await hasCli('swiftlint'))
+      return runLinter('swiftlint', 'swiftlint', ['lint', '--quiet'], files);
     return null;
   }
   if (lang === 'sql') {
-    if (await hasCli('sqlfluff')) return runLinter('sqlfluff', 'sqlfluff', ['lint', '--dialect', 'oracle'], files);
+    if (await hasCli('sqlfluff'))
+      return runLinter('sqlfluff', 'sqlfluff', ['lint', '--dialect', 'oracle'], files);
     return null;
   }
   if (lang === 'kotlin') {
@@ -135,7 +150,8 @@ async function lintLanguage(lang, files) {
     return null;
   }
   if (lang === 'php') {
-    if (await hasCli('phpstan')) return runLinter('phpstan', 'phpstan', ['analyse', '--no-progress'], files);
+    if (await hasCli('phpstan'))
+      return runLinter('phpstan', 'phpstan', ['analyse', '--no-progress'], files);
     if (await hasCli('phpcs')) return runLinter('phpcs', 'phpcs', [], files);
     return null;
   }
@@ -172,7 +188,10 @@ async function runOverride(name, files) {
 
 async function main() {
   const { opts } = parseArgs(process.argv.slice(2));
-  if (opts.help) { help(); process.exit(0); }
+  if (opts.help) {
+    help();
+    process.exit(0);
+  }
 
   const limit = parseInt(opts.limit || '100', 10);
   const outputFile = opts['output-file'] || '';
@@ -180,9 +199,9 @@ async function main() {
 
   const modified = await tryGitStdout(['diff', '--name-only', 'HEAD']);
   const untracked = await tryGitStdout(['ls-files', '--others', '--exclude-standard']);
-  const all = Array.from(
-    new Set([...splitLines(modified || ''), ...splitLines(untracked || '')])
-  ).filter(Boolean).sort();
+  const all = Array.from(new Set([...splitLines(modified || ''), ...splitLines(untracked || '')]))
+    .filter(Boolean)
+    .sort();
 
   if (all.length === 0) {
     log.out('No changed files to lint');

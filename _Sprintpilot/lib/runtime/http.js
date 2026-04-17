@@ -1,5 +1,3 @@
-'use strict';
-
 const https = require('node:https');
 const http = require('node:http');
 const { URL } = require('node:url');
@@ -22,7 +20,12 @@ function postJson(urlStr, body, { headers = {}, timeoutMs = 15_000 } = {}) {
     // can fire on the size-cap abort path (we call req.destroy(err)). Without
     // this, the observed error message becomes non-deterministic.
     let settled = false;
-    const done = (fn, val) => { if (!settled) { settled = true; fn(val); } };
+    const done = (fn, val) => {
+      if (!settled) {
+        settled = true;
+        fn(val);
+      }
+    };
     const ok = (val) => done(resolve, val);
     const fail = (err) => done(reject, err);
 
@@ -78,11 +81,15 @@ function postJson(urlStr, body, { headers = {}, timeoutMs = 15_000 } = {}) {
           if (aborted) return; // error path handles it
           const text = Buffer.concat(chunks).toString('utf8');
           let json = null;
-          try { json = JSON.parse(text); } catch { /* non-json */ }
+          try {
+            json = JSON.parse(text);
+          } catch {
+            /* non-json */
+          }
           ok({ statusCode: res.statusCode, body: text, json });
         });
         res.on('error', fail);
-      }
+      },
     );
     req.on('timeout', () => {
       req.destroy(new Error(`HTTP timeout after ${timeoutMs}ms`));
