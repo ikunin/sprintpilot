@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.0.1] - 2026-04-17
+
+### Fixed
+- **Autopilot runtime crash**: `sprint-autopilot-on/workflow.md` still invoked helper scripts as `bash …/scripts/*.sh`, but they've been Node since the legacy v1.0.21. Replaced all 12 call sites with `node …/scripts/*.js` so the autopilot actually runs.
+- **BMad Method version shown as "unknown"** during install: the installer read `bmadManifest.version` but BMad v6 writes the manifest with `version` nested under `bmad:`. New `extractBmadVersion()` helper tolerates both flat and nested shapes, plus a unit test covering both.
+- `check-update` test fixture — 1.0.10 was correct against the legacy v1.0.21 on the registry, but higher than the `@ikunin/sprintpilot@1.0.0` baseline after the rebrand reset. Switched the "update available" assertion to pin 0.0.1 inside the test.
+
+### Changed
+- **npm package scope: `sprintpilot` → `@ikunin/sprintpilot`**. Unscoped `sprintpilot` is blocked by npm's typosquat-similarity policy (existing unrelated package `sprint-pilot`). Install: `npm i -g @ikunin/sprintpilot`. Product name, CLI binary (`sprintpilot`), skill IDs, and the GitHub repo slug are unchanged — only the npm install path differs.
+- Installer banner layout: version is rendered inline on the 2nd-to-last banner row (`|____/| .__/…  v1.0.1`) instead of a standalone line below.
+- Trademark phrasing tightened across `TRADEMARK.md`, `README.md`, `CHANGELOG.md`, `MIGRATION.md` — dropped third-party trademark-ownership claims that belong to the mark holder's own notices, not ours.
+- Documentation refreshed across `docs/**` for the Node-script runtime (was still describing the bash + BATS world from before the legacy v1.0.21 migration).
+
 ## [1.0.0] - 2026-04-17
 
 Initial public release of **Sprintpilot** — an autonomous story-execution and multi-agent addon for [BMad Method](https://github.com/bmad-code-org/BMAD-METHOD) v6. See [README.md](README.md) for features and [TRADEMARK.md](TRADEMARK.md) for the trademark policy acknowledgment.
