@@ -73,10 +73,20 @@ describe("bmad-config", () => {
     expect((m as Record<string, unknown>).version).toBe("6.3.0");
   });
 
-  it("readBmadVersion returns the version string", async () => {
+  it("readBmadVersion returns the version from the legacy flat manifest shape", async () => {
     mkdirSync(join(dir, "_bmad", "_config"), { recursive: true });
     writeFileSync(join(dir, "_bmad", "_config", "manifest.yaml"), "version: 6.2.2\n", "utf8");
     expect(await readBmadVersion(dir)).toBe("6.2.2");
+  });
+
+  it("readBmadVersion returns the version from the nested v6 manifest shape", async () => {
+    mkdirSync(join(dir, "_bmad", "_config"), { recursive: true });
+    writeFileSync(
+      join(dir, "_bmad", "_config", "manifest.yaml"),
+      'bmad:\n  version: "6.2.0"\n',
+      "utf8",
+    );
+    expect(await readBmadVersion(dir)).toBe("6.2.0");
   });
 
   it("readAddonManifestVersion parses addon.version", async () => {
