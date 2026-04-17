@@ -73,8 +73,9 @@ npm run test:e2e
 | Brownfield | $8-10/phase x 4 phases | 10-25 min/phase | 4 phases |
 
 **Environment variables:**
-- `BMAD_TEST_MODEL` — Override model (default: `sonnet`)
-- `BMAD_TEST_REMOTE_URL` — Override git remote for greenfield test
+- `SPRINTPILOT_TEST_MODEL` — Override model (default: `sonnet`)
+- `SPRINTPILOT_TEST_REMOTE_URL` — Override git remote for greenfield test
+- `SPRINTPILOT_TEST_KEEP_ON_FAIL=1` — Preserve temp dirs on failure for debugging
 
 ### All Tests
 

@@ -19,7 +19,7 @@ function git(args: string[], cwd: string) {
 }
 
 export function createTempRepo(): TempRepo {
-  const dir = mkdtempSync(join(tmpdir(), 'bmad-test-'));
+  const dir = mkdtempSync(join(tmpdir(), 'sprintpilot-test-'));
   git(['init', '--initial-branch=main', '--quiet'], dir);
   git(['config', 'user.email', 'test@test.com'], dir);
   git(['config', 'user.name', 'Test'], dir);
@@ -37,10 +37,10 @@ export function createTempRepo(): TempRepo {
 }
 
 export function createTempRepoWithRemote(): TempRepo {
-  const remoteDir = mkdtempSync(join(tmpdir(), 'bmad-remote-'));
+  const remoteDir = mkdtempSync(join(tmpdir(), 'sprintpilot-remote-'));
   git(['init', '--bare', '--quiet', remoteDir], tmpdir());
 
-  const dir = mkdtempSync(join(tmpdir(), 'bmad-test-'));
+  const dir = mkdtempSync(join(tmpdir(), 'sprintpilot-test-'));
   git(['init', '--initial-branch=main', '--quiet'], dir);
   git(['config', 'user.email', 'test@test.com'], dir);
   git(['config', 'user.name', 'Test'], dir);

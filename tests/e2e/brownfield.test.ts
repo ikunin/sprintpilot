@@ -9,8 +9,6 @@
  * Run: npm run test:e2e:brownfield
  */
 
-import './harness/git-env.js';
-
 import { execSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -26,8 +24,8 @@ import { costTracker } from './harness/cost-tracker.js';
 const FIXTURES_DIR = join(import.meta.dirname, 'fixtures/brownfield');
 const ADDON_SOURCE = join(import.meta.dirname, '../../_Sprintpilot');
 
-/** Model to use — override via BMAD_TEST_MODEL env var (e.g. "opus") */
-const MODEL = process.env.BMAD_TEST_MODEL ?? 'sonnet';
+/** Model to use — override via SPRINTPILOT_TEST_MODEL env var (e.g. "opus") */
+const MODEL = process.env.SPRINTPILOT_TEST_MODEL ?? 'sonnet';
 
 let projectDir: string;
 let remoteDir: string | undefined;
@@ -46,7 +44,7 @@ describe('Brownfield: json-server analysis + auth feature', () => {
     const { mkdtempSync, cpSync } = await import('node:fs');
     const { tmpdir } = await import('node:os');
 
-    projectDir = mkdtempSync(join(tmpdir(), 'bmad-brownfield-'));
+    projectDir = mkdtempSync(join(tmpdir(), 'sprintpilot-brownfield-'));
     console.log(`[Brownfield] Temp project: ${projectDir}`);
 
     // Clone json-server v0.17.3 (v0.17.4 tag has issues with shallow clone)
@@ -68,8 +66,8 @@ describe('Brownfield: json-server analysis + auth feature', () => {
     // Initialize fresh git history
     exec('rm -rf .git');
     exec('git init --initial-branch=main');
-    exec('git config user.email "test@bmad-e2e.com"');
-    exec('git config user.name "BMAD E2E Test"');
+    exec('git config user.email "test@sprintpilot-e2e.com"');
+    exec('git config user.name "Sprintpilot E2E Test"');
     exec('git config commit.gpgsign false');
     exec('git config tag.gpgsign false');
     exec('git add .');
@@ -77,12 +75,12 @@ describe('Brownfield: json-server analysis + auth feature', () => {
 
     // Create bare remote
     const { mkdtempSync: mkdtemp2 } = await import('node:fs');
-    remoteDir = mkdtemp2(join(tmpdir(), 'bmad-bf-remote-'));
+    remoteDir = mkdtemp2(join(tmpdir(), 'sprintpilot-bf-remote-'));
     execSync(`git init --bare "${remoteDir}"`, { timeout: 10_000 });
     exec(`git remote add origin "${remoteDir}"`);
     exec('git push -u origin main');
 
-    // Install BMAD core structure
+    // Install BMad Method core structure
     mkdirSync(join(projectDir, '_bmad/bmm'), { recursive: true });
     mkdirSync(join(projectDir, '_bmad/_config'), { recursive: true });
     writeFileSync(join(projectDir, '_bmad/bmm/config.yaml'), 'project:\n  name: json-server-e2e\n');
@@ -131,7 +129,7 @@ describe('Brownfield: json-server analysis + auth feature', () => {
 
   afterAll(() => {
     console.log(costTracker.report());
-    if (process.env.BMAD_TEST_KEEP_ON_FAIL !== '1') {
+    if (process.env.SPRINTPILOT_TEST_KEEP_ON_FAIL !== '1') {
       try {
         execSync(`rm -rf "${projectDir}"`, { timeout: 10_000 });
         if (remoteDir) execSync(`rm -rf "${remoteDir}"`, { timeout: 10_000 });

@@ -15,8 +15,6 @@
  * Run: npm run test:e2e:greenfield
  */
 
-import './harness/git-env.js';
-
 import { execSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -41,11 +39,11 @@ const MAX_SESSIONS = 8;
 const BUDGET_PER_SESSION = 20;
 const TIMEOUT_PER_SESSION = 1_200_000; // 20 min
 
-/** Model to use — override via BMAD_TEST_MODEL env var (e.g. "opus") */
-const MODEL = process.env.BMAD_TEST_MODEL ?? 'sonnet';
+/** Model to use — override via SPRINTPILOT_TEST_MODEL env var (e.g. "opus") */
+const MODEL = process.env.SPRINTPILOT_TEST_MODEL ?? 'sonnet';
 
-/** Remote URL for push testing — must be set via BMAD_TEST_REMOTE_URL env var */
-const REMOTE_URL = process.env.BMAD_TEST_REMOTE_URL ?? '';
+/** Remote URL for push testing — must be set via SPRINTPILOT_TEST_REMOTE_URL env var */
+const REMOTE_URL = process.env.SPRINTPILOT_TEST_REMOTE_URL ?? '';
 
 let project: TempProject;
 
@@ -285,8 +283,8 @@ describe('Greenfield: Tic Tac Toe via Sprintpilot', () => {
         const systemPrompt = [
           'You are running inside an automated e2e test.',
           session === 1
-            ? 'Follow the BMAD autopilot workflow exactly. The product brief is already at _bmad-output/planning-artifacts/product-brief.md.'
-            : 'Resume the BMAD autopilot from saved state.',
+            ? 'Follow the Sprintpilot autopilot workflow exactly. The product brief is already at _bmad-output/planning-artifacts/product-brief.md.'
+            : 'Resume the Sprintpilot autopilot from saved state.',
           'Do NOT ask the user any questions — resolve all decisions autonomously.',
           'Use TypeScript with Vitest for testing.',
           'Implement ALL features: board display, move input validation, win detection (all 8 lines), draw detection, game flow with play-again.',
@@ -515,7 +513,7 @@ describe('Greenfield: Tic Tac Toe via Sprintpilot', () => {
     );
     console.log(`[Tasks] Worked story branches: ${[...workedStoryKeys].join(', ')}`);
 
-    // Find story files (BMAD puts them in implementation-artifacts or stories per config)
+    // Find story files (BMad Method puts them in implementation-artifacts or stories per config)
     const storyFiles: string[] = [];
     for (const searchDir of searchDirs) {
       storyFiles.push(
@@ -647,7 +645,7 @@ describe('Greenfield: Tic Tac Toe via Sprintpilot', () => {
       console.warn('[Clean] autopilot-state.yaml still exists — sprint may not have completed');
     }
 
-    // No modified tracked files (untracked BMAD setup files are expected)
+    // No modified tracked files (untracked BMad Method setup files are expected)
     const trackedChanges = execSync(`git -C "${dir}" diff --name-only HEAD`, {
       encoding: 'utf-8',
       timeout: 10_000,

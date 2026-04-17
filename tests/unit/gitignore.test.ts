@@ -20,7 +20,7 @@ describe('gitignore', () => {
   let dir: string;
 
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), 'bmad-gi-'));
+    dir = mkdtempSync(join(tmpdir(), 'sprintpilot-gi-'));
   });
   afterEach(() => {
     try {

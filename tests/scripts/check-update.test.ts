@@ -16,7 +16,7 @@ function which(cmd: string): string | null {
 function makeNodeOnlyPath(): { path: string; cleanup: () => void } {
   const nodeReal = which('node');
   if (!nodeReal) return { path: '/usr/bin:/bin', cleanup: () => {} };
-  const binDir = mkdtempSync(join(tmpdir(), 'bmad-nodeonly-'));
+  const binDir = mkdtempSync(join(tmpdir(), 'sprintpilot-nodeonly-'));
   symlinkSync(nodeReal, join(binDir, 'node'));
   return {
     path: `${binDir}:/usr/bin:/bin`,
@@ -34,7 +34,7 @@ describe('check-update + --version', () => {
   let dir: string;
 
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), 'bmad-cu-'));
+    dir = mkdtempSync(join(tmpdir(), 'sprintpilot-cu-'));
     mkdirSync(join(dir, '_Sprintpilot'), { recursive: true });
     writeFileSync(
       join(dir, '_Sprintpilot', 'manifest.yaml'),

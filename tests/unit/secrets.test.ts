@@ -101,7 +101,7 @@ describe('allowlist parsing and matching', () => {
   let tempFile: string;
 
   beforeEach(() => {
-    const dir = mkdtempSync(join(tmpdir(), 'bmad-secrets-'));
+    const dir = mkdtempSync(join(tmpdir(), 'sprintpilot-secrets-'));
     tempFile = join(dir, 'allowlist');
   });
   afterEach(() => {
@@ -136,7 +136,7 @@ describe('isBinaryFile', () => {
   let dir: string;
 
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), 'bmad-bin-'));
+    dir = mkdtempSync(join(tmpdir(), 'sprintpilot-bin-'));
   });
   afterEach(() => {
     try {

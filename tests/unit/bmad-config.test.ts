@@ -17,7 +17,7 @@ describe('bmad-config', () => {
   let dir: string;
 
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), 'bmad-cfg-'));
+    dir = mkdtempSync(join(tmpdir(), 'sprintpilot-cfg-'));
   });
   afterEach(() => {
     try {

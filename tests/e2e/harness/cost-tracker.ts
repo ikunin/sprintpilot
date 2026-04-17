@@ -41,7 +41,7 @@ class CostTracker {
     const hLine = '═'.repeat(boxWidth - 2);
     const lines = [
       `╔${hLine}╗`,
-      `║${'BMAD E2E Test Cost Report'.padStart(Math.floor((boxWidth - 2 + 25) / 2)).padEnd(boxWidth - 2)}║`,
+      `║${'Sprintpilot E2E Test Cost Report'.padStart(Math.floor((boxWidth - 2 + 32) / 2)).padEnd(boxWidth - 2)}║`,
       `╠${hLine}╣`,
     ];
 

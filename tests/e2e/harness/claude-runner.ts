@@ -175,7 +175,7 @@ export async function runClaude(
 }
 
 /**
- * Run a BMAD skill via Claude Code.
+ * Run a BMad Method or Sprintpilot skill via Claude Code.
  * Wraps the skill invocation with appropriate context.
  */
 export async function runSkill(

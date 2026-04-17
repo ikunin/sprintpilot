@@ -1,6 +1,6 @@
 /**
  * Create and manage temporary project directories for e2e testing.
- * Each test gets an isolated git repo with BMAD installed.
+ * Each test gets an isolated git repo with BMad Method core + Sprintpilot installed.
  */
 
 import { execFileSync, execSync } from 'node:child_process';
@@ -32,13 +32,13 @@ export interface TempProjectOptions {
   withRemote?: boolean;
   /** Use an existing remote URL instead of creating a bare local remote */
   remoteUrl?: string;
-  /** Whether to install BMAD core (default: true) */
+  /** Whether to install BMad Method core (default: true) */
   installBmadCore?: boolean;
-  /** Whether to install the addon (default: true) */
+  /** Whether to install Sprintpilot (default: true) */
   installAddon?: boolean;
   /** Override git platform provider (default: "git_only") */
   platform?: string;
-  /** Preserve directory on failure for debugging (env: BMAD_TEST_KEEP_ON_FAIL) */
+  /** Preserve directory on failure for debugging (env: SPRINTPILOT_TEST_KEEP_ON_FAIL) */
   keepOnFail?: boolean;
 }
 
@@ -47,7 +47,7 @@ function exec(cmd: string, cwd: string): string {
 }
 
 /**
- * Create a fresh temporary project with git init and optional BMAD installation.
+ * Create a fresh temporary project with git init and optional BMad Method + Sprintpilot installation.
  */
 export function createTempProject(options: TempProjectOptions = {}): TempProject {
   const {
@@ -58,13 +58,13 @@ export function createTempProject(options: TempProjectOptions = {}): TempProject
     platform = 'git_only',
   } = options;
 
-  const dir = mkdtempSync(join(tmpdir(), 'bmad-e2e-'));
+  const dir = mkdtempSync(join(tmpdir(), 'sprintpilot-e2e-'));
   let remoteDir: string | undefined;
 
   // Initialize git repo
   exec('git init --initial-branch=main', dir);
-  exec('git config user.email "test@bmad-e2e.com"', dir);
-  exec('git config user.name "BMAD E2E Test"', dir);
+  exec('git config user.email "test@sprintpilot-e2e.com"', dir);
+  exec('git config user.name "Sprintpilot E2E Test"', dir);
   exec('git config commit.gpgsign false', dir);
   exec('git commit --allow-empty -m "initial commit"', dir);
 
@@ -75,27 +75,27 @@ export function createTempProject(options: TempProjectOptions = {}): TempProject
     exec('git push -u origin main --force', dir);
   } else if (withRemote) {
     // Create a bare local remote for testing
-    remoteDir = mkdtempSync(join(tmpdir(), 'bmad-e2e-remote-'));
+    remoteDir = mkdtempSync(join(tmpdir(), 'sprintpilot-e2e-remote-'));
     exec(`git init --bare "${remoteDir}"`, dir);
     exec(`git remote add origin "${remoteDir}"`, dir);
     exec('git push -u origin main', dir);
   }
 
-  // Install BMAD core structure (minimal)
+  // Install BMad Method core structure (minimal)
   if (installBmadCore) {
     const bmadDir = join(dir, '_bmad/bmm');
     mkdirSync(bmadDir, { recursive: true });
     writeFileSync(
       join(bmadDir, 'config.yaml'),
-      `# BMAD Config (e2e test)\nproject:\n  name: e2e-test\n`,
+      `# BMad Method config (e2e test)\nproject:\n  name: e2e-test\n`,
     );
-    // Create manifest so install.sh recognizes BMAD is present
+    // Create manifest so install.sh recognizes BMad Method is present
     const configDir = join(dir, '_bmad/_config');
     mkdirSync(configDir, { recursive: true });
     writeFileSync(join(configDir, 'manifest.yaml'), `bmad:\n  version: "6.2.0"\n`);
   }
 
-  // Install the addon
+  // Install Sprintpilot
   if (installAddon && installBmadCore) {
     // Copy _Sprintpilot into the temp project
     const destAddons = join(dir, '_Sprintpilot');
@@ -138,9 +138,9 @@ export function createTempProject(options: TempProjectOptions = {}): TempProject
   exec("git add .gitignore && git commit -m 'add gitignore'", dir);
 
   const cleanup = () => {
-    const keepOnFail = process.env.BMAD_TEST_KEEP_ON_FAIL === '1';
+    const keepOnFail = process.env.SPRINTPILOT_TEST_KEEP_ON_FAIL === '1';
     if (keepOnFail) {
-      console.log(`[BMAD E2E] Preserving temp dir for debugging: ${dir}`);
+      console.log(`[Sprintpilot E2E] Preserving temp dir for debugging: ${dir}`);
       return;
     }
     // Clean up worktrees first
