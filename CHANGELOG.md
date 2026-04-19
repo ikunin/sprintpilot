@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.0.3] - 2026-04-20
+
+### Added
+- `_Sprintpilot/scripts/scan.js` — cross-platform codebase scanner (subcommands: `files`, `largest`, `loc`, `extensions`). Replaces bash pipelines (`find … -exec wc -l | sort | head`) so sprintpilot skills run on Windows PowerShell / cmd, not just bash. Features: nested brace globs, symlink following with cycle protection, strict `--root` containment.
+- 19 new unit tests covering glob edge cases, symlink handling, cycle protection, and root-escape prevention.
+
+### Changed
+- `sprintpilot-codebase-map` agents (stack-analyzer, architecture-mapper, quality-assessor, concerns-hunter, integration-mapper): exploration sections rewritten to use the LLM's native Glob/Grep/Read tools plus `scan.js` for aggregation. No more bash-only commands (`find`, `wc`, `grep -r`, `2>/dev/null`).
+- `sprint-autopilot-on` workflow: added a shell-portability preamble with a bash→PowerShell translation table; converted `rm -rf`, `if [ -f … ]`, and the `2>/dev/null || true` / `|| true` idioms; preserved fail-fast semantics where `&&` was load-bearing (added explicit STOP-on-failure notes).
+- Stale `sync-status.sh` references in `sprint-autopilot-on/workflow.md` updated to `sync-status.js` (the actual script).
+
+### Fixed
+- Skills now run under Gemini CLI and other LLM CLIs on Windows. Previously, bash-specific syntax caused silent failures when commands were dispatched through PowerShell or `cmd`.
+
 ## [1.0.2] - 2026-04-17
 
 ### Changed
