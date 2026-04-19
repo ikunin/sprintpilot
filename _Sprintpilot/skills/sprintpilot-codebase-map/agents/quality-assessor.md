@@ -19,35 +19,47 @@ Scan the project at `{{project_root}}` and write your findings to `{{output_file
 - `*.key`, `*.pem`, `*.p12` (private keys)
 - `credentials.json`, `service-account.json`
 
-## Exploration Commands
+## Exploration
 
-```bash
-# Test framework detection
-cat jest.config* vitest.config* pytest.ini setup.cfg pyproject.toml .rspec Cargo.toml 2>/dev/null | grep -i 'test\|jest\|pytest\|mocha\|vitest\|rspec'
+Use your native file tools (Read, Glob, Grep) plus the `scan.js` helper for aggregations.
 
-# Test file count vs source file count
-echo "Test files:" && find . -type f \( -name '*.test.*' -o -name '*.spec.*' -o -name 'test_*' -o -name '*_test.*' \) -not -path '*/node_modules/*' | wc -l
-echo "Source files:" && find . -type f \( -name '*.ts' -o -name '*.js' -o -name '*.py' -o -name '*.go' -o -name '*.rs' -o -name '*.java' -o -name '*.sql' -o -name '*.sps' -o -name '*.spb' -o -name '*.xml' -o -name '*.sh' -o -name '*.c' -o -name '*.h' -o -name '*.cpp' -o -name '*.hpp' -o -name '*.cc' -o -name '*.cxx' -o -name '*.hxx' \) -not -path '*/node_modules/*' -not -path '*/test*' -not -name '*.test.*' -not -name '*.spec.*' | wc -l
+### Test framework detection
+Read if present: `jest.config*`, `vitest.config*`, `pytest.ini`, `setup.cfg`, `pyproject.toml`, `.rspec`, `Cargo.toml`. Grep each for `test|jest|pytest|mocha|vitest|rspec` (case-insensitive).
 
-# Test types present
-find . -path '*/e2e/*' -o -path '*/integration/*' -o -path '*/unit/*' -o -name '*.e2e.*' -o -name '*.integration.*' 2>/dev/null | head -10
-
-# CI/CD configuration
-cat .github/workflows/*.yml .gitlab-ci.yml Jenkinsfile azure-pipelines.yml .circleci/config.yml .travis.yml 2>/dev/null | head -80
-
-# Linting & formatting config
-ls -la .eslintrc* .prettierrc* .editorconfig .rubocop.yml .flake8 pyproject.toml rustfmt.toml .golangci.yml biome.json .sqlfluff .sqlfluffrc 2>/dev/null
-
-# Code metrics (approximate LOC)
-find . -type f \( -name '*.ts' -o -name '*.js' -o -name '*.py' -o -name '*.go' -o -name '*.rs' -o -name '*.java' -o -name '*.sql' -o -name '*.sps' -o -name '*.spb' -o -name '*.xml' -o -name '*.sh' -o -name '*.c' -o -name '*.h' -o -name '*.cpp' -o -name '*.hpp' -o -name '*.cc' -o -name '*.cxx' -o -name '*.hxx' \) -not -path '*/node_modules/*' -not -path '*/.git/*' | xargs wc -l 2>/dev/null | tail -1
-
-# Largest files (complexity hotspots)
-find . -type f \( -name '*.ts' -o -name '*.js' -o -name '*.py' -o -name '*.sql' -o -name '*.sps' -o -name '*.spb' -o -name '*.sh' -o -name '*.c' -o -name '*.h' -o -name '*.cpp' -o -name '*.hpp' -o -name '*.cc' -o -name '*.cxx' -o -name '*.hxx' \) -not -path '*/node_modules/*' -exec wc -l {} + 2>/dev/null | sort -rn | head -10
-
-# Coverage config
-cat .nycrc .istanbul.yml jest.config* vitest.config* 2>/dev/null | grep -i 'cover'
-ls -la coverage/ htmlcov/ .coverage 2>/dev/null
+### Test file count
 ```
+node "{{project_root}}/_Sprintpilot/scripts/scan.js" files --include "*.test.*,*.spec.*,test_*,*_test.*" --root "{{project_root}}" --count
+```
+
+### Source file count
+```
+node "{{project_root}}/_Sprintpilot/scripts/scan.js" files --include "*.ts,*.js,*.py,*.go,*.rs,*.java,*.sql,*.sps,*.spb,*.xml,*.sh,*.c,*.h,*.cpp,*.hpp,*.cc,*.cxx,*.hxx" --exclude "**/test/**,**/tests/**,**/__tests__/**,**/spec/**,*.test.*,*.spec.*,*_test.*,test_*" --root "{{project_root}}" --count
+```
+(The `scan.js` helper automatically also excludes `node_modules`, `.git`, `vendor`, `dist`, `build`, etc.)
+
+### Test types present
+Use Glob for `**/e2e/**`, `**/integration/**`, `**/unit/**`, `*.e2e.*`, `*.integration.*`. First ~10 hits are enough.
+
+### CI/CD configuration
+Read if present: `.github/workflows/*.yml` (use Glob to list them first), `.gitlab-ci.yml`, `Jenkinsfile`, `azure-pipelines.yml`, `.circleci/config.yml`, `.travis.yml`. 80 lines each is usually enough.
+
+### Linting & formatting config
+Use Glob to list: `.eslintrc*`, `.prettierrc*`, `.editorconfig`, `.rubocop.yml`, `.flake8`, `pyproject.toml`, `rustfmt.toml`, `.golangci.yml`, `biome.json`, `.sqlfluff*`.
+
+### Code metrics (total LOC)
+```
+node "{{project_root}}/_Sprintpilot/scripts/scan.js" loc --include "*.ts,*.js,*.py,*.go,*.rs,*.java,*.sql,*.sps,*.spb,*.xml,*.sh,*.c,*.h,*.cpp,*.hpp,*.cc,*.cxx,*.hxx" --root "{{project_root}}"
+```
+Output is tab-separated `<total-lines>\t<file-count>`.
+
+### Largest files (complexity hotspots)
+```
+node "{{project_root}}/_Sprintpilot/scripts/scan.js" largest --include "*.ts,*.js,*.py,*.sql,*.sps,*.spb,*.sh,*.c,*.h,*.cpp,*.hpp,*.cc,*.cxx,*.hxx" --root "{{project_root}}" --limit 10
+```
+Output: `<lines>\t<path>`, descending.
+
+### Coverage
+Read `.nycrc`, `.istanbul.yml`, `jest.config*`, `vitest.config*` if present and grep for `cover`. Use Glob to check for `coverage/`, `htmlcov/`, `.coverage` directories/files.
 
 ## Downstream Consumers
 
@@ -69,8 +81,8 @@ Write to `{{output_file}}`:
 | Metric | Value | Evidence |
 |--------|-------|----------|
 | Test framework | Jest 29.7 | jest.config.ts:1 |
-| Test files | 45 | find output |
-| Source files | 120 | find output |
+| Test files | 45 | scan.js files --include ... --count |
+| Source files | 120 | scan.js files --include ... --count |
 | Test:Source ratio | 1:2.7 | Calculated |
 | Test types present | unit, integration | directory structure |
 | Test types missing | e2e, snapshot | No e2e/ directory found |

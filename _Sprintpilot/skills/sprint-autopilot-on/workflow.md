@@ -8,6 +8,24 @@ You do NOT hardcode the workflow sequence. After each completed skill, read its 
 
 **Git integration** is additive. If `_Sprintpilot/manifest.yaml` doesn't exist or `git.enabled: false`, all git operations are silently skipped and this workflow behaves identically to the stock autopilot.
 
+### Shell portability (IMPORTANT)
+
+Sprintpilot runs under any LLM CLI (Claude Code, Gemini CLI, Cursor, etc.) on any OS. The shell that executes commands may be **bash, zsh, PowerShell, or cmd** depending on platform and CLI. Shell-specific idioms will fail silently when the wrong shell is used.
+
+**When you encounter bash-style idioms below, translate them to your shell.** The table applies to **external commands** (like `git`); cmdlets have slightly different conventions.
+
+| Bash idiom | PowerShell equivalent | Meaning |
+|---|---|---|
+| `A && B` | `A; if ($LASTEXITCODE -eq 0) { B }` (or separate commands, guarding B manually) | Run B only if A succeeded |
+| `A \|\| true` | `A; $LASTEXITCODE = 0` (or `try { A } catch {}` for cmdlets) | Run A, ignore failures |
+| `2>/dev/null` | `2>$null` | Suppress stderr |
+| `rm -rf <dir>` | `Remove-Item -Recurse -Force <dir>` | Recursive delete |
+| `if [ -f X ]; then ... fi` | `if (Test-Path -PathType Leaf X) { ... }` | File-exists check (regular file, not dir) |
+
+**Safer:** when in doubt, use the cross-platform Node helpers under `_Sprintpilot/scripts/`. For ad-hoc file ops, invoke Node inline: `node -e "require('fs').rmSync('<path>', {recursive: true, force: true})"`.
+
+If a step below uses `&&` to chain "run B only on A's success", and you cannot express that in one line, **run the commands separately and STOP if any step fails** — do not proceed past a failed step.
+
 ---
 
 ## AUTOPILOT RULES — READ BEFORE PROCEEDING
@@ -170,7 +188,9 @@ Resolve:
   <check if="not a git repo">
     <action>HALT: "No git repository found. Initialize one first:
     ```
-    git init && git add -A && git commit -m 'initial commit'
+    git init
+    git add -A
+    git commit -m 'initial commit'
     git remote add origin <your-repo-url>
     ```
     Then run /sprint-autopilot-on again."</action>
@@ -201,15 +221,20 @@ Resolve:
   - COMMITTED: log "Recoverable work found for <name> — will push via git -C"
     Push the branch: `git -C .worktrees/<name> push -u origin <branch> 2>&1`
     If `{{create_pr}}` is true AND platform != git_only: create PR via `node {{project_root}}/_Sprintpilot/scripts/create-pr.js ...`
-    If `{{create_pr}}` is false OR platform is git_only: merge directly — `git checkout -B {{base_branch}} origin/{{base_branch}} && git merge <branch> --no-edit && git push origin {{base_branch}}`
+    If `{{create_pr}}` is false OR platform is git_only: merge directly. Run each as a separate command; **STOP and log the failure if any step fails — do not proceed past a failed step**:
+      1. `git checkout -B {{base_branch}} origin/{{base_branch}}`
+      2. `git merge <branch> --no-edit`
+      3. `git push origin {{base_branch}}`
     Then remove worktree.
   - STALE: `git worktree remove .worktrees/<name> --force` + prune
   - DIRTY: warn user, ask how to proceed (stash/commit/discard)
-  - ORPHAN: `rm -rf .worktrees/<name>` + `git worktree prune`
+  - ORPHAN: remove the directory cross-platform with `node -e "require('fs').rmSync('.worktrees/<name>', {recursive: true, force: true})"`, then `git worktree prune`
   </action>
 
   <action>**Branch reconciliation** — detect pushed-but-unmerged story branches.
-  Run: `git fetch origin && git branch -r --list "origin/{{branch_prefix}}*"`
+  Run as separate commands — **if `git fetch origin` fails (network/auth), STOP branch reconciliation and log a warning; do not operate on stale local refs**:
+    1. `git fetch origin`
+    2. `git branch -r --list "origin/{{branch_prefix}}*"`
   For each remote branch:
     - Extract story-key from branch name (strip "origin/{{branch_prefix}}" prefix)
     - Look up story status in `{status_file}`
@@ -226,16 +251,16 @@ Resolve:
           - If merge fails: log warning, continue (branch is preserved on remote)
           - If merge succeeds:
             - Re-read `{status_file}` from HEAD (may now include story artifacts after merge)
-            - Update `{git_status_file}` via sync-status.sh: set `--merge-status "recovered"` for this story.
-              **IMPORTANT:** sync-status.sh does full block replacement. If the story already has an entry in `{git_status_file}`, re-read its existing fields and pass ALL of them alongside `--merge-status`. If no entry exists yet, pass at minimum `--branch` and `--push-status "pushed"`.
+            - Update `{git_status_file}` via sync-status.js: set `--merge-status "recovered"` for this story.
+              **IMPORTANT:** sync-status.js does full block replacement. If the story already has an entry in `{git_status_file}`, re-read its existing fields and pass ALL of them alongside `--merge-status`. If no entry exists yet, pass at minimum `--branch` and `--push-status "pushed"`.
         - If `{{platform}}` is NOT git_only (github, gitlab, bitbucket, gitea) AND `{{create_pr}}` is true:
           - Check if PR/MR already exists for this branch (platform-specific check via create-pr.sh or CLI)
           - If no PR: create one via `node {{project_root}}/_Sprintpilot/scripts/create-pr.js --platform {{platform}} ...`
           - Log: "PR created/found for <story-key>"
-          - Update `{git_status_file}` via sync-status.sh: set `--merge-status "pr_pending"` for this story (same full-field requirement as above)
+          - Update `{git_status_file}` via sync-status.js: set `--merge-status "pr_pending"` for this story (same full-field requirement as above)
     - If status IS "done" AND branch still exists AND `{{cleanup_on_merge}}` is true:
       - Log: "Stale remote branch: <branch> — story already done, cleaning up"
-      - Delete remote branch: `git push origin --delete <branch> 2>/dev/null || true`
+      - Delete remote branch (ignore failure — the branch may already be gone): `git push origin --delete <branch>`
   </action>
 
   <action>Set `{{git_enabled}}` = true, `{{platform}}` = detected value</action>
@@ -486,8 +511,8 @@ Resolve:
     </action>
 
     <action>**Init submodules** if needed.
-    Run: `if [ -f .gitmodules ]; then timeout 30 git submodule update --init --recursive 2>&1 || echo "SUBMODULE_TIMEOUT"; fi`
-    If SUBMODULE_TIMEOUT: warn "Submodule init timed out (may need auth). Continuing without."
+    First check for `.gitmodules` (use your file-exists tool, or `node -e "process.exit(require('fs').existsSync('.gitmodules')?0:1)"`). If not present, skip this step.
+    If present, run `git submodule update --init --recursive` (give it ~30 seconds). If the command fails or hangs, warn "Submodule init failed (may need auth). Continuing without." and proceed.
     </action>
 
     <action>Set `{{in_worktree}}` = true</action>
@@ -595,17 +620,18 @@ pr_base: {{pr_base}}
 <!-- GIT: Commit planning artifacts to main after planning skills -->
 <check if="{{git_enabled}} AND {{completed_skill}} is a planning skill (bmad-create-prd, bmad-create-architecture, bmad-create-ux-design, bmad-create-epics-and-stories, bmad-sprint-planning, bmad-check-implementation-readiness, bmad-create-story)">
   <action>**Commit planning artifacts to main** — keep track of all planning decisions in git.
-  Stage all changed artifacts:
+  Stage all changed artifacts (ignore errors — any of these paths may not yet exist):
   ```
-  git add _bmad-output/planning-artifacts/ _bmad-output/implementation-artifacts/ _bmad-output/stories/ 2>/dev/null || true
+  git add _bmad-output/planning-artifacts/ _bmad-output/implementation-artifacts/ _bmad-output/stories/
   ```
-  If there are staged changes, commit:
+  Check if there's anything staged; if yes, commit:
   ```
-  git diff --cached --quiet || git commit -m "docs: {{completed_skill}} artifacts"
+  git diff --cached --quiet
   ```
-  Push to remote if possible:
+  If that exits non-zero (there are staged changes), run: `git commit -m "docs: {{completed_skill}} artifacts"`
+  Then push (log a warning if push fails; do not halt autopilot):
   ```
-  git push origin {{base_branch}} 2>/dev/null || true
+  git push origin {{base_branch}}
   ```
   </action>
 </check>
@@ -775,12 +801,12 @@ Instruct: "Re-verify code review for story {{current_story}} — all patch findi
       Log warning but do NOT halt. The branch is pushed and preserved.
       Boot reconciliation (INITIALIZATION branch reconciliation) will retry on next session.
 
-    Note: `{{merge_status}}` is persisted by the full sync-status.sh call later in this step (via `--merge-status`). Do NOT call sync-status.sh separately here — it does full block replacement and would destroy other fields.
+    Note: `{{merge_status}}` is persisted by the full sync-status.js call later in this step (via `--merge-status`). Do NOT call sync-status.js separately here — it does full block replacement and would destroy other fields.
     </action>
     <check if="{{cleanup_on_merge}} is true">
-      <action>**Cleanup worktree** for merged story — branch was merged locally, worktree is no longer needed:
+      <action>**Cleanup worktree** for merged story — branch was merged locally, worktree is no longer needed. Ignore failures from the remove (the worktree may already be gone):
       ```
-      git worktree remove .worktrees/{{current_story}} --force 2>/dev/null || true
+      git worktree remove .worktrees/{{current_story}} --force
       git worktree prune
       ```
       </action>
@@ -804,17 +830,21 @@ Instruct: "Re-verify code review for story {{current_story}} — all patch findi
   This writes to `git-status.yaml` (addon-owned). Sprint-status.yaml is BMAD-owned — updated by BMAD skills only.
   </action>
 
-  <action>**Stage and commit artifacts** — explicitly include git-status.yaml and decision-log.yaml:
+  <action>**Stage and commit artifacts** — explicitly include git-status.yaml and decision-log.yaml. Ignore errors from the `git add` (any listed path may not yet exist):
   ```
-  git add _bmad-output/implementation-artifacts/sprint-status.yaml _bmad-output/implementation-artifacts/git-status.yaml _bmad-output/implementation-artifacts/autopilot-state.yaml _bmad-output/implementation-artifacts/decision-log.yaml _bmad-output/stories/ _bmad-output/planning-artifacts/ 2>/dev/null || true
-  git diff --cached --quiet || git commit -m "docs: story {{current_story}} done — {{test_count}} tests{{#if pr_url}}, PR: {{pr_url}}{{/if}}"
-  git push origin {{base_branch}} 2>/dev/null || true
+  git add _bmad-output/implementation-artifacts/sprint-status.yaml _bmad-output/implementation-artifacts/git-status.yaml _bmad-output/implementation-artifacts/autopilot-state.yaml _bmad-output/implementation-artifacts/decision-log.yaml _bmad-output/stories/ _bmad-output/planning-artifacts/
+  ```
+  Check if anything is staged: `git diff --cached --quiet`. If that exits non-zero, commit:
+  `git commit -m "docs: story {{current_story}} done — {{test_count}} tests{{#if pr_url}}, PR: {{pr_url}}{{/if}}"`
+  Then push (log a warning if push fails; do not halt autopilot):
+  ```
+  git push origin {{base_branch}}
   ```
   This ensures sprint-status.yaml, git-status.yaml, story files, and any updated artifacts are on main even when story code is on a PR branch.
   </action>
 </check>
 
-<!-- Story git status was already written by sync-status.sh above (when git_enabled AND in_worktree).
+<!-- Story git status was already written by sync-status.js above (when git_enabled AND in_worktree).
      sprint-status.yaml is BMAD-owned — updated by bmad-dev-story / bmad-code-review directly. -->
 <check if="NOT {{git_enabled}}">
   <action>Log: "Story {{current_story}} complete — BMAD dev-story updates sprint-status.yaml directly"</action>
@@ -917,7 +947,7 @@ pr_base: {{pr_base}}
         `git merge <branch-ref> --no-edit`
         `git push origin {{base_branch}}`
       - If merge succeeds: update merge_status in `{git_status_file}`.
-        **IMPORTANT:** sync-status.sh does full block replacement — you MUST re-read the story's existing fields from `{git_status_file}` (branch, commit, patch_commits, push_status, pr_url, lint_result, worktree, platform, base_branch, worktree_cleaned) and pass ALL of them along with `--merge-status "merged"`. Omitting fields destroys them.
+        **IMPORTANT:** sync-status.js does full block replacement — you MUST re-read the story's existing fields from `{git_status_file}` (branch, commit, patch_commits, push_status, pr_url, lint_result, worktree, platform, base_branch, worktree_cleaned) and pass ALL of them along with `--merge-status "merged"`. Omitting fields destroys them.
       - If merge fails: `git merge --abort`, update merge_status to "failed" in `{git_status_file}` (same full-field requirement), log warning, continue
   Log: "Pre-checkpoint merge: N stories verified on {{base_branch}}"
   </action>
@@ -999,13 +1029,14 @@ If the skill is not available or fails, generate a minimal README.md:
 
 <!-- GIT: Commit documentation and final artifacts to main -->
 <check if="{{git_enabled}}">
-  <action>**Commit final artifacts and documentation to main**:
+  <action>**Commit final artifacts and documentation to main**. Run each step; if an early step fails, STOP and log — don't proceed past a failed step. `git add` may fail for missing optional paths (`docs/`, `README.md`); ignore those path-specific errors. Failure of the final push should log a warning but not halt autopilot:
   ```
   git checkout -B {{base_branch}} origin/{{base_branch}}
-  git add _bmad-output/ README.md docs/ 2>/dev/null || true
-  git diff --cached --quiet || git commit -m "docs: project documentation and final artifacts"
-  git push origin {{base_branch}} 2>/dev/null || true
+  git add _bmad-output/ README.md docs/
   ```
+  Check if anything is staged: `git diff --cached --quiet`. If that exits non-zero, commit:
+  `git commit -m "docs: project documentation and final artifacts"`
+  Then: `git push origin {{base_branch}}`
   </action>
 </check>
 
@@ -1035,8 +1066,8 @@ If the skill is not available or fails, generate a minimal README.md:
 <check if="{{git_enabled}}">
   <action>**Cleanup all remaining worktrees**:
   Run: `git worktree list --porcelain`
-  For each worktree that is NOT the main worktree:
-    `git worktree remove <path> --force 2>/dev/null || true`
+  For each worktree that is NOT the main worktree, run the following — log and continue on failure; some worktrees may already be gone:
+    `git worktree remove <path> --force`
   Then: `git worktree prune`
   </action>
 </check>

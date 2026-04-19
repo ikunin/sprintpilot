@@ -19,28 +19,35 @@ Scan the project at `{{project_root}}` and write your findings to `{{output_file
 - `*.key`, `*.pem`, `*.p12` (private keys)
 - `credentials.json`, `service-account.json`
 
-## Exploration Commands
+## Exploration
 
-```bash
-# Top-level structure
-ls -la
-find . -maxdepth 2 -type d -not -path '*/node_modules/*' -not -path '*/.git/*' -not -path '*/vendor/*' | head -50
+Use your native file tools (Read, Glob, Grep). The lists below describe what data to collect; pick the appropriate tool for your CLI.
 
-# Entry points
-cat index.ts index.js main.py main.go cmd/main.go src/main.rs lib/main.rb app.py manage.py main.c main.cpp src/main.c src/main.cpp 2>/dev/null | head -30
+### Top-level structure
+Glob the root for directories and files (exclude `node_modules`, `.git`, `vendor`, `target`, `dist`, `build`). Look 1-2 levels deep to understand the layout.
 
-# Route definitions
-grep -rn "router\.\|app\.\(get\|post\|put\|delete\|patch\)\|@app\.route\|@Controller\|@RequestMapping\|CROW_ROUTE\|CPPREST_\|Pistache::" --include='*.ts' --include='*.js' --include='*.py' --include='*.java' --include='*.go' --include='*.xml' --include='*.c' --include='*.h' --include='*.cpp' --include='*.hpp' --include='*.cc' --include='*.cxx' --include='*.hxx' | head -30
+### Entry points
+Read whichever of these exist: `index.ts`, `index.js`, `main.py`, `main.go`, `cmd/main.go`, `src/main.rs`, `lib/main.rb`, `app.py`, `manage.py`, `main.c`, `main.cpp`, `src/main.c`, `src/main.cpp`. 30 lines is usually enough to identify the entry path.
 
-# Module exports / barrel files
-find . -name 'index.ts' -o -name 'index.js' -o -name '__init__.py' -o -name 'mod.rs' | head -20
-
-# Import patterns (what depends on what)
-grep -rn "^import\|^from\|require(\|source \|^\.\|^#include" --include='*.ts' --include='*.js' --include='*.py' --include='*.sh' --include='*.c' --include='*.h' --include='*.cpp' --include='*.hpp' --include='*.cc' --include='*.cxx' --include='*.hxx' | awk -F'from |require|#include' '{print $2}' | sort | uniq -c | sort -rn | head -20
-
-# Configuration loading
-grep -rn "config\|CONFIG\|Settings\|settings" --include='*.ts' --include='*.js' --include='*.py' --include='*.yaml' --include='*.json' --include='*.xml' --include='*.sh' --include='*.c' --include='*.h' --include='*.cpp' --include='*.hpp' --include='*.cc' --include='*.cxx' --include='*.hxx' -l | head -10
+### Route definitions
+Use Grep to find route declarations across `*.ts`, `*.js`, `*.py`, `*.java`, `*.go`, `*.xml`, C/C++ headers. Pattern set:
 ```
+router\.|app\.(get|post|put|delete|patch)|@app\.route|@Controller|@RequestMapping|CROW_ROUTE|CPPREST_|Pistache::
+```
+Limit to ~30 matches.
+
+### Module exports / barrel files
+Use Glob for: `**/index.ts`, `**/index.js`, `**/__init__.py`, `**/mod.rs`. Cap at ~20 hits.
+
+### Import patterns (what depends on what)
+Use Grep to find import/require/include lines across `*.ts`, `*.js`, `*.py`, `*.sh`, C/C++ sources:
+```
+^import|^from|require\(|source |^\.|^#include
+```
+Scan the top ~100 matches and note frequent dependencies. (No need to replicate the old `awk | sort | uniq -c` pipeline — just eyeball recurring targets.)
+
+### Configuration loading
+Use Grep (files-with-matches mode) for `config|CONFIG|Settings|settings` across config-bearing file types. Limit to ~10 files.
 
 Read entry point files, follow the import chain 2-3 levels deep to understand request flow.
 

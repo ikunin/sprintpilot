@@ -21,36 +21,36 @@ Scan the project at `{{project_root}}` and write your findings to `{{output_file
 
 **DO read**: `.env.example`, `.env.sample`, `.env.template` (safe — contain variable names only)
 
-## Exploration Commands
+## Exploration
 
-```bash
-# Environment variables referenced in code
-grep -rn 'process\.env\.\|os\.environ\|os\.getenv\|ENV\[\|\${\|export \|getenv(' --include='*.ts' --include='*.js' --include='*.py' --include='*.rb' --include='*.go' --include='*.sh' --include='*.c' --include='*.h' --include='*.cpp' --include='*.hpp' --include='*.cc' --include='*.cxx' --include='*.hxx' | sed 's/.*\(process\.env\.[A-Z_]*\|os\.environ\[['"'"'"]\?\([A-Z_]*\)\|os\.getenv(\([A-Z_]*\)\|ENV\[\([A-Z_]*\)\|getenv("\?\([A-Z_]*\)\).*/\1/' | sort -u | head -30
+Use Grep and Read. Below are the patterns to search for — file-type filters match the original language coverage (`*.ts`, `*.js`, `*.py`, `*.rb`, `*.go`, `*.rs`, `*.java`, `*.sh`, `*.c`, `*.h`, `*.cpp`, `*.hpp`, `*.cc`, `*.cxx`, `*.hxx`, `*.sql`, `*.sps`, `*.spb`, `*.xml`). Cap each result set (~15-30 matches).
 
-# .env.example (safe to read — template only)
-cat .env.example .env.sample .env.template 2>/dev/null
+### Environment variables referenced in code
+Grep for: `process\.env\.|os\.environ|os\.getenv|ENV\[|\$\{|export |getenv\(`. Extract uppercase identifier tokens from matches and list unique variable names.
 
-# HTTP client usage
-grep -rn 'fetch(\|axios\.\|requests\.\|http\.Client\|HttpClient\|urllib\|net/http\|reqwest\|curl \|wget \|curl_easy_\|libcurl\|cpprest\|boost::beast' --include='*.ts' --include='*.js' --include='*.py' --include='*.go' --include='*.rs' --include='*.java' --include='*.sh' --include='*.c' --include='*.h' --include='*.cpp' --include='*.hpp' --include='*.cc' --include='*.cxx' --include='*.hxx' | head -20
+### .env.example (safe to read — template only)
+Read whichever exist: `.env.example`, `.env.sample`, `.env.template`.
 
-# Database connections
-grep -rn 'createConnection\|createPool\|mongoose\.connect\|prisma\|sequelize\|knex\|sqlalchemy\|diesel\|gorm\|ActiveRecord\|jdbc\|sqlplus\|TNS_ADMIN\|CONNECT \|PQconnectdb\|mysql_real_connect\|SQLConnect\|OCILogon' --include='*.ts' --include='*.js' --include='*.py' --include='*.go' --include='*.rs' --include='*.java' --include='*.rb' --include='*.sql' --include='*.sps' --include='*.spb' --include='*.xml' --include='*.sh' --include='*.c' --include='*.h' --include='*.cpp' --include='*.hpp' --include='*.cc' --include='*.cxx' --include='*.hxx' -l | head -10
+### HTTP client usage
+Grep for: `fetch\(|axios\.|requests\.|http\.Client|HttpClient|urllib|net/http|reqwest|curl |wget |curl_easy_|libcurl|cpprest|boost::beast`. Limit ~20.
 
-# Message queue / event usage
-grep -rn 'kafka\|rabbitmq\|amqp\|sqs\|sns\|pubsub\|redis.*pub\|redis.*sub\|bull\|BullMQ\|celery\|sidekiq\|AQ$\|DBMS_AQ\|librdkafka\|cppkafka\|zmq_' --include='*.ts' --include='*.js' --include='*.py' --include='*.rb' --include='*.sql' --include='*.sps' --include='*.spb' --include='*.xml' --include='*.sh' --include='*.c' --include='*.h' --include='*.cpp' --include='*.hpp' --include='*.cc' --include='*.cxx' --include='*.hxx' -i | head -15
+### Database connections
+Grep (files-with-matches) for: `createConnection|createPool|mongoose\.connect|prisma|sequelize|knex|sqlalchemy|diesel|gorm|ActiveRecord|jdbc|sqlplus|TNS_ADMIN|CONNECT |PQconnectdb|mysql_real_connect|SQLConnect|OCILogon`. Limit ~10 files.
 
-# Cloud SDK usage
-grep -rn 'aws-sdk\|@aws-sdk\|boto3\|google-cloud\|@google-cloud\|azure\|@azure\|aws/core\|Aws::\|google::cloud' --include='*.ts' --include='*.js' --include='*.py' --include='*.java' --include='*.xml' --include='*.sh' --include='*.c' --include='*.h' --include='*.cpp' --include='*.hpp' --include='*.cc' --include='*.cxx' --include='*.hxx' -l | head -10
+### Message queue / event usage
+Grep (case-insensitive) for: `kafka|rabbitmq|amqp|sqs|sns|pubsub|redis.*pub|redis.*sub|bull|BullMQ|celery|sidekiq|AQ$|DBMS_AQ|librdkafka|cppkafka|zmq_`. Limit ~15.
 
-# OAuth / Auth providers
-grep -rn 'oauth\|passport\|auth0\|firebase.*auth\|cognito\|supabase.*auth\|clerk\|next-auth\|lucia' --include='*.ts' --include='*.js' --include='*.py' --include='*.xml' -i | head -15
+### Cloud SDK usage
+Grep (files-with-matches) for: `aws-sdk|@aws-sdk|boto3|google-cloud|@google-cloud|azure|@azure|aws/core|Aws::|google::cloud`. Limit ~10.
 
-# Third-party SaaS SDKs
-grep -rn 'stripe\|sendgrid\|twilio\|sentry\|datadog\|segment\|amplitude\|mixpanel\|intercom\|slack' --include='*.ts' --include='*.js' --include='*.py' --include='*.xml' --include='*.sh' -i -l | head -10
+### OAuth / Auth providers
+Grep (case-insensitive) across `*.ts`, `*.js`, `*.py`, `*.xml` for: `oauth|passport|auth0|firebase.*auth|cognito|supabase.*auth|clerk|next-auth|lucia`. Limit ~15.
 
-# Docker-compose services (external deps)
-cat docker-compose*.yml 2>/dev/null | grep -E '^\s+\w+:$|image:' | head -20
-```
+### Third-party SaaS SDKs
+Grep (files-with-matches, case-insensitive) for: `stripe|sendgrid|twilio|sentry|datadog|segment|amplitude|mixpanel|intercom|slack`. Limit ~10.
+
+### Docker-compose services
+Read `docker-compose*.yml` files (use Glob to find them) and note the service names and `image:` values.
 
 ## Downstream Consumers
 

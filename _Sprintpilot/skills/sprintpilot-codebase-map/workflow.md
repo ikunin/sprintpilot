@@ -18,7 +18,7 @@ Complementary, not a replacement. `bmad-document-project` generates comprehensiv
 
 ## Step 1 — Prepare
 
-<action>Create output directory: `mkdir -p {output_folder}/codebase-analysis`</action>
+<action>Create output directory `{output_folder}/codebase-analysis` (use your native file-create tool; it will create parent directories as needed). The first `Write` tool call targeting a file inside this directory will auto-create it, so no explicit mkdir is required in practice.</action>
 <action>Determine project root absolute path: `{{project_root}}`</action>
 
 ---

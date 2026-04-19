@@ -20,50 +20,48 @@ Scan the project at `{{project_root}}` and write your findings to `{{output_file
 - `credentials.json`, `service-account.json`
 - `*.secret`, `*password*`, `*token*` (in filenames)
 
-## Exploration Commands
+## Exploration
 
-Run these to gather data (adapt paths as needed):
+Gather data using your native file tools (Read, Glob, Grep). The commands below are illustrative — use the equivalent tool from your CLI. Skip files that don't exist; do not fail the task on missing manifests.
 
-```bash
-# Package manifests
-cat package.json 2>/dev/null | head -100
-cat pyproject.toml 2>/dev/null
-cat Cargo.toml 2>/dev/null
-cat go.mod 2>/dev/null
-cat Gemfile 2>/dev/null
-cat pom.xml 2>/dev/null | head -100
-cat build.gradle 2>/dev/null | head -50
-cat *.csproj 2>/dev/null | head -50
+### Package manifests
+Read each of these if present (top 100 lines is enough for most):
+`package.json`, `pyproject.toml`, `Cargo.toml`, `go.mod`, `Gemfile`, `pom.xml`, `build.gradle`, any `*.csproj`.
 
-# Database / PL/SQL manifests
-ls -la *.sql *.sps *.spb 2>/dev/null | head -10
-find . -type f \( -name '*.sql' -o -name '*.sps' -o -name '*.spb' \) -not -path '*/.git/*' 2>/dev/null | wc -l
-cat tnsnames.ora sqlnet.ora 2>/dev/null | head -20
-
-# C / C++ manifests
-ls -la *.c *.h *.cpp *.hpp *.cc *.cxx *.hxx 2>/dev/null | head -10
-find . -type f \( -name '*.c' -o -name '*.h' -o -name '*.cpp' -o -name '*.hpp' -o -name '*.cc' -o -name '*.cxx' -o -name '*.hxx' \) -not -path '*/.git/*' 2>/dev/null | wc -l
-cat CMakeLists.txt configure.ac conanfile.txt vcpkg.json 2>/dev/null | head -20
-
-# Lockfiles (versions)
-head -100 package-lock.json 2>/dev/null || head -100 yarn.lock 2>/dev/null || head -100 pnpm-lock.yaml 2>/dev/null
-
-# Runtime versions
-cat .nvmrc .node-version .python-version .ruby-version .tool-versions 2>/dev/null
-cat rust-toolchain.toml 2>/dev/null
-
-# File type distribution
-find . -type f -not -path '*/node_modules/*' -not -path '*/.git/*' -not -path '*/vendor/*' -not -path '*/target/*' | sed 's/.*\.//' | sort | uniq -c | sort -rn | head -20
-
-# Build tools
-ls -la webpack.config* vite.config* rollup.config* tsconfig* babel.config* .babelrc Makefile CMakeLists.txt build.gradle* pom.xml *.sln *.xml 2>/dev/null
-
-# Infrastructure
-ls -la Dockerfile* docker-compose* .dockerignore 2>/dev/null
-ls -la terraform/ cdk.json serverless.yml k8s/ kubernetes/ helm/ 2>/dev/null
+### Database / PL/SQL manifests
+Read `tnsnames.ora`, `sqlnet.ora` if present.
+Count SQL / PL-SQL files:
+```
+node "{{project_root}}/_Sprintpilot/scripts/scan.js" files --include "*.sql,*.sps,*.spb" --root "{{project_root}}" --count
 ```
 
-Also use Glob and Grep to find patterns not covered above.
+### C / C++ manifests
+Read `CMakeLists.txt`, `configure.ac`, `conanfile.txt`, `vcpkg.json` if present.
+Count C/C++ files:
+```
+node "{{project_root}}/_Sprintpilot/scripts/scan.js" files --include "*.c,*.h,*.cpp,*.hpp,*.cc,*.cxx,*.hxx" --root "{{project_root}}" --count
+```
+
+### Lockfiles (versions)
+Read the first ~100 lines of whichever is present: `package-lock.json`, `yarn.lock`, `pnpm-lock.yaml`.
+
+### Runtime versions
+Read if present: `.nvmrc`, `.node-version`, `.python-version`, `.ruby-version`, `.tool-versions`, `rust-toolchain.toml`.
+
+### File type distribution
+```
+node "{{project_root}}/_Sprintpilot/scripts/scan.js" extensions --root "{{project_root}}" --limit 20
+```
+Output is tab-separated `<count>\t<extension>`, descending.
+
+### Build tools
+Use Glob to list if present: `webpack.config*`, `vite.config*`, `rollup.config*`, `tsconfig*`, `babel.config*`, `.babelrc`, `Makefile`, `CMakeLists.txt`, `build.gradle*`, `pom.xml`, `*.sln`.
+
+### Infrastructure
+Use Glob to list if present: `Dockerfile*`, `docker-compose*`, `.dockerignore`.
+Check for directories: `terraform/`, `k8s/`, `kubernetes/`, `helm/`. Read `cdk.json`, `serverless.yml` if present.
+
+Use Glob and Grep to find patterns not covered above.
 
 ## Downstream Consumers
 
@@ -87,7 +85,7 @@ Write to `{{output_file}}`:
 | TypeScript | 142 | 65% | Application code |
 | ... | ... | ... | ... |
 
-Evidence: `find` command output showing file distribution
+Evidence: `scan.js extensions` output showing file distribution
 
 ## Frameworks & Core Libraries
 | Name | Version | Purpose | Evidence |
