@@ -150,7 +150,15 @@ describe('scan.js', () => {
 
     it('--limit caps output', () => {
       for (let i = 0; i < 5; i++) tree.write(`file${i}.ts`);
-      const r = runScript('scan', ['files', '--include', '*.ts', '--root', tree.dir, '--limit', '2']);
+      const r = runScript('scan', [
+        'files',
+        '--include',
+        '*.ts',
+        '--root',
+        tree.dir,
+        '--limit',
+        '2',
+      ]);
       expect(r.stdout.split('\n')).toHaveLength(2);
     });
   });

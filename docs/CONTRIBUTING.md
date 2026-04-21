@@ -121,19 +121,39 @@ Many coding agents (including Claude Code) flag `git add -A` as potentially dang
 
 ## Developer setup (one-time)
 
-Enable the pre-push hook so Biome + the fast test suite run before every push:
+Running `npm install` at the repo root also runs the `prepare` script
+(`scripts/setup-git-hooks.mjs`) which enables the pre-push hook. To install
+test dependencies as well:
 
 ```bash
-git config core.hooksPath .githooks
+npm install            # activates core.hooksPath=.githooks
 cd tests && npm install
 ```
 
-The hook (at `.githooks/pre-push`) runs `biome ci .` then `npm run test:fast`. CI runs the test suite independently on push/PR, so the hook is just a locally-caught safety net.
+If you bypassed the `prepare` step (or your npm version skipped it), enable
+the hook manually:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+The hook at `.githooks/pre-push` mirrors `.github/workflows/ci.yml`: it runs
+`biome ci .`, then the fast test suite (`cd tests && npm run test:fast`)
+under `GIT_CONFIG_GLOBAL=/dev/null` so scratch repos created by script
+tests don't inherit your user-level `commit.gpgsign` / `user.signingkey`.
+CI still runs the test suite independently on push/PR — the hook catches
+issues locally before they hit CI.
 
 Auto-fix Biome findings:
 
 ```bash
 ./tests/node_modules/.bin/biome check --write .
+```
+
+Bypass the hook in emergencies (avoid for main):
+
+```bash
+git push --no-verify
 ```
 
 ## Commit Convention

@@ -5,9 +5,14 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 // @ts-expect-error — CommonJS module
 import installMod from '../../lib/commands/install.js';
 
+type V1Snapshot = Record<string, Array<{ relPath: string; buffer: Buffer }>>;
+
 const { _internals } = installMod as {
   _internals: {
-    readExistingAutopilotConfig: (root: string) => Promise<{
+    readExistingAutopilotConfig: (
+      root: string,
+      v1Snapshot?: V1Snapshot,
+    ) => Promise<{
       sessionStoryLimit: number | null;
       retrospectiveMode: string | null;
     }>;
@@ -78,6 +83,38 @@ describe('readExistingAutopilotConfig', () => {
     writeConfig(`autopilot:\n  # session_story_limit: 99\n  # retrospective_mode: skip\n`);
     const out = await readExistingAutopilotConfig(root);
     expect(out).toEqual({ sessionStoryLimit: null, retrospectiveMode: null });
+  });
+
+  it('falls back to the v1 in-memory snapshot when no file on disk (v1-migration bug)', async () => {
+    // evictV1Installation removes `_bmad-addons/` BEFORE resolveAutopilotSettings
+    // runs, so by the time we try to read the user's v1 config, only the
+    // in-memory snapshot still has it. Without this path the patcher overwrites
+    // the user's edited `session_story_limit: 5` with the bundled default `3`.
+    const v1Snapshot = {
+      autopilot: [
+        {
+          relPath: 'config.yaml',
+          buffer: Buffer.from('autopilot:\n  session_story_limit: 5  # user-edited\n', 'utf8'),
+        },
+      ],
+    };
+    const out = await readExistingAutopilotConfig(root, v1Snapshot);
+    expect(out.sessionStoryLimit).toBe(5);
+    expect(out.retrospectiveMode).toBe(null);
+  });
+
+  it('v1 in-memory snapshot is ignored when config.yaml already exists on disk', async () => {
+    // On-disk file wins over snapshot so a fresh Sprintpilot upgrade (not
+    // a v1 migration) reads the user's current Sprintpilot config.
+    writeConfig(`autopilot:\n  session_story_limit: 8\n  retrospective_mode: stop\n`);
+    const v1Snapshot = {
+      autopilot: [
+        { relPath: 'config.yaml', buffer: Buffer.from('autopilot:\n  session_story_limit: 99\n') },
+      ],
+    };
+    const out = await readExistingAutopilotConfig(root, v1Snapshot);
+    expect(out.sessionStoryLimit).toBe(8);
+    expect(out.retrospectiveMode).toBe('stop');
   });
 
   it('exposes the known mode whitelist', () => {

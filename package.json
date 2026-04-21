@@ -33,6 +33,9 @@
   "engines": {
     "node": ">=18.0.0"
   },
+  "scripts": {
+    "prepare": "node scripts/setup-git-hooks.mjs"
+  },
   "dependencies": {
     "@clack/core": "^1.0.0",
     "@clack/prompts": "^1.0.0",
