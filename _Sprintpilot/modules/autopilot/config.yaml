@@ -18,3 +18,21 @@ autopilot:
   #
   # Set 0 to disable the limit and run until the sprint is complete.
   session_story_limit: 3
+
+  # Retrospective handling at epic completion.
+  #
+  # - "auto" (default): autopilot generates a deterministic retrospective
+  #   from sprint-status.yaml + decision-log.yaml, then continues with the
+  #   next epic. Safe under every CLI including Gemini CLI — no external
+  #   skill call, no persona simulation, single pass.
+  # - "stop": autopilot pauses at epic completion so you can run
+  #   /bmad-retrospective interactively. Re-run /sprint-autopilot-on to
+  #   resume with the next epic.
+  # - "skip": autopilot skips the retrospective entirely and continues.
+  #   NOT RECOMMENDED — you lose the epic-level learning record.
+  #
+  # Background: the external bmad-retrospective skill can enter a
+  # multi-persona discussion loop when driven by autopilot on some CLIs,
+  # which exhausts the token/memory budget. That's why "auto" generates
+  # the artifact inline instead of invoking the external skill.
+  retrospective_mode: auto
