@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.0.5] - 2026-04-21
+
+### Fixed
+- `sprint-autopilot-on`: stopped routing new projects straight to `bmad-sprint-planning` (Phase 4); routes through `bmad-help` so Phase 1–3 gaps (PRD, architecture, epics) are caught first.
+- `sprint-autopilot-on`: added `origin` remote check to git bootstrap. Local-only repos no longer error on `git fetch origin`; push/PR is automatically disabled in that mode.
+- `sprintpilot-update`: fixed `npx @ikunin/sprintpilot@latest@{latest}` syntax error → `npx @ikunin/sprintpilot@{latest}`.
+
+### Changed
+- `sprint-autopilot-on`: stack detection is now stack-agnostic. Prefers `project-context.md` and `architecture.md` (BMAD-authored sources of truth), falling back to manifest heuristics across Node, Python, Go, Rust, Java/Kotlin, Ruby, .NET, PHP, Elixir, Docker, and Makefile. README install/run/test and the final launch command are all derived from the detected stack.
+- `sprint-autopilot-on`: compacted from 1347 → 890 lines (−34%). Extracted `epic-retrospective.md` and `sprint-report.txt` to `_Sprintpilot/templates/`; deduplicated stack detection; inlined a shared `STATE_FIELDS` reference to replace three repeated YAML blocks; compressed shell-portability and decision-logging prose.
+
 ## [1.0.4] - 2026-04-21
 
 ### Added
