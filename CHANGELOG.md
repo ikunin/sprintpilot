@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.0.4] - 2026-04-21
+
+### Added
+- `sprint-autopilot-on`: configurable retrospective handling with `auto` / `stop` / `skip` modes, so epic rollovers don't silently loop.
+
+### Fixed
+- `sprint-autopilot-on`: addressed review findings on the retrospective-mode rollout.
+- CI / installer: preserve v1 autopilot config values during upgrade, and activate the pre-push hook via `scripts/setup-git-hooks.mjs`.
+
 ## [1.0.3] - 2026-04-20
 
 ### Added
