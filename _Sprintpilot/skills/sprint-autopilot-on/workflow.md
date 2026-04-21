@@ -323,7 +323,7 @@ Resolve:
        The user was told to run /bmad-retrospective interactively. If they
        did, the epic is now `done` in {status_file} (or a retrospective
        artifact exists). Otherwise, re-issue the instructions and halt. -->
-  <check if="{state_file}.paused_at == `epic-complete-awaiting-retrospective`">
+  <check if="{state_file}.paused_at is epic-complete-awaiting-retrospective">
     <action>Set `{{paused_epic_id}}` from `{state_file}.paused_epic_id`</action>
     <action>Check whether epic `{{paused_epic_id}}` is now `done` in `{status_file}` OR an artifact exists at `{implementation_artifacts}/retrospectives/epic-{{paused_epic_id}}-*.md`</action>
     <check if="epic is done OR retrospective artifact exists">
@@ -618,8 +618,12 @@ pr_base: {{pr_base}}
   <goto step="7">Mark story done</goto>
 </check>
 
-<check if="{{completed_skill}} in (retrospective-auto, retrospective-skip)">
-  <action>Log: "Epic retrospective handled ({{completed_skill}}) — sprint-status.yaml updated inline by autopilot"</action>
+<check if="{{completed_skill}} is retrospective-auto">
+  <action>Log: "Epic retrospective generated inline by autopilot — sprint-status.yaml updated"</action>
+</check>
+
+<check if="{{completed_skill}} is retrospective-skip">
+  <action>Log: "Epic retrospective skipped per config — sprint-status.yaml updated inline"</action>
 </check>
 
 <check if="{{completed_skill}} was bmad-create-epics-and-stories">
@@ -899,7 +903,7 @@ Instruct: "Re-verify code review for story {{current_story}} — all patch findi
        NEVER invoked from autopilot — it enters a multi-persona discussion
        loop under some CLIs. -->
 
-  <check if="{{retrospective_mode}} == `auto`">
+  <check if="{{retrospective_mode}} is auto">
     <!-- Deterministic single-pass retrospective. No persona simulation,
          no rounds, no external skill call. All inputs are on-disk. -->
     <action>Collect from `{status_file}` for epic `{{epic_id}}`:
@@ -949,7 +953,7 @@ Instruct: "Re-verify code review for story {{current_story}} — all patch findi
     <action>Set `{{completed_skill}}` = `retrospective-auto`</action>
   </check>
 
-  <check if="{{retrospective_mode}} == `stop`">
+  <check if="{{retrospective_mode}} is stop">
     <!-- Pause autopilot so user can run /bmad-retrospective interactively.
          On the next /sprint-autopilot-on the resume logic in step 1 will
          detect the cleared state and move to the next epic. -->
@@ -980,7 +984,7 @@ Instruct: "Re-verify code review for story {{current_story}} — all patch findi
     <action>STOP</action>
   </check>
 
-  <check if="{{retrospective_mode}} == `skip`">
+  <check if="{{retrospective_mode}} is skip">
     <!-- User opted out of retrospective. Record and move on. -->
     <action>Update `{status_file}`:
       - `epics.{{epic_id}}.status` = `done`
