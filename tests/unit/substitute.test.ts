@@ -4,8 +4,8 @@ import substituteMod from '../../lib/substitute.js';
 
 const { isTextFile, renderString, buildContext } = substituteMod as {
   isTextFile: (path: string) => boolean;
-  renderString: (text: string, ctx: Record<string, string>) => string;
-  buildContext: (input: { outputFolder?: string | null }) => Record<string, string>;
+  renderString: (text: string, ctx: Record<string, unknown>) => string;
+  buildContext: (input?: { outputFolder?: string | null }) => Record<string, unknown>;
 };
 
 describe('isTextFile', () => {
@@ -80,5 +80,23 @@ describe('buildContext', () => {
   it('defaults when outputFolder is null', () => {
     const ctx = buildContext({ outputFolder: null });
     expect(ctx.output_folder).toBe('_bmad-output');
+  });
+
+  it('accepts no arguments and returns defaults', () => {
+    const ctx = buildContext();
+    expect(ctx.output_folder).toBe('_bmad-output');
+    expect(ctx.planning_artifacts).toBe('_bmad-output/planning-artifacts');
+    expect(ctx.implementation_artifacts).toBe('_bmad-output/implementation-artifacts');
+  });
+
+  it('does NOT expose session_story_limit or retrospective_mode in ctx (collides with {{var}} in workflow.md)', () => {
+    // These values are written directly to modules/autopilot/config.yaml by
+    // patchAutopilotConfig after the copy, NOT via renderString, because
+    // workflow.md uses the pattern `{{session_story_limit}}` and
+    // `{{retrospective_mode}}` — the inner `{key}` would be matched and
+    // substituted, corrupting those variable references.
+    const ctx = buildContext({ outputFolder: 'out' });
+    expect(ctx.session_story_limit).toBeUndefined();
+    expect(ctx.retrospective_mode).toBeUndefined();
   });
 });

@@ -138,6 +138,7 @@ All BMAD skills are fully automatable (auto-continue past menus, derive decision
 | `bmad-create-ux-design` | Automatable if PRD exists; BLOCKER if no PRD |
 | `bmad-party-mode` | Skip — inherently interactive |
 | `bmad-brainstorming` | Skip — inherently interactive |
+| `bmad-retrospective` | Under autopilot, handled per `autopilot.retrospective_mode`: `auto` (default — inline artifact, no external skill call), `stop` (pause so user runs `/bmad-retrospective` interactively, then resumes autopilot), or `skip` (not recommended). The external skill is NOT invoked from autopilot because it enters a multi-persona discussion loop under some CLIs. |
 
 ---
 
@@ -173,13 +174,15 @@ Resolve:
   </action>
   <action>Read `{project-root}/_Sprintpilot/modules/autopilot/config.yaml` (if present) and set:
   - `{{session_story_limit}}` from `autopilot.session_story_limit` (default: 3). A value of 0 disables the limit (run until sprint complete).
-  If the file or key is missing, fall back to 3.
+  - `{{retrospective_mode}}` from `autopilot.retrospective_mode` (default: `auto`). Valid values: `auto` | `stop` | `skip`. Any unknown value falls back to `auto`.
+  If the file or either key is missing, fall back to the defaults above.
   </action>
 </check>
 
 <check if="manifest does NOT exist">
   <action>Set `{{git_enabled}}` = false</action>
   <action>Set `{{session_story_limit}}` = 3</action>
+  <action>Set `{{retrospective_mode}}` = `auto`</action>
   <action>Log: "No _Sprintpilot/manifest.yaml found — running stock autopilot (no git)"</action>
 </check>
 
@@ -315,6 +318,34 @@ Resolve:
       - Advance to next non-done story
     - Update `{state_file}` with reconciled values
   </action>
+
+  <!-- Resume from a `retrospective_mode: stop` pause.
+       The user was told to run /bmad-retrospective interactively. If they
+       did, the epic is now `done` in {status_file} (or a retrospective
+       artifact exists). Otherwise, re-issue the instructions and halt. -->
+  <check if="{state_file}.paused_at == `epic-complete-awaiting-retrospective`">
+    <action>Set `{{paused_epic_id}}` from `{state_file}.paused_epic_id`</action>
+    <action>Check whether epic `{{paused_epic_id}}` is now `done` in `{status_file}` OR an artifact exists at `{implementation_artifacts}/retrospectives/epic-{{paused_epic_id}}-*.md`</action>
+    <check if="epic is done OR retrospective artifact exists">
+      <action>Clear `paused_at`, `paused_epic_id`, and `next_action` from `{state_file}`</action>
+      <action>Log: "Epic {{paused_epic_id}} retrospective detected — resuming autopilot"</action>
+    </check>
+    <check if="epic is NOT done AND no retrospective artifact">
+      <action>Report:
+      ```
+      Autopilot still paused — epic {{paused_epic_id}} retrospective not yet done.
+
+      Run `/bmad-retrospective` interactively for epic {{paused_epic_id}},
+      then re-run `/sprint-autopilot-on` to continue.
+
+      (To bypass, edit _Sprintpilot/modules/autopilot/config.yaml and set
+      retrospective_mode to `auto` or `skip`.)
+      ```
+      </action>
+      <action>STOP</action>
+    </check>
+  </check>
+
   <goto step="2">Jump to execution loop with reconciled state</goto>
 </check>
 
@@ -369,6 +400,7 @@ Resolve:
   Git integration: {{git_enabled}}
   Platform: {{platform}}
   Session limit: {{session_story_limit}} stories, then checkpoint + new session
+  Retrospective mode: {{retrospective_mode}}
 
   Beginning autonomous execution. I will only stop for true blockers or session checkpoints.
   ```
@@ -586,8 +618,8 @@ pr_base: {{pr_base}}
   <goto step="7">Mark story done</goto>
 </check>
 
-<check if="{{completed_skill}} was bmad-retrospective">
-  <action>Log: "Epic retrospective complete — BMAD skills will update sprint-status.yaml directly"</action>
+<check if="{{completed_skill}} in (retrospective-auto, retrospective-skip)">
+  <action>Log: "Epic retrospective handled ({{completed_skill}}) — sprint-status.yaml updated inline by autopilot"</action>
 </check>
 
 <check if="{{completed_skill}} was bmad-create-epics-and-stories">
@@ -858,10 +890,111 @@ Instruct: "Re-verify code review for story {{current_story}} — all patch findi
 
 <action>Check if ALL stories in this epic are `done`</action>
 <check if="epic complete">
-  <action>Create task "[epic] retrospective" → `in_progress`</action>
-  <action>INVOKE `bmad-retrospective` using Skill tool (retrospective skill updates sprint-status.yaml itself)</action>
-  <action>Mark retrospective task → `completed`</action>
-  <action>Set `{{completed_skill}}` = `bmad-retrospective`</action>
+  <action>Resolve `{{epic_id}}` (e.g. "1") and `{{epic_title}}` from `{status_file}` for the current epic</action>
+  <action>Create task "[epic {{epic_id}}] retrospective" → `in_progress`</action>
+
+  <!-- Retrospective handling is driven by `autopilot.retrospective_mode`
+       in modules/autopilot/config.yaml. See the SKILL AUTOMATABLE REFERENCE
+       table for rationale. The external `bmad-retrospective` skill is
+       NEVER invoked from autopilot — it enters a multi-persona discussion
+       loop under some CLIs. -->
+
+  <check if="{{retrospective_mode}} == `auto`">
+    <!-- Deterministic single-pass retrospective. No persona simulation,
+         no rounds, no external skill call. All inputs are on-disk. -->
+    <action>Collect from `{status_file}` for epic `{{epic_id}}`:
+      - list of done stories with { story-key, title, test_pass_count, patch_count }
+      - epic title, start/end dates if present
+    </action>
+    <action>Collect decision-log entries for epic `{{epic_id}}` from `{decision_log_file}` (match on `story` prefix `{{epic_id}}-` or `phase: autopilot:*` entries tagged to this epic)</action>
+    <action>Identify open risks / carry-over notes from sprint-status (any story with `notes` or `risks` fields, any `workaround` decisions in the log for this epic)</action>
+    <action>Ensure directory `{implementation_artifacts}/retrospectives/` exists</action>
+    <action>Write `{implementation_artifacts}/retrospectives/epic-{{epic_id}}-retrospective.md` using this template:
+    ```markdown
+    # Epic {{epic_id}} — {{epic_title}} — Retrospective
+
+    **Completed:** {current_date}
+    **Stories done:** {{n_done}}/{{n_total}}
+
+    ## Stories
+    {{#each stories}}
+    - **{{story-key}}** — {{title}}
+      - Tests: {{test_pass_count}}
+      - Patches applied: {{patch_count}}
+    {{/each}}
+
+    ## Key decisions
+    {{#each decisions}}
+    - [{{impact}}] {{category}}: {{decision}} — {{rationale}}
+    {{/each}}
+
+    ## Risks carried forward
+    {{#each open_risks}}
+    - {{risk}}
+    {{/each}}
+
+    ## Notes
+    Generated inline by Sprintpilot autopilot per `autopilot.retrospective_mode: auto`.
+    ```
+    </action>
+    <action>Update `{status_file}`:
+      - `epics.{{epic_id}}.status` = `done`
+      - `epics.{{epic_id}}.retrospective_path` = the retrospective file path (relative to project root)
+      - `epics.{{epic_id}}.completed_at` = {current_date}
+    </action>
+    <action>Append decision-log entry:
+      `{ category: workaround, decision: "retrospective generated inline", rationale: "autopilot.retrospective_mode=auto — avoids external skill's multi-persona loop", impact: low, phase: autopilot:retrospective, story: "epic-{{epic_id}}" }`
+    </action>
+    <action>Mark retrospective task → `completed`</action>
+    <action>Set `{{completed_skill}}` = `retrospective-auto`</action>
+  </check>
+
+  <check if="{{retrospective_mode}} == `stop`">
+    <!-- Pause autopilot so user can run /bmad-retrospective interactively.
+         On the next /sprint-autopilot-on the resume logic in step 1 will
+         detect the cleared state and move to the next epic. -->
+    <action>Update `{state_file}`:
+      - `paused_at` = `epic-complete-awaiting-retrospective`
+      - `paused_epic_id` = `{{epic_id}}`
+      - `next_action` = "run /bmad-retrospective interactively for epic {{epic_id}}, then re-run /sprint-autopilot-on"
+    </action>
+    <action>Append decision-log entry:
+      `{ category: workaround, decision: "paused for interactive retrospective", rationale: "autopilot.retrospective_mode=stop", impact: low, phase: autopilot:retrospective, story: "epic-{{epic_id}}" }`
+    </action>
+    <action>Mark retrospective task → `completed` (handed off to user)</action>
+    <action>Report:
+    ```
+    Autopilot paused — epic {{epic_id}} complete, retrospective handed off.
+
+    Per `autopilot.retrospective_mode: stop` in
+    _Sprintpilot/modules/autopilot/config.yaml, autopilot does not run the
+    retrospective automatically.
+
+    To continue:
+      1. Run `/bmad-retrospective` interactively for epic {{epic_id}}
+      2. When done, run `/sprint-autopilot-on` to resume with the next epic
+
+    State saved to: {state_file}
+    ```
+    </action>
+    <action>STOP</action>
+  </check>
+
+  <check if="{{retrospective_mode}} == `skip`">
+    <!-- User opted out of retrospective. Record and move on. -->
+    <action>Update `{status_file}`:
+      - `epics.{{epic_id}}.status` = `done`
+      - `epics.{{epic_id}}.retrospective_path` = null
+      - `epics.{{epic_id}}.retrospective_skipped` = true
+      - `epics.{{epic_id}}.completed_at` = {current_date}
+    </action>
+    <action>Append decision-log entry:
+      `{ category: workaround, decision: "retrospective skipped", rationale: "autopilot.retrospective_mode=skip (NOT RECOMMENDED)", impact: medium, phase: autopilot:retrospective, story: "epic-{{epic_id}}" }`
+    </action>
+    <action>Mark retrospective task → `completed` (skipped)</action>
+    <action>Set `{{completed_skill}}` = `retrospective-skip`</action>
+    <action>Log: "Epic {{epic_id}} retrospective skipped per config — continuing with next epic"</action>
+  </check>
 
   <!-- GIT: Epic completion — suggest merge, cleanup worktrees -->
   <check if="{{git_enabled}}">

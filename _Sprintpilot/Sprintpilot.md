@@ -25,6 +25,22 @@ When Sprintpilot or the git addon is active:
 - Each story gets its own isolated worktree and branch (`story/<key>`)
 - Commits use conventional format: `feat(<epic>): <title> (<key>)`
 
+### Autopilot configuration
+
+Edit `_Sprintpilot/modules/autopilot/config.yaml`:
+
+| Setting | Default | Values | Purpose |
+|---------|---------|--------|---------|
+| `autopilot.session_story_limit` | `3` | integer ≥ 0 | Stories fully implemented per autopilot run before checkpoint. `0` = unlimited. |
+| `autopilot.retrospective_mode` | `auto` | `auto` / `stop` / `skip` | How epic-end retrospectives are handled (see below). |
+
+`retrospective_mode` options:
+- **`auto`** *(default)* — autopilot writes a deterministic retrospective artifact from `sprint-status.yaml` + `decision-log.yaml`, then continues. Single pass, no external skill call, safe under every CLI.
+- **`stop`** — autopilot pauses at epic completion. Run `/bmad-retrospective` interactively, then re-run `/sprint-autopilot-on` to resume. Use this when you want the full multi-persona discussion as part of your process.
+- **`skip`** — no retrospective artifact is written. **Not recommended** — you lose the epic-level learning record.
+
+Both settings are prompted during `sprintpilot install` (interactive mode) with existing values as defaults, so reinstalls preserve your choices.
+
 ---
 
 ## Full skill reference by lifecycle phase
@@ -59,7 +75,7 @@ See **Mandatory sequence per story** section below.
 
 | Skill | When to use |
 |-------|-------------|
-| `bmad-retrospective` | Run after all stories in an epic are `done`; saves lessons, marks epic `done` |
+| `bmad-retrospective` | Run after all stories in an epic are `done`; saves lessons, marks epic `done`. Under autopilot this is driven by `autopilot.retrospective_mode` (`auto` inline, `stop` to pause for interactive use, or `skip`). |
 
 ---
 
