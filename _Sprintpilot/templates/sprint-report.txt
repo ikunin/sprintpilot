@@ -1,0 +1,60 @@
+╔═══════════════════════════════════════════════════════════════╗
+║                   BMAD AUTOPILOT — REPORT                     ║
+╚═══════════════════════════════════════════════════════════════╝
+
+SUMMARY
+  Stories completed : {{done_count}}/{{total_stories}}
+  Epics completed   : {{done_epics}}/{{total_epics}}
+  Total tests       : {{N}}/{{N}} passed
+{{#if git_enabled}}
+  Platform          : {{platform}}
+{{/if}}
+
+STORIES
+{{#each epic}}
+  Epic {{epic_number}}: {{epic_title}}
+  {{#each stories}}
+  ✓ {{story-key}}  — {{test_count}} tests{{#if pr_url}}  PR: {{pr_url}}{{/if}}
+  {{/each}}
+{{/each}}
+{{#if remaining_stories}}
+  Not started:
+  {{#each remaining_stories}}
+  · {{story-key}}
+  {{/each}}
+{{/if}}
+
+DECISIONS REQUIRING REVIEW (high/medium impact)
+{{#each medium_high_decisions}}
+  #{{id}}  [{{impact}}] {{story}} / {{phase}}
+      {{decision}}
+      → {{rationale}}
+{{/each}}
+{{#if no_medium_high_decisions}}
+  None — all decisions were low-impact.
+{{/if}}
+
+  Full log: {decision_log_file}
+
+REVIEW FINDINGS APPLIED
+  Patches applied    : {{total_patches}}
+  Findings dismissed : {{total_dismissed}}
+  Review rounds      : {{total_review_rounds}}
+
+CODE REVIEW SUMMARY (per story)
+{{#each completed_stories}}
+  {{story-key}} : {{patches_applied}} patches applied, {{findings_dismissed}} dismissed
+{{/each}}
+
+WHAT TO DO NEXT
+  1. Review decisions marked medium/high above
+{{#if has_pr_urls}}
+  2. Merge open PRs: {{pr_urls_list}}
+{{/if}}
+{{#if launch_cmd}}
+  {{next_number}}. Run the app: {{launch_cmd}}
+{{/if}}
+  {{next_number}}. Manual smoke test checklist:
+{{#each completed_stories}}
+     · [{{story-key}}] {{smoke_test_suggestion}}
+{{/each}}

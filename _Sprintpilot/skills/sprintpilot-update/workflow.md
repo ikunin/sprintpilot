@@ -34,8 +34,9 @@
 
 6. **Install the update.** On confirmation, run:
    ```bash
-   npx @ikunin/sprintpilot@latest@{latest} install --yes
+   npx @ikunin/sprintpilot@{latest} install --yes
    ```
+   (`{latest}` is the version resolved in step 2 — e.g., `npx @ikunin/sprintpilot@1.0.4 install --yes`.)
    Stream the output so the user can see progress.
 
 7. **Verify.** Read `_Sprintpilot/manifest.yaml` again and confirm the version updated:

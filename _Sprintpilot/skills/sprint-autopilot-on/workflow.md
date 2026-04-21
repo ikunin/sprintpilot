@@ -8,23 +8,19 @@ You do NOT hardcode the workflow sequence. After each completed skill, read its 
 
 **Git integration** is additive. If `_Sprintpilot/manifest.yaml` doesn't exist or `git.enabled: false`, all git operations are silently skipped and this workflow behaves identically to the stock autopilot.
 
-### Shell portability (IMPORTANT)
+### Shell portability
 
-Sprintpilot runs under any LLM CLI (Claude Code, Gemini CLI, Cursor, etc.) on any OS. The shell that executes commands may be **bash, zsh, PowerShell, or cmd** depending on platform and CLI. Shell-specific idioms will fail silently when the wrong shell is used.
+The executing shell may be bash, zsh, PowerShell, or cmd — translate bash idioms as needed:
 
-**When you encounter bash-style idioms below, translate them to your shell.** The table applies to **external commands** (like `git`); cmdlets have slightly different conventions.
+| Bash | PowerShell |
+|---|---|
+| `A && B` | `A; if ($LASTEXITCODE -eq 0) { B }` |
+| `A \|\| true` | `A; $LASTEXITCODE = 0` |
+| `2>/dev/null` | `2>$null` |
+| `rm -rf <dir>` | `Remove-Item -Recurse -Force <dir>` |
+| `if [ -f X ]; then ... fi` | `if (Test-Path -PathType Leaf X) { ... }` |
 
-| Bash idiom | PowerShell equivalent | Meaning |
-|---|---|---|
-| `A && B` | `A; if ($LASTEXITCODE -eq 0) { B }` (or separate commands, guarding B manually) | Run B only if A succeeded |
-| `A \|\| true` | `A; $LASTEXITCODE = 0` (or `try { A } catch {}` for cmdlets) | Run A, ignore failures |
-| `2>/dev/null` | `2>$null` | Suppress stderr |
-| `rm -rf <dir>` | `Remove-Item -Recurse -Force <dir>` | Recursive delete |
-| `if [ -f X ]; then ... fi` | `if (Test-Path -PathType Leaf X) { ... }` | File-exists check (regular file, not dir) |
-
-**Safer:** when in doubt, use the cross-platform Node helpers under `_Sprintpilot/scripts/`. For ad-hoc file ops, invoke Node inline: `node -e "require('fs').rmSync('<path>', {recursive: true, force: true})"`.
-
-If a step below uses `&&` to chain "run B only on A's success", and you cannot express that in one line, **run the commands separately and STOP if any step fails** — do not proceed past a failed step.
+For cross-platform file ops prefer the Node helpers under `_Sprintpilot/scripts/`, or inline: `node -e "require('fs').rmSync('<path>', {recursive: true, force: true})"`. When a step chains commands with `&&` and you cannot express it in one line, run them separately and STOP on any failure.
 
 ---
 
@@ -75,54 +71,19 @@ For everything else: decide, document briefly, continue.
 
 ## DECISION LOGGING
 
-Every non-trivial decision made during autopilot execution MUST be logged to `{decision_log_file}`. This creates an audit trail the user reviews at the end of each session.
+Log every non-trivial decision to `{decision_log_file}` (skip routine actions — running tests, staging files, creating branches). Create the file on first decision; update `last_updated` on every append.
 
-### When to log
+**Categories:** `architecture`, `test-strategy`, `dependency`, `review-triage` (dismissed finding), `review-accept` (applied fix), `halt-recovery`, `scope` (outside story spec), `workaround`.
+**Impact:** `low` (reversible/cosmetic), `medium` (affects one component), `high` (cross-cutting or deviates from spec).
+**Phase format:** `{skill}:{sub_phase}` — e.g. `dev-story:RED`, `code-review:triage`, `autopilot:routing`.
 
-Log a decision whenever you:
-- Choose an architecture pattern, data structure, or design approach (`architecture`)
-- Select a test strategy or skip a test category (`test-strategy`)
-- Add, remove, or substitute a dependency (`dependency`)
-- Dismiss a code review finding (`review-triage`)
-- Accept and apply a code review finding (`review-accept`)
-- Recover from a HALT condition (`halt-recovery`)
-- Implement something not explicitly in the story spec (`scope`)
-- Apply a workaround for a tool limitation or false positive (`workaround`)
-
-Do NOT log routine actions (running tests, staging files, creating branches).
-
-### File format
-
-Initialize `{decision_log_file}` on first decision (if it does not exist):
-
+**File schema:**
 ```yaml
-generated: {current_date}
-last_updated: {current_datetime}
-
-decisions: []
+generated: {date}
+last_updated: {datetime}
+decisions:
+  - { id, timestamp, story, phase, category, decision, rationale, impact }
 ```
-
-Append each decision as a new entry:
-
-```yaml
-  - id: {auto_increment}
-    timestamp: "{current_datetime_iso8601}"
-    story: "{current_story or sprint-level}"
-    phase: "{skill}:{sub_phase}"
-    category: {architecture|test-strategy|dependency|review-triage|review-accept|halt-recovery|scope|workaround}
-    decision: "{what was decided — one line}"
-    rationale: "{why — one line}"
-    impact: {low|medium|high}
-```
-
-**Phase format:** `dev-story:RED`, `dev-story:GREEN`, `code-review:triage`, `code-review:patch`, `autopilot:init`, `autopilot:routing`, etc.
-
-**Impact levels:**
-- `low` — easily reversible, cosmetic, or standard practice
-- `medium` — affects behavior but contained to one story/component
-- `high` — cross-cutting, hard to reverse, or deviates from spec
-
-Always update `last_updated` when appending.
 
 ---
 
@@ -155,6 +116,8 @@ Resolve:
 - `decision_log_file` = `{implementation_artifacts}/decision-log.yaml`
 - `project_root` = absolute path of current working directory (store for later use)
 - `session_story_limit` is loaded below from `modules/autopilot/config.yaml` (default: 3)
+
+**`{state_file}` schema** (referenced as `STATE_FIELDS` below): `last_updated`, `current_story`, `current_bmad_step`, `completed_skill`, `next_skill`, `session_stories_done`, `stories_remaining`, `git_enabled`, `platform`, `in_worktree`, `pr_base`. Always update `last_updated` on every write.
 
 ### Git integration bootstrap
 
@@ -200,6 +163,17 @@ Resolve:
     <action>STOP</action>
   </check>
 
+  <action>**Check for `origin` remote** — run: `git remote get-url origin`
+  If the command fails (exit code != 0), no `origin` remote is configured. Set `{{has_origin}}` = false.
+  Otherwise set `{{has_origin}}` = true.
+  </action>
+  <check if="{{has_origin}} is false">
+    <action>Log: "WARN: no `origin` remote configured — running in local-only mode. Remote operations (fetch, push, PR, branch reconciliation) will be skipped. Add a remote later with: `git remote add origin <url>`"</action>
+    <action>Set `{{push_auto}}` = false</action>
+    <action>Set `{{create_pr}}` = false</action>
+    <action>Set `{{platform}}` = "git_only"</action>
+  </check>
+
   <action>**Lock file** — run: `node {{project_root}}/_Sprintpilot/scripts/lock.js acquire`
   Output will be one of:
   - `ACQUIRED:<session-id>` → proceed
@@ -235,7 +209,8 @@ Resolve:
   </action>
 
   <action>**Branch reconciliation** — detect pushed-but-unmerged story branches.
-  Run as separate commands — **if `git fetch origin` fails (network/auth), STOP branch reconciliation and log a warning; do not operate on stale local refs**:
+  Skip this entire section if `{{has_origin}}` is false (no remote → nothing to reconcile).
+  Run as separate commands — **if `git fetch origin` fails (no remote/network/auth), STOP branch reconciliation and log a warning; do not operate on stale local refs**:
     1. `git fetch origin`
     2. `git branch -r --list "origin/{{branch_prefix}}*"`
   For each remote branch:
@@ -319,30 +294,14 @@ Resolve:
     - Update `{state_file}` with reconciled values
   </action>
 
-  <!-- Resume from a `retrospective_mode: stop` pause.
-       The user was told to run /bmad-retrospective interactively. If they
-       did, the epic is now `done` in {status_file} (or a retrospective
-       artifact exists). Otherwise, re-issue the instructions and halt. -->
+  <!-- Resume from a `retrospective_mode: stop` pause. -->
   <check if="{state_file}.paused_at is epic-complete-awaiting-retrospective">
-    <action>Set `{{paused_epic_id}}` from `{state_file}.paused_epic_id`</action>
-    <action>Check whether epic `{{paused_epic_id}}` is now `done` in `{status_file}` OR an artifact exists at `{implementation_artifacts}/retrospectives/epic-{{paused_epic_id}}-*.md`</action>
+    <action>Set `{{paused_epic_id}}` from `{state_file}.paused_epic_id`. Check if epic `{{paused_epic_id}}` is `done` in `{status_file}` OR an artifact exists at `{implementation_artifacts}/retrospectives/epic-{{paused_epic_id}}-*.md`.</action>
     <check if="epic is done OR retrospective artifact exists">
-      <action>Clear `paused_at`, `paused_epic_id`, and `next_action` from `{state_file}`</action>
-      <action>Log: "Epic {{paused_epic_id}} retrospective detected — resuming autopilot"</action>
+      <action>Clear `paused_at`, `paused_epic_id`, `next_action` from `{state_file}`. Log: "Epic {{paused_epic_id}} retrospective detected — resuming autopilot".</action>
     </check>
     <check if="epic is NOT done AND no retrospective artifact">
-      <action>Report:
-      ```
-      Autopilot still paused — epic {{paused_epic_id}} retrospective not yet done.
-
-      Run `/bmad-retrospective` interactively for epic {{paused_epic_id}},
-      then re-run `/sprint-autopilot-on` to continue.
-
-      (To bypass, edit _Sprintpilot/modules/autopilot/config.yaml and set
-      retrospective_mode to `auto` or `skip`.)
-      ```
-      </action>
-      <action>STOP</action>
+      <action>Report: "Autopilot still paused — epic {{paused_epic_id}} retrospective not yet done. Run `/bmad-retrospective` interactively, then re-run `/sprint-autopilot-on`. (To bypass: set `retrospective_mode` to `auto` or `skip` in `_Sprintpilot/modules/autopilot/config.yaml`.)" Then STOP.</action>
     </check>
   </check>
 
@@ -350,22 +309,11 @@ Resolve:
 </check>
 
 <check if="state_file does NOT exist">
-  <action>Check if `{status_file}` exists — if not, invoke `bmad-sprint-planning` first</action>
+  <action>Check if `{status_file}` exists. If NOT, do NOT jump to `bmad-sprint-planning` (Phase 4 skill, requires Phase 1–3 artifacts). Invoke `bmad-help` — "No sprint-status.yaml found. What is the current phase and which skill should run first?" — and set `{{next_skill}}` from its response. Expected routing: no PRD → `bmad-create-prd` (BLOCKER); PRD → `bmad-create-architecture`; architecture → `bmad-create-epics-and-stories`; epics → `bmad-sprint-planning`.</action>
 
-  <check if="{{git_enabled}} AND status_file did not exist (sprint-planning just ran)">
-    <action>Run `git fetch origin` to ensure remote refs are current</action>
-    <action>Initialize `{git_status_file}` with git_integration block:
-    ```yaml
-    # Sprintpilot — Git Status
-    git_integration:
-      enabled: true
-      base_branch: {git.base_branch from config}
-      platform: {{platform}}
-
-    stories:
-    ```
-    Note: this is the addon's own file — NEVER write git fields to sprint-status.yaml.
-    </action>
+  <check if="{{git_enabled}} AND status_file did not exist AND {{next_skill}} is bmad-sprint-planning (planning just completed earlier in this flow)">
+    <action>Run `git fetch origin` — warn + skip on failure (no remote/auth/network), do not abort bootstrap.</action>
+    <action>Initialize `{git_status_file}` (addon-owned — NEVER write git fields to sprint-status.yaml) with: `git_integration: { enabled: true, base_branch: <from config>, platform: {{platform}} }` and empty `stories:`.</action>
   </check>
 
   <action>Read `{status_file}` — find all stories not yet `done`</action>
@@ -376,21 +324,7 @@ Resolve:
     - `{{session_stories_done}}` = 0
   </action>
   <action>Create master task: "Sprintpilot — Full Sprint Execution" → `in_progress`</action>
-  <action>Write initial `{state_file}`:
-  ```yaml
-  last_updated: {current_datetime}
-  current_story: null
-  current_bmad_step: null
-  completed_skill: bmad-help
-  next_skill: {{next_skill}}
-  session_stories_done: 0
-  stories_remaining: [list from sprint-status]
-  git_enabled: {{git_enabled}}
-  platform: {{platform}}
-  in_worktree: false
-  pr_base: {{base_branch}}
-  ```
-  </action>
+  <action>Write initial `{state_file}` with STATE_FIELDS: `current_story = null`, `current_bmad_step = null`, `completed_skill = bmad-help`, `session_stories_done = 0`, `stories_remaining = [from sprint-status]`, `in_worktree = false`, `pr_base = {{base_branch}}`.</action>
   <action>Report to user:
   ```
   Sprintpilot ON
@@ -483,90 +417,33 @@ Resolve:
 
 <!-- GIT: Enter worktree before dev-story -->
 <check if="{{git_enabled}} AND {{next_skill}} is bmad-dev-story">
-  <action>**Sanitize branch name** — run:
-  `node {{project_root}}/_Sprintpilot/scripts/sanitize-branch.js "{{current_story}}" --prefix "{{branch_prefix}}" --max-length 60`
-  Output: sanitized name (without prefix). Set `{{branch_name}}` = output.
-  Full branch ref will be `{{branch_prefix}}{{branch_name}}`.
+  <action>**Sanitize branch name**: `node {{project_root}}/_Sprintpilot/scripts/sanitize-branch.js "{{current_story}}" --prefix "{{branch_prefix}}" --max-length 60`. Set `{{branch_name}}` = output. Full ref: `{{branch_prefix}}{{branch_name}}`.</action>
+
+  <action>**Idempotency check** — if branch is already registered in `{status_file}` for this story AND its worktree exists, skip creation. If registered without worktree → recovery mode (see health check). Otherwise proceed.</action>
+
+  <action>**Pick branch point.** If `{{has_origin}}` is true: `git fetch origin` (warn + continue on failure). If `{{has_origin}}` is false: skip fetch, use local refs.
+
+  Read `{git_status_file}` for earlier stories in this epic; find the latest with `push_status = "pushed"` AND a valid `pr_url`; check if merged to base: `git merge-base --is-ancestor origin/{{branch_prefix}}<prev-branch> origin/{{base_branch}}`.
+  - If unmerged previous story exists (requires `{{has_origin}}`): `git checkout origin/{{branch_prefix}}<prev-branch>`, set `{{pr_base}}` = `{{branch_prefix}}<prev-branch>`.
+  - Otherwise: `git checkout origin/{{base_branch}}` (or local `{{base_branch}}` if no origin), set `{{pr_base}}` = `{{base_branch}}`.
+
+  Detached HEAD is fine — `git worktree add` below creates a new branch from HEAD.
   </action>
 
-  <action>**Check if branch already registered** in `{status_file}` for this story.
-  If yes AND worktree already exists → skip creation (idempotent).
-  If yes AND no worktree → recovery mode (see health check).
-  If no → proceed with creation.
-  </action>
+  <action>**Create worktree.** Try: `git worktree add "{{project_root}}/.worktrees/{{current_story}}" -b "{{branch_prefix}}{{branch_name}}" 2>&1`. If it fails because the branch already exists, retry without `-b`: `git worktree add "{{project_root}}/.worktrees/{{current_story}}" "{{branch_prefix}}{{branch_name}}" 2>&1`.
 
-  <action>**Prepare for worktree** — determine the correct branch point.
-  Run: `git fetch origin`
-
-  Check if there is a previous story in this epic with a pushed but unmerged branch (PR pending):
-  - Read `{git_status_file}` for earlier stories in the same epic
-  - Find the latest story branch where `push_status` = "pushed" AND `pr_url` is a valid URL
-  - Check if that branch has been merged to `{{base_branch}}`: `git merge-base --is-ancestor origin/{{branch_prefix}}<prev-branch> origin/{{base_branch}}`
-
-  If an unmerged previous story branch exists:
-  - Branch from it: `git checkout origin/{{branch_prefix}}<prev-branch>`
-  - Set `{{pr_base}}` = `{{branch_prefix}}<prev-branch>` (PR should target previous story, not main)
-  - Log: "Branching from {{branch_prefix}}<prev-branch> (PR pending merge)"
-  Otherwise:
-  - Branch from base: `git checkout origin/{{base_branch}}`
-  - Set `{{pr_base}}` = `{{base_branch}}`
-
-  (Detached HEAD is fine — the worktree add below creates a new branch from HEAD)
-  </action>
-
-  <action>**Create worktree** using standard git commands (works in any coding agent):
-  ```
-  git worktree add "{{project_root}}/.worktrees/{{current_story}}" -b "{{branch_prefix}}{{branch_name}}" 2>&1
-  ```
-  This creates `.worktrees/{{current_story}}/` with a new branch `{{branch_prefix}}{{branch_name}}` from HEAD.
-
-  If worktree add fails (branch already exists):
-  ```
-  git worktree add "{{project_root}}/.worktrees/{{current_story}}" "{{branch_prefix}}{{branch_name}}" 2>&1
-  ```
-
-  **If both fail** (disk full, permissions, etc.):
-  - Log: "WARN: git worktree add failed — continuing without worktree isolation"
-  - Set `{{in_worktree}}` = false
-  - Create branch manually: `git checkout -b {{branch_prefix}}{{branch_name}}`
-    If checkout also fails (branch already exists): `git checkout {{branch_prefix}}{{branch_name}}`
-    If both fail: HALT — "Could not create or switch to branch {{branch_prefix}}{{branch_name}}"
-  - Continue with the skill invocation in PROJECT_ROOT (no isolation)
-  - Git operations (commit, push, PR) still work on the branch
+  If both fail (disk/permissions): log "WARN: worktree add failed — continuing without isolation", set `{{in_worktree}}` = false, and fall back to branch-only mode: `git checkout -b {{branch_prefix}}{{branch_name}}` (retry without `-b` if branch exists). HALT only if the checkout also fails. Git push/PR still work on the branch.
   </action>
 
   <check if="worktree add succeeded">
-    <action>**Change working directory** to the worktree:
-    `cd {{project_root}}/.worktrees/{{current_story}}`
-    All subsequent file operations and commands MUST use this directory.
-    Set `{{worktree_path}}` = `{{project_root}}/.worktrees/{{current_story}}`
-    </action>
-
-    <action>**Init submodules** if needed.
-    First check for `.gitmodules` (use your file-exists tool, or `node -e "process.exit(require('fs').existsSync('.gitmodules')?0:1)"`). If not present, skip this step.
-    If present, run `git submodule update --init --recursive` (give it ~30 seconds). If the command fails or hangs, warn "Submodule init failed (may need auth). Continuing without." and proceed.
-    </action>
-
+    <action>`cd {{project_root}}/.worktrees/{{current_story}}`. All subsequent commands run from here. Set `{{worktree_path}}` = this path.</action>
+    <action>**Init submodules** if `.gitmodules` exists (check with your file-exists tool or `node -e "process.exit(require('fs').existsSync('.gitmodules')?0:1)"`). Run `git submodule update --init --recursive` (~30s). On failure/hang: warn "Submodule init failed (may need auth). Continuing." and proceed.</action>
     <action>Set `{{in_worktree}}` = true</action>
   </check>
-  <action>Update `{state_file}` (write to worktree copy since we're now IN the worktree)</action>
+  <action>Update `{state_file}` (write to the worktree copy since cwd is now the worktree)</action>
 </check>
 
-<action>Update `{state_file}`:
-```yaml
-last_updated: {current_datetime}
-current_story: {{current_story}}
-current_bmad_step: executing
-completed_skill: {previous skill}
-next_skill: {{next_skill}}
-session_stories_done: {{session_stories_done}}
-stories_remaining: {{stories_remaining}}
-git_enabled: {{git_enabled}}
-platform: {{platform}}
-in_worktree: {{in_worktree}}
-pr_base: {{pr_base}}
-```
-</action>
+<action>Update `{state_file}` with STATE_FIELDS (set `current_bmad_step = executing`, `completed_skill = <previous skill>`).</action>
 
 <!-- Autopilot menu handling rules apply — see AUTOPILOT RULES section above -->
 
@@ -637,7 +514,8 @@ pr_base: {{pr_base}}
 </check>
 
 <check if="{{completed_skill}} was bmad-sprint-planning AND {{git_enabled}}">
-  <action>Run `git fetch origin`</action>
+  <action>If `{{has_origin}}` is true, run `git fetch origin` (log a warning on failure and continue — do not abort).
+  If `{{has_origin}}` is false, skip the fetch.</action>
   <action>Initialize `{git_status_file}` if it doesn't exist (with git_integration block)</action>
 </check>
 
@@ -653,22 +531,10 @@ pr_base: {{pr_base}}
   </action>
 </check>
 
-<!-- GIT: Commit planning artifacts to main after planning skills -->
 <check if="{{git_enabled}} AND {{completed_skill}} is a planning skill (bmad-create-prd, bmad-create-architecture, bmad-create-ux-design, bmad-create-epics-and-stories, bmad-sprint-planning, bmad-check-implementation-readiness, bmad-create-story)">
-  <action>**Commit planning artifacts to main** — keep track of all planning decisions in git.
-  Stage all changed artifacts (ignore errors — any of these paths may not yet exist):
-  ```
-  git add _bmad-output/planning-artifacts/ _bmad-output/implementation-artifacts/ _bmad-output/stories/
-  ```
-  Check if there's anything staged; if yes, commit:
-  ```
-  git diff --cached --quiet
-  ```
-  If that exits non-zero (there are staged changes), run: `git commit -m "docs: {{completed_skill}} artifacts"`
-  Then push (log a warning if push fails; do not halt autopilot):
-  ```
-  git push origin {{base_branch}}
-  ```
+  <action>**Commit planning artifacts to main.**
+  1. `git add _bmad-output/planning-artifacts/ _bmad-output/implementation-artifacts/ _bmad-output/stories/` (ignore missing-path errors)
+  2. If `git diff --cached --quiet` exits non-zero: `git commit -m "docs: {{completed_skill}} artifacts"` then `git push origin {{base_branch}}` (warn on push failure, do not halt).
   </action>
 </check>
 
@@ -679,32 +545,17 @@ pr_base: {{pr_base}}
 
 <step n="5" goal="Determine next skill — from skill output first, bmad-help as fallback">
 
-<action>Read the output of `{{completed_skill}}`</action>
+<action>Read the output of `{{completed_skill}}`. If it contains "Next Steps", "What to do next", "Run next", or equivalent, extract `{{next_skill}}` from that section. Otherwise invoke `bmad-help` — "{{completed_skill}} just finished. What is the next required workflow step?" — and extract `{{next_skill}}` from its response. Log the source ("skill output" vs "bmad-help fallback").</action>
 
-<check if="output contains 'Next Steps', 'What to do next', 'Run next', or equivalent">
-  <action>Extract `{{next_skill}}` from that section</action>
-  <action>Log: "Next step from skill output: {{next_skill}}"</action>
-</check>
-
-<check if="output contains NO clear next step">
-  <action>Invoke `bmad-help` — "{{completed_skill}} just finished. What is the next required workflow step?"</action>
-  <action>Extract `{{next_skill}}` from bmad-help response</action>
-  <action>Log: "Next step from bmad-help fallback: {{next_skill}}"</action>
-</check>
-
-<check if="{{next_skill}} is null, empty, or signals completion (no further steps / sprint done / all done)">
-  <action>**Verify against source of truth** — re-read `{status_file}` and check for any story with status != "done"</action>
-  <check if="undone stories exist in status_file">
-    <action>Set `{{current_story}}` = first undone story from `{status_file}`</action>
-    <action>Determine `{{next_skill}}` based on that story's current status and BMAD step:
-      - If story has no story file yet → `bmad-create-story`
-      - If story file exists but status is `ready-for-dev` → `bmad-check-implementation-readiness`
-      - If story is `in-progress` and `current_bmad_step` is before `code-review` (i.e. RED or GREEN phase) → `bmad-dev-story`
-      - If story is `in-progress` and `current_bmad_step` is `code-review` or later → `bmad-code-review`
-      - Otherwise → invoke `bmad-help` for precise determination
-    </action>
-    <action>Log: "next_skill was empty but undone stories remain — resolved to {{next_skill}} for {{current_story}}"</action>
-  </check>
+<check if="{{next_skill}} is null, empty, or signals completion">
+  <action>**Verify against source of truth** — re-read `{status_file}`. If undone stories exist, set `{{current_story}}` = first one and determine `{{next_skill}}`:
+    - No story file → `bmad-create-story`
+    - Story file + status `ready-for-dev` → `bmad-check-implementation-readiness`
+    - Status `in-progress` and `current_bmad_step` before `code-review` → `bmad-dev-story`
+    - Status `in-progress` and `current_bmad_step` ≥ `code-review` → `bmad-code-review`
+    - Else → invoke `bmad-help` for precise determination
+  Log: "next_skill was empty but undone stories remain — resolved to {{next_skill}} for {{current_story}}".
+  </action>
   <check if="all stories in status_file are done">
     <goto step="10">Sprint complete</goto>
   </check>
@@ -815,37 +666,15 @@ Instruct: "Re-verify code review for story {{current_story}} — all patch findi
   </action>
 
   <check if="{{create_pr}} is false OR {{platform}} is git_only OR {{pr_url}} is null or SKIPPED">
-    <action>**Merge story branch to main** — tracked and retryable.
-    Run:
-    ```
-    git checkout -B {{base_branch}} origin/{{base_branch}}
-    git merge {{branch_prefix}}{{branch_name}} --no-edit
-    ```
-    If succeeds:
-      - `git push origin {{base_branch}}`
-      - Set `{{merge_status}}` = "merged"
-    If fails (conflict):
-      - `git merge --abort`
-      - `git fetch origin`
-      - `git checkout -B {{base_branch}} origin/{{base_branch}}`
-      - Retry merge once: `git merge {{branch_prefix}}{{branch_name}} --no-edit`
-      - If retry succeeds: push, set `{{merge_status}}` = "merged"
-      - If retry fails: set `{{merge_status}}` = "failed"
-        Log: "WARN: merge failed for {{current_story}} — will retry on next boot"
+    <action>**Merge story branch to main.** If `{{has_origin}}` is false (local-only), substitute `origin/{{base_branch}}` → `{{base_branch}}` and skip all `git push origin` / `git fetch origin` calls below.
+    1. `git checkout -B {{base_branch}} origin/{{base_branch}}` then `git merge {{branch_prefix}}{{branch_name}} --no-edit`.
+    2. On success: `git push origin {{base_branch}}`, set `{{merge_status}}` = "merged".
+    3. On conflict: `git merge --abort`, `git fetch origin`, re-checkout base, retry merge once. On retry success: push + merged. On retry failure: `{{merge_status}}` = "failed", log warning, continue — the branch is preserved and boot reconciliation retries next session.
 
-    If `{{merge_status}}` == "failed":
-      Log warning but do NOT halt. The branch is pushed and preserved.
-      Boot reconciliation (INITIALIZATION branch reconciliation) will retry on next session.
-
-    Note: `{{merge_status}}` is persisted by the full sync-status.js call later in this step (via `--merge-status`). Do NOT call sync-status.js separately here — it does full block replacement and would destroy other fields.
+    `{{merge_status}}` is persisted by the sync-status.js call later in this step (via `--merge-status`). Do NOT call sync-status.js here — it does full block replacement and would destroy other fields.
     </action>
     <check if="{{cleanup_on_merge}} is true">
-      <action>**Cleanup worktree** for merged story — branch was merged locally, worktree is no longer needed. Ignore failures from the remove (the worktree may already be gone):
-      ```
-      git worktree remove .worktrees/{{current_story}} --force
-      git worktree prune
-      ```
-      </action>
+      <action>**Cleanup worktree** (ignore failures — may already be gone): `git worktree remove .worktrees/{{current_story}} --force` then `git worktree prune`</action>
     </check>
   </check>
   <check if="{{pr_url}} is a valid URL (not null, not SKIPPED)">
@@ -854,29 +683,11 @@ Instruct: "Re-verify code review for story {{current_story}} — all patch findi
     <action>Log: "Story {{current_story}} pushed — PR awaiting review: {{pr_url}}"</action>
   </check>
 
-  <!-- Commit all implementation artifacts and status updates to main after each story -->
-  <action>**Commit story completion artifacts to main** — ensure main always reflects current sprint state.
-  ```
-  git checkout -B {{base_branch}} origin/{{base_branch}}
-  ```
-  </action>
-
-  <action>**Write git status** to addon's own file (NEVER modify sprint-status.yaml) — runs AFTER checkout to base branch so the file persists in the working tree for the commit below:
-  `node {{project_root}}/_Sprintpilot/scripts/sync-status.js --story "{{current_story}}" --git-status-file "{{project_root}}/_bmad-output/implementation-artifacts/git-status.yaml" --branch "{{branch_prefix}}{{branch_name}}" --commit "{{story_commit}}" --patch-commits "{{patch_commits_csv}}" --push-status "{{push_status}}" --merge-status "{{merge_status}}" --pr-url "{{pr_url}}" --lint-result "{{lint_result}}" --worktree "{{project_root}}/.worktrees/{{current_story}}" --platform "{{platform}}" --base-branch "{{base_branch}}"`
-  This writes to `git-status.yaml` (addon-owned). Sprint-status.yaml is BMAD-owned — updated by BMAD skills only.
-  </action>
-
-  <action>**Stage and commit artifacts** — explicitly include git-status.yaml and decision-log.yaml. Ignore errors from the `git add` (any listed path may not yet exist):
-  ```
-  git add _bmad-output/implementation-artifacts/sprint-status.yaml _bmad-output/implementation-artifacts/git-status.yaml _bmad-output/implementation-artifacts/autopilot-state.yaml _bmad-output/implementation-artifacts/decision-log.yaml _bmad-output/stories/ _bmad-output/planning-artifacts/
-  ```
-  Check if anything is staged: `git diff --cached --quiet`. If that exits non-zero, commit:
-  `git commit -m "docs: story {{current_story}} done — {{test_count}} tests{{#if pr_url}}, PR: {{pr_url}}{{/if}}"`
-  Then push (log a warning if push fails; do not halt autopilot):
-  ```
-  git push origin {{base_branch}}
-  ```
-  This ensures sprint-status.yaml, git-status.yaml, story files, and any updated artifacts are on main even when story code is on a PR branch.
+  <action>**Commit story artifacts to main** — keeps main in sync even when story code is on a PR branch.
+  1. `git checkout -B {{base_branch}} origin/{{base_branch}}`
+  2. Write git-status.yaml (addon-owned — never touch sprint-status.yaml): `node {{project_root}}/_Sprintpilot/scripts/sync-status.js --story "{{current_story}}" --git-status-file "{{project_root}}/_bmad-output/implementation-artifacts/git-status.yaml" --branch "{{branch_prefix}}{{branch_name}}" --commit "{{story_commit}}" --patch-commits "{{patch_commits_csv}}" --push-status "{{push_status}}" --merge-status "{{merge_status}}" --pr-url "{{pr_url}}" --lint-result "{{lint_result}}" --worktree "{{project_root}}/.worktrees/{{current_story}}" --platform "{{platform}}" --base-branch "{{base_branch}}"`
+  3. Stage artifacts (ignore errors for missing paths): `git add _bmad-output/implementation-artifacts/sprint-status.yaml _bmad-output/implementation-artifacts/git-status.yaml _bmad-output/implementation-artifacts/autopilot-state.yaml _bmad-output/implementation-artifacts/decision-log.yaml _bmad-output/stories/ _bmad-output/planning-artifacts/`
+  4. If `git diff --cached --quiet` exits non-zero: `git commit -m "docs: story {{current_story}} done — {{test_count}} tests{{#if pr_url}}, PR: {{pr_url}}{{/if}}"` then `git push origin {{base_branch}}` (warn on push failure, do not halt).
   </action>
 </check>
 
@@ -897,134 +708,34 @@ Instruct: "Re-verify code review for story {{current_story}} — all patch findi
   <action>Resolve `{{epic_id}}` (e.g. "1") and `{{epic_title}}` from `{status_file}` for the current epic</action>
   <action>Create task "[epic {{epic_id}}] retrospective" → `in_progress`</action>
 
-  <!-- Retrospective handling is driven by `autopilot.retrospective_mode`
-       in modules/autopilot/config.yaml. See the SKILL AUTOMATABLE REFERENCE
-       table for rationale. The external `bmad-retrospective` skill is
-       NEVER invoked from autopilot — it enters a multi-persona discussion
-       loop under some CLIs. -->
+  <!-- Retrospective: driven by `autopilot.retrospective_mode`. The external
+       `bmad-retrospective` skill is NEVER invoked from autopilot (multi-persona
+       discussion loop under some CLIs). -->
 
   <check if="{{retrospective_mode}} is auto">
-    <!-- Deterministic single-pass retrospective. No persona simulation,
-         no rounds, no external skill call. All inputs are on-disk. -->
-    <action>Collect from `{status_file}` for epic `{{epic_id}}`:
-      - list of done stories with { story-key, title, test_pass_count, patch_count }
-      - epic title, start/end dates if present
-    </action>
-    <action>Collect decision-log entries for epic `{{epic_id}}` from `{decision_log_file}` (match on `story` prefix `{{epic_id}}-` or `phase: autopilot:*` entries tagged to this epic)</action>
-    <action>Identify open risks / carry-over notes from sprint-status (any story with `notes` or `risks` fields, any `workaround` decisions in the log for this epic)</action>
-    <action>Ensure directory `{implementation_artifacts}/retrospectives/` exists</action>
-    <action>Write `{implementation_artifacts}/retrospectives/epic-{{epic_id}}-retrospective.md` using this template:
-    ```markdown
-    # Epic {{epic_id}} — {{epic_title}} — Retrospective
-
-    **Completed:** {current_date}
-    **Stories done:** {{n_done}}/{{n_total}}
-
-    ## Stories
-    {{#each stories}}
-    - **{{story-key}}** — {{title}}
-      - Tests: {{test_pass_count}}
-      - Patches applied: {{patch_count}}
-    {{/each}}
-
-    ## Key decisions
-    {{#each decisions}}
-    - [{{impact}}] {{category}}: {{decision}} — {{rationale}}
-    {{/each}}
-
-    ## Risks carried forward
-    {{#each open_risks}}
-    - {{risk}}
-    {{/each}}
-
-    ## Notes
-    Generated inline by Sprintpilot autopilot per `autopilot.retrospective_mode: auto`.
-    ```
-    </action>
-    <action>Update `{status_file}`:
-      - `epics.{{epic_id}}.status` = `done`
-      - `epics.{{epic_id}}.retrospective_path` = the retrospective file path (relative to project root)
-      - `epics.{{epic_id}}.completed_at` = {current_date}
-    </action>
-    <action>Append decision-log entry:
-      `{ category: workaround, decision: "retrospective generated inline", rationale: "autopilot.retrospective_mode=auto — avoids external skill's multi-persona loop", impact: low, phase: autopilot:retrospective, story: "epic-{{epic_id}}" }`
-    </action>
-    <action>Mark retrospective task → `completed`</action>
-    <action>Set `{{completed_skill}}` = `retrospective-auto`</action>
+    <action>Collect from `{status_file}` for epic `{{epic_id}}`: done stories `{ story-key, title, test_pass_count, patch_count }`, epic title, dates if present.</action>
+    <action>Collect decision-log entries for epic `{{epic_id}}` (match `story` prefix `{{epic_id}}-` or `phase: autopilot:*` tagged to this epic). Identify open risks / carry-over notes from any story `notes`/`risks` fields or `workaround` decisions for this epic.</action>
+    <action>Ensure `{implementation_artifacts}/retrospectives/` exists. Read template `{{project_root}}/_Sprintpilot/templates/epic-retrospective.md`, fill mustache placeholders, write to `{implementation_artifacts}/retrospectives/epic-{{epic_id}}-retrospective.md`.</action>
+    <action>Update `{status_file}`: `epics.{{epic_id}}.status = done`, `.retrospective_path = <file>`, `.completed_at = {current_date}`.</action>
+    <action>Append decision-log entry: `{ category: workaround, decision: "retrospective generated inline", rationale: "retrospective_mode=auto", impact: low, phase: autopilot:retrospective, story: "epic-{{epic_id}}" }`.</action>
+    <action>Mark retrospective task → `completed`. Set `{{completed_skill}}` = `retrospective-auto`.</action>
   </check>
 
   <check if="{{retrospective_mode}} is stop">
-    <!-- Pause autopilot so user can run /bmad-retrospective interactively.
-         On the next /sprint-autopilot-on the resume logic in step 1 will
-         detect the cleared state and move to the next epic. -->
-    <action>Update `{state_file}`:
-      - `paused_at` = `epic-complete-awaiting-retrospective`
-      - `paused_epic_id` = `{{epic_id}}`
-      - `next_action` = "run /bmad-retrospective interactively for epic {{epic_id}}, then re-run /sprint-autopilot-on"
-    </action>
-    <action>Append decision-log entry:
-      `{ category: workaround, decision: "paused for interactive retrospective", rationale: "autopilot.retrospective_mode=stop", impact: low, phase: autopilot:retrospective, story: "epic-{{epic_id}}" }`
-    </action>
-    <action>Mark retrospective task → `completed` (handed off to user)</action>
-    <action>Report:
-    ```
-    Autopilot paused — epic {{epic_id}} complete, retrospective handed off.
-
-    Per `autopilot.retrospective_mode: stop` in
-    _Sprintpilot/modules/autopilot/config.yaml, autopilot does not run the
-    retrospective automatically.
-
-    To continue:
-      1. Run `/bmad-retrospective` interactively for epic {{epic_id}}
-      2. When done, run `/sprint-autopilot-on` to resume with the next epic
-
-    State saved to: {state_file}
-    ```
-    </action>
-    <action>STOP</action>
+    <action>Update `{state_file}`: `paused_at = epic-complete-awaiting-retrospective`, `paused_epic_id = {{epic_id}}`, `next_action = "run /bmad-retrospective interactively for epic {{epic_id}}, then re-run /sprint-autopilot-on"`.</action>
+    <action>Append decision-log entry: `{ category: workaround, decision: "paused for interactive retrospective", rationale: "retrospective_mode=stop", impact: low, phase: autopilot:retrospective, story: "epic-{{epic_id}}" }`. Mark retrospective task → `completed`.</action>
+    <action>Report: "Autopilot paused — epic {{epic_id}} complete, retrospective handed off. Run `/bmad-retrospective` interactively for epic {{epic_id}}, then re-run `/sprint-autopilot-on`. State saved to: {state_file}." Then STOP.</action>
   </check>
 
   <check if="{{retrospective_mode}} is skip">
-    <!-- User opted out of retrospective. Record and move on. -->
-    <action>Update `{status_file}`:
-      - `epics.{{epic_id}}.status` = `done`
-      - `epics.{{epic_id}}.retrospective_path` = null
-      - `epics.{{epic_id}}.retrospective_skipped` = true
-      - `epics.{{epic_id}}.completed_at` = {current_date}
-    </action>
-    <action>Append decision-log entry:
-      `{ category: workaround, decision: "retrospective skipped", rationale: "autopilot.retrospective_mode=skip (NOT RECOMMENDED)", impact: medium, phase: autopilot:retrospective, story: "epic-{{epic_id}}" }`
-    </action>
-    <action>Mark retrospective task → `completed` (skipped)</action>
-    <action>Set `{{completed_skill}}` = `retrospective-skip`</action>
-    <action>Log: "Epic {{epic_id}} retrospective skipped per config — continuing with next epic"</action>
+    <action>Update `{status_file}`: `epics.{{epic_id}}.status = done`, `.retrospective_path = null`, `.retrospective_skipped = true`, `.completed_at = {current_date}`.</action>
+    <action>Append decision-log entry: `{ category: workaround, decision: "retrospective skipped", rationale: "retrospective_mode=skip (NOT RECOMMENDED)", impact: medium, phase: autopilot:retrospective, story: "epic-{{epic_id}}" }`. Mark retrospective task → `completed`. Set `{{completed_skill}}` = `retrospective-skip`.</action>
   </check>
 
-  <!-- GIT: Epic completion — suggest merge, cleanup worktrees -->
   <check if="{{git_enabled}}">
-    <action>**List all epic PR/MR URLs** from `{status_file}` for this epic's stories</action>
-    <action>Report:
-    ```
-    Epic complete — PR/MR summary:
-    {{#each epic_stories}}
-    - {{story-key}}: {{pr_url}}
-    {{/each}}
-
-    Ready to merge. Review PRs and confirm when ready.
-    ```
-    </action>
+    <action>**Epic PR summary** — list all epic PR/MR URLs from `{status_file}` and report as "Epic complete — PR/MR summary: [list]. Ready to merge — review PRs and confirm when ready."</action>
     <check if="{{cleanup_on_merge}} is true">
-      <action>**Cleanup worktrees** for completed stories:
-      For each story in this epic:
-        1. Check if worktree at `.worktrees/{{story-key}}` exists
-        2. Check if clean: `git -C .worktrees/{{story-key}} status --porcelain`
-        3. If clean → `git worktree remove .worktrees/{{story-key}}` + `git worktree prune`
-           Update `{git_status_file}` for this story: `worktree_cleaned: true`
-        4. If dirty → warn user, skip cleanup
-      </action>
-    </check>
-    <check if="{{cleanup_on_merge}} is false">
-      <action>Log: "Worktree cleanup skipped (git.worktree.cleanup_on_merge = false)"</action>
+      <action>**Cleanup worktrees** for completed stories. For each: if `.worktrees/{{story-key}}` exists, check cleanliness via `git -C .worktrees/{{story-key}} status --porcelain`. If clean → `git worktree remove` + `git worktree prune` and set `worktree_cleaned: true` in `{git_status_file}`. If dirty → warn and skip.</action>
     </check>
   </check>
 </check>
@@ -1041,21 +752,7 @@ Instruct: "Re-verify code review for story {{current_story}} — all patch findi
 
 <step n="8" goal="Save state and continue">
 
-<action>Update `{state_file}`:
-```yaml
-last_updated: {current_datetime}
-current_story: {{current_story}}
-current_bmad_step: {{current_bmad_step}}
-completed_skill: {{completed_skill}}
-next_skill: {{next_skill}}
-session_stories_done: {{session_stories_done}}
-stories_remaining: {{stories_remaining}}
-git_enabled: {{git_enabled}}
-platform: {{platform}}
-in_worktree: {{in_worktree}}
-pr_base: {{pr_base}}
-```
-</action>
+<action>Update `{state_file}` with STATE_FIELDS.</action>
 
 <goto step="2">Continue execution loop</goto>
 
@@ -1090,21 +787,7 @@ pr_base: {{pr_base}}
   </action>
 </check>
 
-<action>Update `{state_file}`:
-```yaml
-last_updated: {current_datetime}
-current_story: {{current_story}}
-current_bmad_step: {{current_bmad_step}}
-completed_skill: {{completed_skill}}
-next_skill: {{next_skill}}
-session_stories_done: {{session_stories_done}}
-stories_remaining: {{stories_remaining}}
-git_enabled: {{git_enabled}}
-platform: {{platform}}
-in_worktree: {{in_worktree}}
-pr_base: {{pr_base}}
-```
-</action>
+<action>Update `{state_file}` with STATE_FIELDS.</action>
 
 <action>Read `{decision_log_file}` — count medium/high decisions from this session's stories</action>
 
@@ -1154,133 +837,53 @@ No work will be repeated.
 <action>Run full test suite — report `N/N passed`</action>
 
 <!-- Generate project documentation after sprint completion -->
-<action>**Generate documentation** — create or update project README and docs.
-Invoke `bmad-document-project` skill to auto-generate documentation from the completed implementation.
-If the skill is not available or fails, generate a minimal README.md:
-- Project name and description (from product brief / PRD)
-- How to install (`npm install` / `pip install` / etc.)
-- How to run (`npm start` / the launch command)
-- How to test (`npm test`)
-- Architecture overview (from architecture doc if it exists)
+<action>**Resolve stack** — set `{{stack}}` = `{ name, install_cmd, run_cmd, test_cmd }` using the first successful source:
+
+  1. **`project-context.md`** (glob `**/project-context.md`, canonical `{output_folder}/project-context.md`) — extract from "Technology Stack & Versions" and any install/run/test subsections.
+  2. **`architecture.md`** (`{planning_artifacts}/architecture.md`) — extract from "Tech Stack" / "Runtime" / "Build & Deploy" / "Commands" sections.
+  3. **Manifest heuristics** — map manifest file → stack → idiomatic commands:
+
+  | Manifest | Stack | install / run / test |
+  |---|---|---|
+  | `package.json` | Node/JS/TS | `<pm> install` / `<pm> run start\|dev\|serve` (or `node <bin>`) / `<pm> test` — `<pm>` = `pnpm`/`yarn`/`bun`/`npm` by lockfile |
+  | `pyproject.toml`, `requirements.txt`, `setup.py` | Python | `pip install -r requirements.txt` (or `-e .`) / Django `python manage.py runserver` → Flask → FastAPI `uvicorn app:app` → `python main.py`/`app.py` / `pytest` |
+  | `go.mod` | Go | `go mod download` / `go run .` (or `./cmd/<name>`) / `go test ./...` |
+  | `Cargo.toml` | Rust | `cargo build` / `cargo run` (or `--bin <name>`) / `cargo test` |
+  | `pom.xml` | Java/Kotlin (Maven) | `mvn install` / `mvn spring-boot:run` or `mvn exec:java` / `mvn test` |
+  | `build.gradle(.kts)` | Java/Kotlin (Gradle) | `./gradlew build` / `./gradlew bootRun` or `run` / `./gradlew test` |
+  | `Gemfile` | Ruby | `bundle install` / `rails server` or `bundle exec ruby <entry>` / `bundle exec rspec` |
+  | `*.csproj`/`*.sln` | .NET | `dotnet restore` / `dotnet run` (or `--project`) / `dotnet test` |
+  | `composer.json` | PHP | `composer install` / `php artisan serve` (Laravel) or `php -S localhost:8000 -t public` / `vendor/bin/phpunit` |
+  | `mix.exs` | Elixir | `mix deps.get` / `mix phx.server` or `mix run --no-halt` / `mix test` |
+  | (none of the above) | Explicit launcher | `./run.sh`/`./run_gui.sh`/`./start.sh`, `make run\|start\|dev`, `docker compose up`, `docker build` + `docker run` |
+
+  4. **No match** — all fields `null`. Downstream omits the line; never guess.
+
+  Set `{{launch_cmd}}` = `{{stack.run_cmd}}`.
+  If `{{stack}}` came from (3) and `project-context.md` exists without stack info, log: "Consider running `bmad-generate-project-context` to capture stack commands."
 </action>
 
-<!-- GIT: Commit documentation and final artifacts to main -->
+<action>**Generate documentation** — invoke `bmad-document-project`. If unavailable or it fails, write a minimal README using `{{stack}}`: project name + description (from brief/PRD); install/run/test lines for each non-null `{{stack.*_cmd}}` (omit lines where null); architecture overview if `architecture.md` exists.</action>
+
 <check if="{{git_enabled}}">
-  <action>**Commit final artifacts and documentation to main**. Run each step; if an early step fails, STOP and log — don't proceed past a failed step. `git add` may fail for missing optional paths (`docs/`, `README.md`); ignore those path-specific errors. Failure of the final push should log a warning but not halt autopilot:
-  ```
-  git checkout -B {{base_branch}} origin/{{base_branch}}
-  git add _bmad-output/ README.md docs/
-  ```
-  Check if anything is staged: `git diff --cached --quiet`. If that exits non-zero, commit:
-  `git commit -m "docs: project documentation and final artifacts"`
-  Then: `git push origin {{base_branch}}`
+  <action>**Commit final artifacts + docs to main.**
+  1. `git checkout -B {{base_branch}} origin/{{base_branch}}`
+  2. `git add _bmad-output/ README.md docs/` (ignore missing-path errors)
+  3. If `git diff --cached --quiet` exits non-zero: `git commit -m "docs: project documentation and final artifacts"` then `git push origin {{base_branch}}` (warn on push failure).
   </action>
 </check>
 
-<action>Read `{status_file}` and collect:
-  - All completed stories grouped by epic, with their story titles
-  - Total story count, total epic count
-  - Final test count
-  - If git_enabled: all PR/MR URLs, patch counts, dismissed findings per story
-</action>
+<action>**Collect report data** from `{status_file}` (stories grouped by epic with titles, totals, final test count; PR/MR URLs, patch/dismissed counts per story if git_enabled) and `{decision_log_file}` (medium/high-impact decisions; counts of `review-accept`, `review-triage`, code-review rounds; per-story patches-applied / findings-dismissed).</action>
 
-<action>Read `{decision_log_file}` and collect:
-  - All decisions with impact `medium` or `high`
-  - Count of `review-accept` entries (patches applied)
-  - Count of `review-triage` entries (findings dismissed)
-  - Total review rounds (count of code-review invocations)
-  - Per-story summary: patches applied and findings dismissed
-</action>
-
-<action>Find the app launch command by checking (in order):
-  1. `run_gui.sh` or `run.sh` in the project root
-  2. `main.py` in the project root
-  3. Check `pyproject.toml`, `package.json`, or `setup.py` for scripts
-  Record as `{{launch_cmd}}`
-</action>
-
-<!-- GIT: Final worktree cleanup — safety net for any worktrees not cleaned during epic completion -->
 <check if="{{git_enabled}}">
-  <action>**Cleanup all remaining worktrees**:
-  Run: `git worktree list --porcelain`
-  For each worktree that is NOT the main worktree, run the following — log and continue on failure; some worktrees may already be gone:
-    `git worktree remove <path> --force`
-  Then: `git worktree prune`
-  </action>
-</check>
-
-<!-- GIT: Release lock -->
-<check if="{{git_enabled}}">
+  <action>**Cleanup remaining worktrees** (safety net): `git worktree list --porcelain` → for each non-main worktree: `git worktree remove <path> --force` then `git worktree prune` (log + continue on failure).</action>
   <action>Release lock: `node {{project_root}}/_Sprintpilot/scripts/lock.js release`</action>
 </check>
 
 <action>Delete `{state_file}` — sprint complete</action>
 <action>Mark master task "Sprintpilot — Full Sprint Execution" → `completed`</action>
 
-<action>Report (use exact format):
-```
-╔═══════════════════════════════════════════════════════════════╗
-║                   BMAD AUTOPILOT — REPORT                     ║
-╚═══════════════════════════════════════════════════════════════╝
-
-SUMMARY
-  Stories completed : {{done_count}}/{{total_stories}}
-  Epics completed   : {{done_epics}}/{{total_epics}}
-  Total tests       : {{N}}/{{N}} passed
-{{#if git_enabled}}
-  Platform          : {{platform}}
-{{/if}}
-
-STORIES
-{{#each epic}}
-  Epic {{epic_number}}: {{epic_title}}
-  {{#each stories}}
-  ✓ {{story-key}}  — {{test_count}} tests{{#if pr_url}}  PR: {{pr_url}}{{/if}}
-  {{/each}}
-{{/each}}
-{{#if remaining_stories}}
-  Not started:
-  {{#each remaining_stories}}
-  · {{story-key}}
-  {{/each}}
-{{/if}}
-
-DECISIONS REQUIRING REVIEW (high/medium impact)
-{{#each medium_high_decisions}}
-  #{{id}}  [{{impact}}] {{story}} / {{phase}}
-      {{decision}}
-      → {{rationale}}
-{{/each}}
-{{#if no_medium_high_decisions}}
-  None — all decisions were low-impact.
-{{/if}}
-
-  Full log: {decision_log_file}
-
-REVIEW FINDINGS APPLIED
-  Patches applied    : {{total_patches}}
-  Findings dismissed : {{total_dismissed}}
-  Review rounds      : {{total_review_rounds}}
-
-CODE REVIEW SUMMARY (per story)
-{{#each completed_stories}}
-  {{story-key}} : {{patches_applied}} patches applied, {{findings_dismissed}} dismissed
-{{/each}}
-
-WHAT TO DO NEXT
-  1. Review decisions marked medium/high above
-{{#if has_pr_urls}}
-  2. Merge open PRs: {{pr_urls_list}}
-{{/if}}
-{{#if launch_cmd}}
-  {{next_number}}. Run the app: {{launch_cmd}}
-{{/if}}
-  {{next_number}}. Manual smoke test checklist:
-{{#each completed_stories}}
-     · [{{story-key}}] {{smoke_test_suggestion}}
-{{/each}}
-```
-</action>
+<action>Read template `{{project_root}}/_Sprintpilot/templates/sprint-report.txt`, fill mustache placeholders with the collected data, and print the result verbatim as the final message.</action>
 
 </step>
 
