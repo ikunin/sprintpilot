@@ -430,14 +430,18 @@ Resolve:
   Detached HEAD is fine — `git worktree add` below creates a new branch from HEAD.
   </action>
 
+  <action>Run: `node {{project_root}}/_Sprintpilot/scripts/log-timing.js start --story "{{current_story}}" --phase "worktree.add" --project-root "{{project_root}}"` — ignore failures.</action>
   <action>**Create worktree.** Try: `git worktree add "{{project_root}}/.worktrees/{{current_story}}" -b "{{branch_prefix}}{{branch_name}}" 2>&1`. If it fails because the branch already exists, retry without `-b`: `git worktree add "{{project_root}}/.worktrees/{{current_story}}" "{{branch_prefix}}{{branch_name}}" 2>&1`.
 
   If both fail (disk/permissions): log "WARN: worktree add failed — continuing without isolation", set `{{in_worktree}}` = false, and fall back to branch-only mode: `git checkout -b {{branch_prefix}}{{branch_name}}` (retry without `-b` if branch exists). HALT only if the checkout also fails. Git push/PR still work on the branch.
   </action>
+  <action>Run: `node {{project_root}}/_Sprintpilot/scripts/log-timing.js end --story "{{current_story}}" --phase "worktree.add" --project-root "{{project_root}}"` — ignore failures.</action>
 
   <check if="worktree add succeeded">
     <action>`cd {{project_root}}/.worktrees/{{current_story}}`. All subsequent commands run from here. Set `{{worktree_path}}` = this path.</action>
+    <action>Run: `node {{project_root}}/_Sprintpilot/scripts/log-timing.js start --story "{{current_story}}" --phase "worktree.submodule-init" --project-root "{{project_root}}"` — ignore failures.</action>
     <action>**Init submodules** if `.gitmodules` exists (check with your file-exists tool or `node -e "process.exit(require('fs').existsSync('.gitmodules')?0:1)"`). Run `git submodule update --init --recursive` (~30s). On failure/hang: warn "Submodule init failed (may need auth). Continuing." and proceed.</action>
+    <action>Run: `node {{project_root}}/_Sprintpilot/scripts/log-timing.js end --story "{{current_story}}" --phase "worktree.submodule-init" --project-root "{{project_root}}"` — ignore failures.</action>
     <action>Set `{{in_worktree}}` = true</action>
   </check>
   <action>Update `{state_file}` (write to the worktree copy since cwd is now the worktree)</action>
@@ -447,7 +451,14 @@ Resolve:
 
 <!-- Autopilot menu handling rules apply — see AUTOPILOT RULES section above -->
 
+<!-- PHASE TIMING: emit start/end around every skill invocation.
+     Use `{{current_story}}` when set, else the sentinel `sprint` for
+     sprint-level skills (bmad-help, bmad-sprint-planning, etc).
+     The script is a silent no-op when autopilot.phase_timings is false. -->
+<action>Set `{{timing_story}}` = `{{current_story}}` if non-empty, else `sprint`.</action>
+<action>Run: `node {{project_root}}/_Sprintpilot/scripts/log-timing.js start --story "{{timing_story}}" --phase "skill.{{next_skill}}" --project-root "{{project_root}}"` — ignore failures.</action>
 <action>INVOKE `{{next_skill}}` skill using the Skill tool</action>
+<action>Run: `node {{project_root}}/_Sprintpilot/scripts/log-timing.js end --story "{{timing_story}}" --phase "skill.{{next_skill}}" --project-root "{{project_root}}"` — ignore failures.</action>
 <action>Mark task "{{next_skill}}" as `completed`</action>
 
 <goto step="4">Handle completion</goto>
@@ -458,7 +469,9 @@ Resolve:
 <step n="4" goal="Handle skill completion and route to next action">
 
 <check if="{{completed_skill}} was bmad-dev-story">
+  <action>Run: `node {{project_root}}/_Sprintpilot/scripts/log-timing.js start --story "{{current_story}}" --phase "tests.run" --project-root "{{project_root}}"` — ignore failures.</action>
   <action>Verify tests ran — if not, run them now: report `N/N passed`</action>
+  <action>Run: `node {{project_root}}/_Sprintpilot/scripts/log-timing.js end --story "{{current_story}}" --phase "tests.run" --project-root "{{project_root}}"` — ignore failures.</action>
   <action>**Log decisions** — review implementation choices made during dev-story and append entries to `{decision_log_file}` for any architecture, test-strategy, dependency, scope, or workaround decisions (see DECISION LOGGING section)</action>
 
   <!-- GIT: Lint, stage, and commit after dev-story -->
@@ -476,7 +489,9 @@ Resolve:
     - `{patch-title}` → from review finding title, fallback to "code review fix"
     Read the commit template from `git.commit_templates.story` in config (default: `feat({epic}): {story-title} ({story-key})`).
     Then run:
-    `node {{project_root}}/_Sprintpilot/scripts/stage-and-commit.js --message "feat({{epic}}): {{story-title}} ({{current_story}})" --allowlist {{project_root}}/_Sprintpilot/.secrets-allowlist`
+    `node {{project_root}}/_Sprintpilot/scripts/log-timing.js start --story "{{current_story}}" --phase "git.commit" --project-root "{{project_root}}"` (ignore failures), then
+    `node {{project_root}}/_Sprintpilot/scripts/stage-and-commit.js --message "feat({{epic}}): {{story-title}} ({{current_story}})" --allowlist {{project_root}}/_Sprintpilot/.secrets-allowlist`, then
+    `node {{project_root}}/_Sprintpilot/scripts/log-timing.js end --story "{{current_story}}" --phase "git.commit" --project-root "{{project_root}}"` (ignore failures).
     Output: commit SHA. Set `{{story_commit}}` = output.
     Warnings (secrets, large files) printed to stderr — review but don't halt unless user says to.
     </action>
@@ -603,10 +618,12 @@ For any finding that is DISMISSED (contradicts AC or is a false positive):
 <action>Mark "[story] Apply patches" → `completed`</action>
 
 <!-- Re-run code review to sync sprint-status.yaml — patches resolved all findings, so code-review will now set story to done -->
+<action>Run: `node {{project_root}}/_Sprintpilot/scripts/log-timing.js start --story "{{current_story}}" --phase "skill.bmad-code-review.rereview" --project-root "{{project_root}}"` — ignore failures.</action>
 <action>Re-invoke `bmad-code-review` using the Skill tool.
 The review layers already ran — this pass will see zero unresolved findings and set the story status to `done` in sprint-status.yaml (code-review owns that transition per step-04-present.md:92).
 Instruct: "Re-verify code review for story {{current_story}} — all patch findings have been applied. Update story status accordingly."
 </action>
+<action>Run: `node {{project_root}}/_Sprintpilot/scripts/log-timing.js end --story "{{current_story}}" --phase "skill.bmad-code-review.rereview" --project-root "{{project_root}}"` — ignore failures.</action>
 <action>Mark task "code-review-verify" → `completed`</action>
 
 <goto step="7">Mark story done</goto>
@@ -789,6 +806,9 @@ Instruct: "Re-verify code review for story {{current_story}} — all patch findi
 
 <action>Update `{state_file}` with STATE_FIELDS.</action>
 
+<!-- Phase-timing session snapshot (no-op if autopilot.phase_timings is false). -->
+<action>Run: `node {{project_root}}/_Sprintpilot/scripts/summarize-timings.js --session-only --format md --quiet --project-root "{{project_root}}"` — ignore failures. The stdout line is the artifact path; include it in the checkpoint report if non-empty.</action>
+
 <action>Read `{decision_log_file}` — count medium/high decisions from this session's stories</action>
 
 <action>Report to user:
@@ -835,6 +855,9 @@ No work will be repeated.
 
 <action>Verify: all stories `done`, all retrospectives `done` in `{status_file}`</action>
 <action>Run full test suite — report `N/N passed`</action>
+
+<!-- Final phase-timing hotspot report (no-op if autopilot.phase_timings is false). -->
+<action>Run: `node {{project_root}}/_Sprintpilot/scripts/summarize-timings.js --format md --quiet --project-root "{{project_root}}"` — ignore failures. The stdout line is the artifact path; include it in the sprint report if non-empty.</action>
 
 <!-- Generate project documentation after sprint completion -->
 <action>**Resolve stack** — set `{{stack}}` = `{ name, install_cmd, run_cmd, test_cmd }` using the first successful source:

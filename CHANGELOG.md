@@ -1,5 +1,23 @@
 # Changelog
 
+## [Unreleased]
+
+**PR 2 of 12 — M0 phase-timing instrumentation**
+
+Emits per-phase duration measurements so subsequent optimizations (PRs 3–12) can be validated against a real baseline instead of estimated percentages.
+
+### Added
+- `_Sprintpilot/scripts/log-timing.js` — append-only JSONL writer. Path-traversal-guarded `--story` / `--phase` arg validation, 2 KB cap on `--meta`, 4 KB cap on the full line so a single POSIX `write()` is atomic. Silently no-ops when the resolved `autopilot.phase_timings` is not `true`. Shard-per-story model (one sub-agent = one writer).
+- `_Sprintpilot/scripts/summarize-timings.js` — reads `.timings/<story>.jsonl` shards, pairs `start`/`end` events per story + phase, emits a hotspot report (phases consuming > 5% of total paired time). Formats: text (stdout), json (stdout), md (artifact + stdout). `--session-only` writes `summary-session-<ts>.md`; default writes `summary-<YYYY-MM-DD>.md`.
+- 40 new unit tests (23 in `log-timing.test.ts`, 17 in `summarize-timings.test.ts`), including a race-free subprocess append test (24 parallel writers to the same shard, all 24 lines present).
+
+### Changed
+- `_Sprintpilot/modules/autopilot/profiles/_base.yaml`: `phase_timings: true` default (was false). `legacy` profile stays `false` (explicit in `legacy.yaml`) to preserve v1.0.5 byte-for-byte behavior.
+- `_Sprintpilot/skills/sprint-autopilot-on/workflow.md`: wrapped the primary skill `INVOKE` site, the code-review re-invoke, worktree add / submodule-init, test verification, and `git.commit` with `log-timing.js start` / `end` hooks. Session checkpoint calls `summarize-timings.js --session-only`; sprint complete calls the full summarizer.
+
+### Rollback
+- Set `autopilot.phase_timings: false` in `_Sprintpilot/modules/autopilot/config.yaml`, or switch to `complexity_profile: legacy`. All instrumentation becomes a silent no-op.
+
 ## [2.0.0] - 2026-04-23
 
 **Major release: Adaptive Process Scaling — PR 1 of 12 (Foundation)**
