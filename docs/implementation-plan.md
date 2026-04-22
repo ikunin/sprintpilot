@@ -99,32 +99,88 @@ Total estimate: **~23–28 engineer-days** sequential. Phases 1–3 (PRs 1–8) 
 - `package.json` — bump version to `2.0.0`; update description if referencing "autopilot only"
 - `CHANGELOG.md` — v2.0.0 entry explaining breaking behavior + `legacy` escape hatch
 
-**Profile YAML shape (identical across snapshots, values differ):**
+**Profile YAML shape — base + overlay (DRY).** `profiles/_base.yaml` carries every default. Per-profile YAMLs override **only** the keys that differ. `resolve-profile.js` reads `_base.yaml` first, then overlays the named profile. New knobs added in future PRs need one edit to `_base.yaml` + at most one per differing profile. No `settings:` wrapper — profile files match `config.yaml` shape directly so the resolver doesn't need to unwrap.
 
 ```yaml
-# _Sprintpilot/modules/autopilot/profiles/<name>.yaml
-name: medium
-version_pinned: null      # only set on legacy.yaml
-settings:
-  autopilot:
-    implementation_flow: full        # full | quick
-    session_story_limit: 5
-    retrospective_mode: auto
-    phase_timings: true              # M0, PR 2
-    coalesce_state_writes: true      # M3, PR 6
-    conditional_boot_work: true      # M4, PR 7
-    cache_shared_reads: true         # M5, PR 8
-  git:
-    granularity: story               # story | epic
-    worktree:
-      enabled: true
-    squash_on_merge: false
-  ma:
-    parallel_stories: false
-    max_parallel_stories: 2
-    parallel_epics: false
-    state_sharding: false
+# _Sprintpilot/modules/autopilot/profiles/_base.yaml
+name: _base
+version_pinned: null
+autopilot:
+  implementation_flow: full          # full | quick
+  session_story_limit: 5
+  retrospective_mode: auto
+  phase_timings: true                # M0, PR 2
+  coalesce_state_writes: true        # M3, PR 6
+  conditional_boot_work: true        # M4, PR 7
+  cache_shared_reads: true           # M5, PR 8
+git:
+  granularity: story                 # story | epic
+  worktree:
+    enabled: true
+  squash_on_merge: false
+ma:
+  parallel_stories: false
+  max_parallel_stories: 2
+  parallel_epics: false
+  state_sharding: false
 ```
+
+```yaml
+# _Sprintpilot/modules/autopilot/profiles/nano.yaml — only the deltas
+name: nano
+autopilot:
+  implementation_flow: quick
+  session_story_limit: 0
+  retrospective_mode: skip
+git:
+  granularity: epic
+  worktree:
+    enabled: false
+  squash_on_merge: true
+```
+
+```yaml
+# _Sprintpilot/modules/autopilot/profiles/large.yaml — only the deltas
+name: large
+autopilot:
+  session_story_limit: 3
+  retrospective_mode: stop
+  conditional_boot_work: false       # always run full reconciliation
+ma:
+  parallel_stories: true
+  max_parallel_stories: 3
+  state_sharding: true
+```
+
+`small.yaml` and `medium.yaml` may be near-empty (matching `_base` exactly) — still present so `--profile small` and `--profile medium` resolve identically.
+
+```yaml
+# _Sprintpilot/modules/autopilot/profiles/legacy.yaml
+name: legacy
+version_pinned: "v1.0.5"
+# Legacy pins all v1.x-compatible defaults. Explicitly duplicated (not via base)
+# so future changes to _base.yaml cannot silently affect legacy behavior.
+autopilot:
+  implementation_flow: full
+  session_story_limit: 3
+  retrospective_mode: auto
+  phase_timings: false
+  coalesce_state_writes: false
+  conditional_boot_work: false
+  cache_shared_reads: false
+git:
+  granularity: story
+  worktree:
+    enabled: true
+  squash_on_merge: false
+ma:
+  parallel_stories: false
+  max_parallel_stories: 2
+  parallel_epics: false
+  state_sharding: false
+```
+
+**`legacy` forward-compatibility guarantee (I9).** The `legacy` profile MUST produce a behavior that is a superset of v1.0.5's output — no new files in `_bmad-output/`, no new git-config changes, no new artifact schemas. Future PRs that introduce new artifacts (shards, timings, etc.) MUST gate them on non-legacy profiles. CI includes a `tests/e2e/profile-legacy-v1-parity.test.ts` that asserts a `legacy` sprint produces a file-and-schema superset match against a pre-v2 snapshot. If a future PR would break this, the PR is rejected or the feature is explicitly made legacy-incompatible in CHANGELOG.
 
 **`resolve-profile.js` contract:**
 
@@ -139,13 +195,17 @@ Commands:
 Behavior:
   1. Load _Sprintpilot/modules/autopilot/config.yaml — read complexity_profile
      MISSING KEY → default "medium" + log one-time migration notice to stderr
-  2. Load profiles/<profile>.yaml — base defaults
+  2. Load profiles/_base.yaml first; then overlay profiles/<profile>.yaml
+     (legacy.yaml ignores _base and stands alone — see forward-compat guarantee)
   3. Load _Sprintpilot/modules/{autopilot,git,ma}/config.yaml — user overrides win
   4. Deep-merge using the following semantics:
-     - Leaf values: user-override wins, else profile default, else "undefined" (caller handles)
+     - All YAMLs share the same shape (no `settings:` wrapper), so merge is
+       straightforward object merge at every level
+     - Leaf values: user-override wins, else profile overlay, else base, else undefined
      - Objects: merge keys recursively
-     - Null user-override: explicit "unset" — falls back to profile default (distinct from missing key)
-     - Arrays: no merge; user-override replaces entirely (avoids ambiguous concat semantics)
+     - Null user-override: explicit "unset" — falls back to profile default
+       (distinct from missing key, which just means "no override")
+     - Arrays: no merge; user-override replaces entirely
   5. Emit resolved config
 
 Reuses: readYaml() from lib/core/bmad-config.js:5-24
@@ -231,21 +291,19 @@ The per-story 7-step BMad cycle is mandatory for `small`, `medium`, `large`, and
 The policy in this file is enforced by `_Sprintpilot/skills/sprint-autopilot-on/workflow.md`, which reads the resolved profile via `_Sprintpilot/scripts/resolve-profile.js`.
 ```
 
-**Upgrade migration (via `sprintpilot-update` skill).**
+**Upgrade migration — three paths, all safe.**
 
-Existing installs have no `complexity_profile` key. Users who run `sprintpilot update` (the current supported upgrade path) get prompted:
+Users upgrade via one of three mechanisms. The plan must handle each:
 
-```
-Sprintpilot v2 introduces complexity profiles. Your install currently has no
-profile set, so behavior is implicitly "medium" (matches current behavior).
+1. **`npm i -g @ikunin/sprintpilot@latest`** — the majority path. npm doesn't invoke Sprintpilot's own update skill; it just replaces files. For these users, the **missing-key default** in `resolve-profile.js` (treating absent `complexity_profile` as `medium`) is the entire migration. `medium`'s defaults match v1.0.5 behavior byte-for-byte; nothing changes until the user explicitly opts in.
 
-Pick a profile now to get the v2 benefits:
-  1) Keep implicit medium (no change — recommended for upgrade continuity)
-  2) Switch to nano, small, large, or legacy
-[1]:
-```
+2. **`sprintpilot update`** (the skill-driven path) — minority. The update skill runs `check-prereqs.js`, notes that `complexity_profile` is absent, and emits a one-line log: `"Implicit medium profile active; run 'sprintpilot install --profile <name>' to opt into a different profile."` No interactive prompt — prompting here would surprise scripted workflows. Users who want a different profile re-run install.
 
-If the user selects option 1, nothing is written; behavior stays identical. If the user selects option 2, `complexity_profile: <name>` is written to `_Sprintpilot/modules/autopilot/config.yaml` via the existing regex patch pattern. This ensures no silent migration — every change is user-affirmed. A `--profile <name>` flag on `sprintpilot update` allows non-interactive upgrades for CI.
+3. **Fresh install** (`sprintpilot install` on a clean project) — goes through the new profile prompt in this PR.
+
+**Postinstall banner (npm path).** `package.json` gets a `postinstall` hook that prints the same one-liner the update skill emits when v2 is installed on top of v1. A `SPRINTPILOT_NO_POSTINSTALL=1` env var silences it for CI. This is the only mechanism that reaches npm-upgrading users.
+
+**No prompt-based migration.** We deliberately do **not** prompt for profile selection on upgrade. Rationale: prompting would surprise scripted CI upgrades (`npm i` inside a build pipeline) and the behavior-preserving default makes the prompt unnecessary for anyone who just wants their current setup to keep working. Users who want v2's new features run `sprintpilot install --profile <name>` explicitly.
 
 **Tests (Vitest, mirror `tests/unit/autopilot-config.test.ts` pattern):**
 
@@ -441,12 +499,16 @@ All operations are single-writer per story-key — no locking needed.
 
 ```yaml
 story: <key>
-updated_at: "2026-04-23T14:22:05.123456789Z"   # written on every update; merge tiebreaker
+updated_at:
+  wall: "2026-04-23T14:22:05.123Z"       # ISO8601 millisecond precision (Node's toISOString)
+  monotonic: "4127891234567"             # process.hrtime.bigint() as string; merge tiebreaker
 schema_version: 1
 # … arbitrary user fields
 ```
 
-**Merge tiebreaker (addresses the earlier gap).** `merge-shards.js` picks the shard with max(`updated_at`) per key. Nanosecond precision ensures deterministic ordering even for writes within the same second. If `updated_at` is missing from a shard (corrupt/legacy), that shard is treated as invalid (see recovery below).
+**Merge tiebreaker (addresses the earlier gap).** `merge-shards.js` picks the shard with max(`updated_at.monotonic`) per key. Node's `process.hrtime.bigint()` returns nanosecond-precision monotonic ticks — not wall-clock but strictly increasing within a process, which is exactly what we need for tiebreaking. For merges across sessions (different processes), we fall back to `updated_at.wall` millisecond ordering; ties within a millisecond across sessions are extraordinarily rare and are resolved alphabetically by shard filename. If `updated_at` is missing from a shard (corrupt/legacy), that shard is treated as invalid (see recovery below).
+
+Rationale for the split: monotonic time is safe from NTP slew and clock drift — critical when parallel sub-agents race to write — but not meaningful across process restarts. Wall-clock time is meaningful cross-process but vulnerable to clock changes. Storing both lets the merger use the right tool for each case.
 
 **Partial-YAML crash recovery — full state machine:**
 
@@ -698,9 +760,8 @@ Commit batching: currently workflow.md commits artifacts multiple times per stor
 | `current_bmad_step` | Same — step granularity determines whether to re-invoke a skill on resume |
 | `in_worktree` | If true on resume, autopilot must `cd` into the worktree before any subsequent action |
 | `patch_commits` (step 6) | Mid-patch-loop recovery — each patch commit SHA must be persisted so a crash doesn't leave orphaned commits |
-| `lock holder` (lock.js acquire result) | Must be visible immediately so concurrent sessions detect the lock |
 
-All other fields (test counts, completion notes, file lists, timing metadata, non-critical decision-log entries) coalesce to one write per story boundary.
+All other fields (test counts, completion notes, file lists, timing metadata, non-critical decision-log entries) coalesce to one write per story boundary. (Note: the `.autopilot.lock` file is managed by `lock.js` and lives outside `autopilot-state.yaml` entirely; coalescing does not affect it.)
 
 **nano.yaml / all profiles:** `coalesce_state_writes: true` default (except `legacy`).
 
@@ -858,6 +919,28 @@ This keeps all LLM interaction on the host-agent side and all sidecar authoring 
 
 **Default behavior when dependencies.yaml is absent:** linear chain from sprint-status order. Safe — no parallelism possible without explicit input. This preserves "no surprises": users opt in to parallelism by authoring dependencies.
 
+**Discoverability (M11).** A hand-authored sidecar is easy to miss in docs. PR 9 adds a scaffolding subcommand:
+
+```
+sprintpilot dependencies scaffold [--epic <id>] [--force]
+
+Writes _Sprintpilot/sprints/dependencies.yaml from sprint-status.yaml:
+  - Declares a linear chain by default (safest starting point)
+  - Adds commented-out "force_independent" examples the user can uncomment
+  - Refuses to overwrite an existing file unless --force
+```
+
+The installer's post-install success message (for medium/large profiles) mentions the command:
+
+```
+✓ Sprintpilot installed with profile: medium
+
+Parallel story execution is available. To enable:
+  1) sprintpilot dependencies scaffold --epic 1
+  2) Edit _Sprintpilot/sprints/dependencies.yaml (uncomment independent stories)
+  3) Set parallel_stories: true in _Sprintpilot/modules/ma/config.yaml
+```
+
 **Tests:**
 
 - Unit: DAG for known fixture (3 stories, 1 dep) produces correct layers
@@ -964,17 +1047,25 @@ At sprint complete (step 10, line ~828):
 
 **Tests:**
 
-- Integration: clone a repo with 1 submodule, create 3 worktrees, measure submodule init time before/after change — assert new is < 5s per worktree
+- Integration: clone a repo with 1 submodule, create 3 worktrees, measure submodule init time before/after change — assert new is <= 30% of baseline per worktree
 - Unit: `with-retry.js` retries on simulated ref-lock error, gives up after 3 tries, doesn't retry on unrelated errors
 - Unit: `submodule-lock.js` serializes concurrent acquire/release pairs
+- Fixture: create `tests/e2e/fixtures/with-submodule/` — minimal git repo + one submodule (another tiny local repo). Fixture setup script creates both. Existing test fixtures have no submodules, so this is new.
+
+**Additional files created (fixture):**
+
+- `tests/e2e/fixtures/with-submodule/` — directory with `.gitmodules`, one submodule pointing at a sibling fixture repo
+- `tests/e2e/fixtures/with-submodule/setup.sh` — reproducible initialization script
+- `tests/unit/worktree-path-audit.test.ts` — scans workflow.md + scripts for any call that treats `<worktree>/.git` as a directory (catches regressions of M7)
 
 **Acceptance criteria:**
 
-- [ ] Submodule init time per worktree drops measurably on a repo with submodules
-- [ ] `gc.auto` disabled during session, restored at end (verified by `git config --get`)
+- [ ] Submodule init time per worktree drops measurably (target: <= 30% of baseline) on the with-submodule fixture
+- [ ] `gc.auto` disabled during session in **main repo and every worktree**, restored symmetrically at end (verified by `git -C <dir> config --get gc.auto`)
 - [ ] Ref-lock retry succeeds on transient contention (simulated in test)
 - [ ] Per-submodule lock serializes concurrent submodule updates
 - [ ] Worktree-less profiles (nano) unaffected
+- [ ] Worktree-path audit test passes (no code treats worktree's `.git` as a dir)
 
 **Rollback.** Revert the PR. Older workflows continue to init submodules the slow way; the retry wrapper is a no-op if not invoked.
 
@@ -1018,18 +1109,36 @@ Output (stdout, JSON):
   {
     "host": "claude-code" | "cursor" | "aider" | ... | "unknown",
     "supports_parallel": true | false,
-    "detection_reason": "<human-readable>"
+    "detection_reason": "<human-readable>",
+    "confidence": "high" | "medium" | "low"
   }
 
-Detection heuristics:
-  1. Presence of .claude-code/ or .claude/skills/ → claude-code, parallel = true
-  2. Presence of .cursor/ → cursor, parallel = false
-  3. CLINE_* env → cline, parallel = false
-  4. (other markers per tool-registry.js)
-  Unknown → treat as parallel = false.
+Detection priority (first match wins):
+  1. Env vars set by the running host (HIGH confidence):
+     - CLAUDECODE=1 or CLAUDE_CODE_SESSION_ID        → claude-code
+     - CURSOR_SESSION_ID or CURSOR_TRACE_ID          → cursor
+     - WINDSURF_SESSION                              → windsurf
+     - AIDER_SESSION or AIDER_HISTORY_FILE set       → aider
+     - CLINE_* env                                   → cline
+  2. Parent process name (MEDIUM confidence):
+     - parent == "claude"        → claude-code
+     - parent == "cursor-agent"  → cursor
+     - parent == "aider"         → aider
+  3. Filesystem markers as last resort (LOW confidence — flagged):
+     - .claude/skills/ AND .claude-code/ AND env unset
+       → claude-code, low confidence — but still supports_parallel=false
+       because filesystem markers prove install target, not current host
+
+Tautology guard: Sprintpilot install artifacts (.claude/skills/ etc.)
+are insufficient evidence on their own. Detection returning confidence=low
+forces supports_parallel=false regardless of which host the markers suggest.
+
+Unknown or low confidence → supports_parallel=false.
 ```
 
-workflow.md calls this before dispatch-layer.js and falls back to sequential if `supports_parallel: false`.
+workflow.md calls this before dispatch-layer.js and falls back to sequential if `supports_parallel: false` **or** `confidence: low`.
+
+**Why this matters (C7 rationale).** The filesystem markers a previous review caught as tautological (`.claude/skills/` existing because install was run for Claude Code, not because Claude Code is the current host) are now explicitly demoted to low-confidence evidence that never triggers parallelism. Only env vars — which the currently-running host actually sets — can enable parallel mode.
 
 **Workflow.md step 2 change (conceptual):**
 
@@ -1142,7 +1251,15 @@ multi_agent:
 ```
 preflight-merge.js --epics <id1,id2,...> --base <branch>
 
-Startup cleanup (always runs):
+Lock acquisition (addresses race window — M13):
+  - Acquire via: node lock.js acquire --file .sprintpilot/preflight.lock
+  - Only one preflight runs at a time across the project
+  - If lock held: wait up to 60s, then fail with clear error
+  - Release via lock.js at end in finally block, even on SIGKILL via
+    stale-lock detection on next run (30-minute TTL; preflight never
+    exceeds this)
+
+Startup cleanup (always runs AFTER lock acquired):
   - If __sprintpilot_preflight branch exists from a prior crashed run:
       git checkout <base> 2>/dev/null
       git branch -D __sprintpilot_preflight 2>/dev/null
@@ -1158,8 +1275,10 @@ For each pair:
 
 Returns JSON: { safe_pairs: [["1","3"]], conflict_pairs: [["2","4"]] }
 
-Cleanup is guaranteed even on exception — preflight wraps each pair
-in try/finally so the throwaway branch never persists.
+Cleanup is guaranteed via two layers:
+  - try/finally for normal exit paths
+  - lock.js stale-lock + startup cleanup for SIGKILL/crash paths
+  Next preflight invocation detects and removes leftover state.
 ```
 
 **Workflow.md cross-epic dispatch (high level):**
@@ -1203,7 +1322,13 @@ in try/finally so the throwaway branch never persists.
   - `tests/e2e/profile-rollback.test.ts` (PR 1) — install with nano, switch to legacy, verify byte-identical behavior to pre-v2 fixture
   - `tests/e2e/aider-smoke.test.ts` (PR 11) — install + single-story sequential run on Aider (open-source, scriptable). Proves the sequential-fallback path works on a non-Claude-Code host.
 - **Regression guards** — every PR that changes workflow.md must keep existing e2e tests (`greenfield.test.ts`, `brownfield.test.ts`) passing unchanged. Any intentional behavioral change in those tests is a red flag.
-- **Multi-host CI matrix.** Claude Code is the primary test host. Aider is the canary for non-Claude-Code hosts (open source, no UI, easy to run headless). CI runs both for any PR touching `workflow.md` or `agent-adapter.js`. Other 7 hosts stay manual-test territory until someone runs into a regression.
+- **Multi-host CI matrix.** Claude Code is the primary test host. Aider is the canary for non-Claude-Code hosts (open source, no UI, easy to run headless). CI runs both for any PR touching `workflow.md`, `agent-adapter.js`, or any profile YAML. Other 7 hosts stay manual-test territory until someone runs into a regression.
+- **Aider CI model choice.** Aider runs with **Anthropic Sonnet** (`--model anthropic/claude-sonnet-4-6` or current stable ID) in CI. Rationale: Sonnet is Aider's most reliable editing model for complex multi-file edits and tracks Claude Code closely, so a Sonnet-backed Aider run is the closest proxy to Claude Code behavior we can get. Setup via `ANTHROPIC_API_KEY` as a repo-level CI secret.
+- **CI budget.** Each Aider smoke run should consume < 100K total tokens (one fixture story, single epic). At current Sonnet pricing that's well under $1/run. CI caps runs: one per PR push. The `aider-smoke.test.ts` skips (`it.skipIf`) if `ANTHROPIC_API_KEY` is absent — a branch with the key missing logs "skipped — no API key" rather than failing, so external contributors don't get blocked by a missing secret.
+- **CI gating policy (I14).**
+  - **Claude Code tests**: must pass, always.
+  - **Aider smoke test**: must pass when `ANTHROPIC_API_KEY` is available; skipped (not failed) when the secret is absent.
+  - **Aider flakes**: if Aider fails on grounds unrelated to the PR (Aider version bump breaks something, model deprecation, etc.), the PR author files a tracking issue (`aider-ci-flake`), marks the test as `it.skip` with a reference to the issue, and ships. The test is un-skipped when the flake is fixed. This prevents Aider's own reliability from blocking Sprintpilot work while keeping the regression gate in place for legitimate failures.
 - **Tool-agnostic correctness claim.** Sprintpilot's correctness doesn't depend on which host agent runs. Running against two real hosts (Claude Code for parallel, Aider for sequential) is the integration test. We do not mock host agents.
 
 ### Decision log during implementation
@@ -1238,6 +1363,19 @@ Each PR updates:
 - `docs/CONFIGURATION.md` — if the PR adds config keys
 - `docs/USAGE.md` — if the PR changes user-visible flow (PRs 1, 4, 5, 11)
 - `AGENTS.md` — if the PR changes the BMad flow contract (PRs 1, 4)
+
+**Concept doc caveat (C8).** Before v2.1.0 ships (PRs 9–11), `docs/adaptive-process-scaling.md` §10 (time-reduction table) MUST be annotated: parallelism rows are marked "Claude Code only; other hosts run sequentially" in both the header and inline row notes. Same note goes into §7 (Parallelism design) where `parallel_stories: true` is described. Without this, non-Claude-Code users reasonably expect wall-clock reductions that won't materialize and perceive the promise as broken.
+
+### v1 deprecation policy (M12)
+
+v2.0.0 is a major version bump; users on `^1.x` semver stay pinned. The deprecation policy is:
+
+| Version | Status | Support through |
+|---|---|---|
+| v1.0.x | maintenance | 2026-10-31 — security fixes + critical bug fixes only; no new features |
+| v2.0.x | active | 18 months after v3.0.0 release |
+
+Documented in `CHANGELOG.md` v2.0.0 entry and the GitHub repo README. Users on v1 who want v2 features migrate by running `npm i -g @ikunin/sprintpilot@latest` + `sprintpilot install --profile <name>`.
 
 ### Failure playbook
 
@@ -1336,12 +1474,13 @@ Recommended release cadence: ship PRs 1–8 as one release (foundation + nano + 
 **New files** (~17 scripts + ~14 tests + 5 profile YAMLs + 2 docs):
 
 ```
+_Sprintpilot/modules/autopilot/profiles/_base.yaml       (DRY base, PR 1)
 _Sprintpilot/modules/autopilot/profiles/nano.yaml
 _Sprintpilot/modules/autopilot/profiles/small.yaml
 _Sprintpilot/modules/autopilot/profiles/medium.yaml
 _Sprintpilot/modules/autopilot/profiles/large.yaml
-_Sprintpilot/modules/autopilot/profiles/legacy.yaml
-_Sprintpilot/sprints/dependencies.yaml           (template)
+_Sprintpilot/modules/autopilot/profiles/legacy.yaml      (no _base extension)
+_Sprintpilot/sprints/dependencies.yaml                   (template)
 _Sprintpilot/scripts/resolve-profile.js
 _Sprintpilot/scripts/check-prereqs.js
 _Sprintpilot/scripts/log-timing.js
@@ -1369,6 +1508,10 @@ tests/e2e/nano-greenfield.test.ts
 tests/e2e/medium-parallel.test.ts
 tests/e2e/profile-rollback.test.ts
 tests/e2e/aider-smoke.test.ts
+tests/e2e/profile-legacy-v1-parity.test.ts
+tests/e2e/fixtures/with-submodule/                        (PR 10)
+tests/e2e/fixtures/with-submodule/setup.sh                (PR 10)
+tests/unit/worktree-path-audit.test.ts                    (PR 10)
 docs/implementation-decisions.md
 ```
 
@@ -1451,4 +1594,29 @@ First-pass plan (committed as `9c8f870`) had gaps surfaced by adversarial review
 | M9 — no path-traversal validation | PRs 2, 3 add input-regex validation on `--story`/`--phase` args |
 
 Appendix preserved as a change-log so reviewers of this plan can audit what changed between revisions.
+
+---
+
+## Appendix D — Changes applied after second adversarial review
+
+Revision `a365aa8` had second-round findings. This revision addresses all of them.
+
+| ID | Fix applied in |
+|---|---|
+| C7 — agent-adapter filesystem detection tautological | PR 11 rewrites detection priority: env vars (high confidence) → parent process (medium) → filesystem (low, never enables parallel). Install artifacts can't masquerade as running-host evidence |
+| C8 — concept doc's time-reduction table misleading for non-CC hosts | Added explicit requirement: concept doc §10 and §7 annotated with "Claude Code only; other hosts run sequentially" before v2.1.0 ships |
+| C9 — npm upgrade bypasses sprintpilot-update migration | Dropped the prompt-based migration entirely. Three paths documented: npm install (relies on missing-key default + postinstall banner), sprintpilot update skill (one-liner log), fresh install (prompt). No interactive prompt on upgrade — scripted CI upgrades preserved |
+| I9 — legacy forward-compat guarantee undefined | PR 1 legacy spec now mandates no-new-files / no-new-schemas against v1.0.5; `tests/e2e/profile-legacy-v1-parity.test.ts` enforces |
+| I10 — "iso8601-with-nanos" format impossible in Node | Shard schema splits into `{wall: iso8601-ms, monotonic: hrtime-ns}`; merge uses monotonic within process, wall + filename across processes |
+| I11 — `lock holder` mis-listed in PR 6 coalesce exceptions | Removed from the list; note added that `.autopilot.lock` is lock.js-managed, outside autopilot-state.yaml |
+| I12 — no submodule test fixture | PR 10 Files created now includes `tests/e2e/fixtures/with-submodule/` + setup script + worktree-path audit test |
+| I13 — Aider API key provisioning unspecified | PR 11 spec: **Anthropic Sonnet** via `ANTHROPIC_API_KEY` CI secret, `it.skipIf` when absent, < 100K tokens / < $1 per CI run |
+| I14 — multi-host CI gating policy missing | Explicit policy: Claude Code must pass, Aider must pass when key present (skipped when absent), unrelated Aider flakes tracked via issue + test-level `it.skip` |
+| M10 — profile YAMLs duplicated | `profiles/_base.yaml` + deltas-only per profile. Legacy stands alone (no _base extension) to preserve forward-compat |
+| M11 — dependencies.yaml has no discovery path | PR 9 adds `sprintpilot dependencies scaffold --epic <id>` subcommand; installer post-install message references it |
+| M12 — v1 deprecation policy absent | Cross-cutting section adds policy: v1 maintenance through 2026-10-31 (security/critical only); v2.0.x active for 18mo after v3.0.0 |
+| M13 — preflight branch race window | PR 12 preflight acquires `.sprintpilot/preflight.lock` via `lock.js` before startup cleanup; stale-lock cleanup on SIGKILL |
+| M14 — resolve-profile merge: `settings:` wrapper ambiguous | Profile YAMLs drop the wrapper; all YAMLs share the flat `autopilot:` / `git:` / `ma:` shape. Merge logic simplifies |
+
+**Net effect.** The plan now contains zero unresolved findings from either adversarial review pass. All concrete specs (host detection, shard schema, coalesce exceptions, preflight, profile YAMLs, CI policy) are implementable without interpretation gaps. The concept doc caveat for C8 is the only action item outside the plan file itself — it lands as part of PR 11.
 
