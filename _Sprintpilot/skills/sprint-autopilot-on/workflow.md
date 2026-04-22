@@ -140,12 +140,18 @@ Resolve:
   - `{{retrospective_mode}}` from `autopilot.retrospective_mode` (default: `auto`). Valid values: `auto` | `stop` | `skip`. Any unknown value falls back to `auto`.
   If the file or either key is missing, fall back to the defaults above.
   </action>
+  <action>**Resolve profile-driven flow** — run:
+  `node {{project_root}}/_Sprintpilot/scripts/resolve-profile.js get autopilot.implementation_flow`
+  Output: `full` or `quick`. Set `{{implementation_flow}}` = output. Default to `full` if the call fails.
+  Run: `node {{project_root}}/_Sprintpilot/scripts/resolve-profile.js get autopilot.session_story_limit` → override `{{session_story_limit}}` if the resolver produces a different value than config.yaml (profile overrides config silence). Same pattern for `autopilot.retrospective_mode`.
+  </action>
 </check>
 
 <check if="manifest does NOT exist">
   <action>Set `{{git_enabled}}` = false</action>
   <action>Set `{{session_story_limit}}` = 3</action>
   <action>Set `{{retrospective_mode}}` = `auto`</action>
+  <action>Set `{{implementation_flow}}` = `full`</action>
   <action>Log: "No _Sprintpilot/manifest.yaml found — running stock autopilot (no git)"</action>
 </check>
 
@@ -398,10 +404,28 @@ Resolve:
 
 <step n="3" goal="Prepare and execute the recommended skill">
 
+<!-- PR 4 NANO ROUTING: when the active profile's implementation_flow is
+     'quick', route bmad-dev-story through bmad-quick-dev instead. Quick-dev
+     runs Implement → Review → Classify → Commit internally (BMad
+     step-oneshot.md), so bmad-create-story / bmad-check-readiness /
+     bmad-code-review are not invoked in this flow. -->
+<check if="{{implementation_flow}} is quick AND {{next_skill}} is bmad-dev-story">
+  <action>Override `{{next_skill}}` = `bmad-quick-dev`</action>
+  <action>Log: "Routing {{current_story}} through bmad-quick-dev per nano profile (implementation_flow=quick)"</action>
+</check>
+<!-- Under quick flow, autopilot never invokes bmad-create-story or
+     bmad-check-implementation-readiness; quick-dev reads AC from
+     sprint-status.yaml directly. If bmad-help proposes these skills
+     while implementation_flow=quick, skip them and advance. -->
+<check if="{{implementation_flow}} is quick AND ({{next_skill}} is bmad-create-story OR {{next_skill}} is bmad-check-implementation-readiness)">
+  <action>Log: "Skipping {{next_skill}} under quick flow (nano profile) — quick-dev reads AC directly"</action>
+  <action>Set `{{next_skill}}` = `bmad-quick-dev`</action>
+</check>
+
 <action>Set `{{completed_skill}}` = `{{next_skill}}`</action>
 <action>Create task "{{next_skill}}" → mark `in_progress`</action>
 
-<check if="{{next_skill}} is a per-story skill (bmad-dev-story, bmad-code-review, bmad-create-story)">
+<check if="{{next_skill}} is a per-story skill (bmad-dev-story, bmad-quick-dev, bmad-code-review, bmad-create-story)">
   <action>Set `{{current_story}}` = first story in `{status_file}` with status `ready-for-dev` or `in-progress`</action>
 
   <critical>**Validate story key format** — the key MUST follow the pattern `{epic}-{story}-{title-kebab}` (e.g., `1-2-user-authentication`), NOT just `{epic}-{story}` (e.g., `1-2`).
@@ -415,8 +439,11 @@ Resolve:
   <action>Create per-story step tasks if not already created</action>
 </check>
 
-<!-- GIT: Enter worktree before dev-story -->
-<check if="{{git_enabled}} AND {{next_skill}} is bmad-dev-story">
+<!-- GIT: Enter worktree before dev-story OR quick-dev (nano flow).
+     Nano's profile sets worktree.enabled=false so the worktree creation
+     inside this block is a no-op then — PR 5 handles the in-place
+     branch fallback. -->
+<check if="{{git_enabled}} AND ({{next_skill}} is bmad-dev-story OR {{next_skill}} is bmad-quick-dev)">
   <action>**Sanitize branch name**: `node {{project_root}}/_Sprintpilot/scripts/sanitize-branch.js "{{current_story}}" --prefix "{{branch_prefix}}" --max-length 60`. Set `{{branch_name}}` = output. Full ref: `{{branch_prefix}}{{branch_name}}`.</action>
 
   <action>**Idempotency check** — if branch is already registered in `{status_file}` for this story AND its worktree exists, skip creation. If registered without worktree → recovery mode (see health check). Otherwise proceed.</action>
@@ -467,6 +494,24 @@ Resolve:
 
 
 <step n="4" goal="Handle skill completion and route to next action">
+
+<!-- PR 4 NANO ROUTING: quick-dev completion handler.
+     Quick-dev's one-shot (step-oneshot.md:44) already ran Implement →
+     Review → Classify → Commit internally. Autopilot skips the external
+     bmad-code-review step and jumps straight to step 7 (mark story
+     done). Escalation safety net: if tests fail or classify severity is
+     high, flip implementation_flow to full for the rest of the session. -->
+<check if="{{completed_skill}} was bmad-quick-dev">
+  <action>Run: `node {{project_root}}/_Sprintpilot/scripts/log-timing.js start --story "{{current_story}}" --phase "tests.run" --project-root "{{project_root}}"` — ignore failures.</action>
+  <action>Verify tests ran — if not, run them now: report `N/N passed`. Record pass/fail into `{{tests_passed}}`.</action>
+  <action>Run: `node {{project_root}}/_Sprintpilot/scripts/log-timing.js end --story "{{current_story}}" --phase "tests.run" --project-root "{{project_root}}"` — ignore failures.</action>
+  <action>Read quick-dev's Classify severity from its stdout/output. If its output mentions `severity: high` or a failing classify, set `{{quickdev_severity_high}}` = true.</action>
+  <check if="{{tests_passed}} is false OR {{quickdev_severity_high}} is true">
+    <action>**Escalation** — flip the session-scoped flow to `full`: set `{{implementation_flow}}` = `full`. Do NOT write this back to config.yaml; it is session-only. Log decision: `category=scope, phase=autopilot:escalation, impact=medium, "nano story {{current_story}} triggered fallback (tests_passed={{tests_passed}}, severity_high={{quickdev_severity_high}}) — subsequent stories use full cycle"` to `{decision_log_file}`.</action>
+  </check>
+  <action>Set `{{next_skill}}` = "(none)" — quick-dev handled review + commit internally per BMad step-oneshot.md.</action>
+  <goto step="7">Mark story done</goto>
+</check>
 
 <check if="{{completed_skill}} was bmad-dev-story">
   <action>Run: `node {{project_root}}/_Sprintpilot/scripts/log-timing.js start --story "{{current_story}}" --phase "tests.run" --project-root "{{project_root}}"` — ignore failures.</action>

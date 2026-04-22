@@ -10,9 +10,15 @@ The per-story flow depends on the active `complexity_profile` in
 
 - **`small`, `medium`, `large`, `legacy`** — full mandatory 7-step BMad cycle
   (see below). Non-negotiable for these profiles.
-- **`nano`** — routes through `bmad-quick-dev` per story (one-shot
-  Implement → Review → Classify → Commit per `step-oneshot.md`). Quality
-  gates preserved via quick-dev's internal review step.
+- **`nano`** — routes each story through `bmad-quick-dev` (one-shot
+  Implement → Review → Classify → Commit per BMad `step-oneshot.md:44`).
+  Quality gates preserved via quick-dev's internal review step.
+  Autopilot does NOT invoke `bmad-create-story`, `bmad-check-implementation-readiness`,
+  `bmad-dev-story`, or `bmad-code-review` under nano — quick-dev reads AC
+  directly from `sprint-status.yaml`. Safety net: if quick-dev's tests
+  fail or its Classify severity is `high`, the autopilot escalates the
+  session (session-scoped only — never written back to config) to `full`
+  flow so the remaining stories run through the 7-step cycle.
 
 This policy is enforced by `_Sprintpilot/skills/sprint-autopilot-on/workflow.md`
 at runtime via `_Sprintpilot/scripts/resolve-profile.js`. When the profile

@@ -82,6 +82,26 @@ A running log of non-obvious implementation choices made during the v2 rollout. 
 **Decision:** PR 3 ships the scripts + schema but leaves workflow.md's state-write path untouched.
 **Rationale:** Acceptance criterion #5 (`state_sharding: never` falls back to direct writes) is satisfied trivially if direct writes are still the only path in workflow.md. Rewriting STATE_FIELDS writes to route through shards is a PR 6 concern (coalescing) and PR 11 (parallel). Shipping the scripts now unblocks those PRs without destabilizing the current single-writer path.
 **Impact:** Medium-low. Users see no behavior change on `auto` or `never`. The `always` mode is available for PR 6 to opt into.
+
+## PR 4 — Nano routing
+
+### D4.1 — architecture / session-scoped escalation
+**Decision:** If quick-dev signals `severity: high` or tests fail under nano, the autopilot flips `{{implementation_flow}}` to `full` for the rest of the session only — never writes back to `config.yaml`.
+**Rationale:** Persisting the flip would silently change the user's configured profile on disk, surprising them on the next run. Session-scoped escalation gives the safety net without the silent mutation. The decision is logged to `decision-log.yaml` with `category=scope, phase=autopilot:escalation` so users can trace why the cycle changed mid-sprint.
+**Impact:** Low. Users who want a permanent switch to `small` can explicitly update their config.yaml; the log entry points them to the right knob.
+
+### D4.2 — scope / skill skipping
+**Decision:** Under `implementation_flow=quick`, the autopilot skips `bmad-create-story` and `bmad-check-implementation-readiness` entirely (not just `bmad-dev-story`).
+**Rationale:** Quick-dev's own routing (BMad `step-01-clarify-and-route.md:40-44`) reads AC directly from `sprint-status.yaml` and synthesizes its own plan. Invoking `bmad-create-story` first would produce a story file quick-dev doesn't need, wasting an LLM call. The workflow's step-3 gate handles the two cases that could still arrive (`bmad-help` proposing either skill) by rewriting `{{next_skill}} = bmad-quick-dev`.
+**Impact:** Low. Non-nano profiles continue to run all three skills unchanged.
+
+### D4.3 — test-strategy / routing assertions
+**Decision:** Nano routing is verified by asserting the *resolver output*, not by exercising workflow.md directly.
+**Rationale:** Workflow.md is instruction text read by an LLM; there is no in-process "workflow runner" to unit-test. The routing correctness depends entirely on what `resolve-profile.js` returns for `autopilot.implementation_flow` (and related keys). If the resolver is right, the LLM-executed gates will pick the right branch. Asserting the resolver is the load-bearing test.
+**Impact:** Low. Workflow gates are still reviewed manually; the unit test locks down the profile-to-flow contract.
+**Decision:** PR 3 ships the scripts + schema but leaves workflow.md's state-write path untouched.
+**Rationale:** Acceptance criterion #5 (`state_sharding: never` falls back to direct writes) is satisfied trivially if direct writes are still the only path in workflow.md. Rewriting STATE_FIELDS writes to route through shards is a PR 6 concern (coalescing) and PR 11 (parallel). Shipping the scripts now unblocks those PRs without destabilizing the current single-writer path.
+**Impact:** Medium-low. Users see no behavior change on `auto` or `never`. The `always` mode is available for PR 6 to opt into.
 **Decision:** When `{{current_story}}` is empty (sprint-level skills like `bmad-help`, `bmad-sprint-planning`), the workflow passes the literal `sprint` as the story key.
 **Rationale:** `STORY_RE` rejects the empty string (path-traversal guard). Rather than weakening the regex or adding a conditional gate, we use a reserved sentinel that matches the regex and makes the story shard for sprint-level phases explicit in the artifact (`.timings/sprint.jsonl`).
 **Impact:** Low. The summarizer treats `sprint` as one more story; it shows up cleanly in per-story wall-clock tables. Users cannot accidentally collide because user story keys are derived from epic-numbered patterns (`1-2-title`), never the literal word `sprint`.

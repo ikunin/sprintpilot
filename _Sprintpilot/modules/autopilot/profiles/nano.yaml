@@ -13,6 +13,13 @@ autopilot:
   implementation_flow: quick
   session_story_limit: 0
   retrospective_mode: skip
+  # Nano safety net — if a story fails under quick-dev, escalate to the
+  # small profile for the remainder of the session (scope: session only,
+  # never written back to config.yaml).
+  nano:
+    fallback_on_tests_fail: true
+    fallback_on_quick_dev_high_severity: true
+    fallback_target: small
 
 git:
   granularity: epic

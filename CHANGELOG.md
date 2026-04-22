@@ -2,6 +2,23 @@
 
 ## [Unreleased]
 
+**PR 4 of 12 — Nano routing through `bmad-quick-dev`**
+
+When the active profile declares `implementation_flow: quick` (nano only, by default), the autopilot routes each story through BMad's `bmad-quick-dev` one-shot skill instead of the 7-step cycle. Quick-dev runs Implement → Review → Classify → Commit internally (BMad `step-oneshot.md:44`), so `bmad-create-story`, `bmad-check-implementation-readiness`, `bmad-dev-story`, and `bmad-code-review` are not invoked under nano. Quality gates are preserved via quick-dev's internal review.
+
+### Added
+- `_Sprintpilot/modules/autopilot/profiles/nano.yaml` declares a `nano.fallback_on_tests_fail`, `nano.fallback_on_quick_dev_high_severity`, and `nano.fallback_target` escalation block.
+- `tests/unit/nano-routing.test.ts` — 9 tests asserting `implementation_flow` resolves correctly per profile and the nano-specific escalation + orchestration keys are exposed to the workflow.
+
+### Changed
+- `_Sprintpilot/skills/sprint-autopilot-on/workflow.md` — (1) boot resolves `{{implementation_flow}}` via `resolve-profile.js`; (2) step 3 overrides `{{next_skill}} = bmad-quick-dev` when `implementation_flow = quick AND next_skill in {bmad-dev-story, bmad-create-story, bmad-check-implementation-readiness}`; (3) step 4 adds a `bmad-quick-dev` completion handler that jumps directly to "mark story done" and escalates (session-scoped, not persisted) to `full` flow if tests fail or classify severity is high.
+- `AGENTS.md` — nano section spells out the skipped skills and the escalation safety net.
+
+### Rollback
+- Set `complexity_profile` to anything except `nano`. The autopilot falls back to the 7-step cycle immediately.
+
+## [Unreleased — PR 3]
+
 **PR 3 of 12 — State-shard infrastructure**
 
 Per-story shards for `autopilot-state.yaml` and `decision-log.yaml` so that parallel sub-agents (PR 11) can write without contention. The coordinator merges at layer boundaries. Shipping the scripts + schema; workflow consumers land in PR 6 (coalesce) and PR 11 (parallel).
