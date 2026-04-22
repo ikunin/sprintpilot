@@ -30,4 +30,4 @@ ma:
   parallel_stories: false
   max_parallel_stories: 2
   parallel_epics: false
-  state_sharding: false
+  state_sharding: never

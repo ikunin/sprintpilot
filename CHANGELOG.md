@@ -2,6 +2,24 @@
 
 ## [Unreleased]
 
+**PR 3 of 12 — State-shard infrastructure**
+
+Per-story shards for `autopilot-state.yaml` and `decision-log.yaml` so that parallel sub-agents (PR 11) can write without contention. The coordinator merges at layer boundaries. Shipping the scripts + schema; workflow consumers land in PR 6 (coalesce) and PR 11 (parallel).
+
+### Added
+- `_Sprintpilot/scripts/state-shard.js` — `write` / `read` / `append` / `init` over `.autopilot-state/<story>.yaml` and `.decision-log/<story>.yaml`. Atomic writes via tmp-sibling + `rename()`. Flat dotted-keys + JSON flow-form file shape — still valid YAML, round-trips without a general YAML parser so the installed script has zero install-time deps.
+- `_Sprintpilot/scripts/merge-shards.js` — merges shards into authoritative project-level YAMLs. Decision-log dedupe by `id`, sort by `ts`. Corruption recovery: a shard that fails to parse OR lacks `updated_at` is moved to `.archive/corrupt/` and flagged on the merged output; never deleted. Idempotent. `--archive` moves merged shards to `.archive/layer-<id>/`. `--dry-run` computes without writing.
+- 39 new unit tests (23 in `state-shard.test.ts`, 16 in `merge-shards.test.ts`), including concurrent-subprocess writes to distinct shards and corruption-archive verification. Suite: 249 → 288 passing.
+
+### Changed
+- `_Sprintpilot/modules/autopilot/profiles/_base.yaml` + `legacy.yaml`: `state_sharding` is now a tri-valued string (`never | auto | always`), default `auto` on non-legacy, `never` on legacy. Prior boolean shape is replaced (the key was never consumed).
+- Shard schema adds an intra-process `updated_at.monotonic` tiebreaker alongside `updated_at.wall` so parallel writers within a single process resolve conflicts without NTP drift interference.
+
+### Rollback
+- Set `ma.state_sharding: never` on the active profile. Future workflow consumers of sharding gate on this value and fall back to direct writes.
+
+## [Unreleased — PR 2]
+
 **PR 2 of 12 — M0 phase-timing instrumentation**
 
 Emits per-phase duration measurements so subsequent optimizations (PRs 3–12) can be validated against a real baseline instead of estimated percentages.

@@ -24,4 +24,7 @@ ma:
   parallel_stories: false
   max_parallel_stories: 2
   parallel_epics: false
-  state_sharding: false
+  # PR 3: state_sharding semantics — auto = shard when parallelism is active,
+  # always = shard unconditionally (for forcing the code path in tests),
+  # never = write authoritative files directly (pre-PR behavior, rollback).
+  state_sharding: auto
