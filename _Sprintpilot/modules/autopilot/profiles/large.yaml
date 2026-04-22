@@ -1,0 +1,15 @@
+# Large profile — production system, compliance / uptime stakes.
+# Parallelism on by default; full reconciliation every boot; tighter
+# session checkpointing; interactive retrospectives.
+
+name: large
+
+autopilot:
+  session_story_limit: 3
+  retrospective_mode: stop
+  conditional_boot_work: false     # always run full reconciliation
+
+ma:
+  parallel_stories: true
+  max_parallel_stories: 3
+  state_sharding: true

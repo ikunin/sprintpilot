@@ -1,0 +1,5 @@
+# Small profile — MVP / internal tool / prototype, solo or 1–2 devs.
+# Matches _base defaults; kept as a distinct file so --profile small
+# is always resolvable even if _base evolves.
+
+name: small

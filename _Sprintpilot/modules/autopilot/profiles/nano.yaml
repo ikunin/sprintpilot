@@ -1,0 +1,21 @@
+# Nano profile — toy / tutorial / learning projects, solo.
+# Routes each story through bmad-quick-dev (one-shot Implement → Review
+# → Classify → Commit). Drops worktrees, per-story PRs, retrospectives,
+# and session checkpoints. Quality gates preserved via quick-dev's
+# internal review step.
+#
+# Behavior is gated on PR 4 (nano routing) landing. Until then this
+# profile is configurable but has no runtime effect.
+
+name: nano
+
+autopilot:
+  implementation_flow: quick
+  session_story_limit: 0
+  retrospective_mode: skip
+
+git:
+  granularity: epic
+  worktree:
+    enabled: false
+  squash_on_merge: true

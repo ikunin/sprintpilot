@@ -1,0 +1,33 @@
+# Legacy profile — rollback to pre-v2 (v1.0.5) behavior.
+#
+# Explicitly duplicates every setting that was default in v1.0.5 so future
+# changes to _base.yaml cannot silently affect legacy behavior. This is
+# the forward-compatibility guarantee: legacy produces a file-and-schema
+# superset match against the v1.0.5 snapshot.
+#
+# Unlike the other profile YAMLs, legacy does NOT extend _base. The
+# resolver detects version_pinned and skips the base overlay.
+
+name: legacy
+version_pinned: "v1.0.5"
+
+autopilot:
+  implementation_flow: full
+  session_story_limit: 3
+  retrospective_mode: auto
+  phase_timings: false
+  coalesce_state_writes: false
+  conditional_boot_work: false
+  cache_shared_reads: false
+
+git:
+  granularity: story
+  worktree:
+    enabled: true
+  squash_on_merge: false
+
+ma:
+  parallel_stories: false
+  max_parallel_stories: 2
+  parallel_epics: false
+  state_sharding: false

@@ -1,0 +1,5 @@
+# Medium profile — team product with real users (default).
+# Matches _base defaults. Parallelism is opt-in: edit ma/config.yaml
+# or run sprintpilot install --profile medium --parallel 2.
+
+name: medium

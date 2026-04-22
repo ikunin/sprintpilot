@@ -1,0 +1,27 @@
+# Adaptive Process Scaling — base defaults for all non-legacy profiles.
+# Per-profile YAML files override only the keys they want to change.
+# See docs/adaptive-process-scaling.md and docs/implementation-plan.md.
+
+name: _base
+version_pinned: null
+
+autopilot:
+  implementation_flow: full        # full | quick
+  session_story_limit: 5
+  retrospective_mode: auto
+  phase_timings: false             # M0, PR 2 — defaults false until PR 2 ships
+  coalesce_state_writes: false     # M3, PR 6
+  conditional_boot_work: false     # M4, PR 7
+  cache_shared_reads: false        # M5, PR 8
+
+git:
+  granularity: story               # story | epic
+  worktree:
+    enabled: true
+  squash_on_merge: false
+
+ma:
+  parallel_stories: false
+  max_parallel_stories: 2
+  parallel_epics: false
+  state_sharding: false

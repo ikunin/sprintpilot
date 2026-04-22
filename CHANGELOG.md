@@ -1,5 +1,32 @@
 # Changelog
 
+## [2.0.0] - 2026-04-23
+
+**Major release: Adaptive Process Scaling — PR 1 of 12 (Foundation)**
+
+Introduces `complexity_profile` as a first-class config dimension. Existing installs are unaffected — the missing-key default matches v1.0.5 behavior byte-for-byte. Full concept and roadmap: `docs/adaptive-process-scaling.md` and `docs/implementation-plan.md`.
+
+### Added
+- `_Sprintpilot/modules/autopilot/profiles/` — five profile YAMLs (`_base`, `nano`, `small`, `medium`, `large`, `legacy`). Base + overlay (DRY); `legacy` stands alone with `version_pinned: "v1.0.5"` so future refactors cannot silently drift legacy behavior.
+- `_Sprintpilot/scripts/resolve-profile.js` — `print` / `get` / `validate` commands. Missing `complexity_profile` key defaults to `medium` with a stderr notice. Consulted by `workflow.md` starting PR 4.
+- `_Sprintpilot/scripts/check-prereqs.js` — verifies node ≥ 18 and git ≥ 2.18. Warns (does not fail) on git 2.5–2.17 for degraded mode (no submodule speedups).
+- `sprintpilot install --profile <name>` — non-interactive CLI flag. Five values: `nano | small | medium | large | legacy`.
+- Interactive installer now asks for complexity profile between autopilot settings and tool selection. Upgrading users see their existing profile as the default.
+- `complexity_profile` key in `_Sprintpilot/modules/autopilot/config.yaml` with full documentation inline.
+
+### Changed
+- `AGENTS.md` — "BMad Method is non-negotiable" section reframed as "Flow selection is profile-driven". The per-story 7-step cycle is still mandatory for `small`/`medium`/`large`/`legacy`; `nano` routes through `bmad-quick-dev` (behavior gated on PR 4).
+
+### Deprecation
+- **v1.x branch enters maintenance.** Security fixes + critical bug fixes only through **2026-10-31**. No new features. v2 active for 18 months after v3.0.0 ships.
+- **Rollback.** Set `complexity_profile: legacy` in `_Sprintpilot/modules/autopilot/config.yaml` to pin to v1.0.5 semantics.
+- **NPM upgrade path.** `npm i -g @ikunin/sprintpilot@latest` preserves behavior via the missing-key default. No interactive prompt on upgrade — scripted CI upgrades unaffected.
+
+### Unreleased (PRs 2–12, future versions)
+- **v2.1.0** (PRs 2–8): M0 phase-timing instrumentation, state-shard infrastructure, nano routing, nano orchestration cuts, M3/M4/M5 overhead cuts.
+- **v2.2.0** (PRs 9–11): dependency sidecar, worktree cost mitigation, parallel intra-epic stories (Claude Code only; sequential fallback on other hosts).
+- **v2.3.0** (PR 12): cross-epic parallelism (experimental).
+
 ## [1.0.5] - 2026-04-21
 
 ### Fixed

@@ -53,6 +53,10 @@ async function main() {
       '--tools <list>',
       'Comma-separated tools (claude-code,cursor,windsurf,cline,roo,trae,kiro,gemini-cli,github-copilot,all)',
     )
+    .option(
+      '--profile <name>',
+      'Complexity profile: nano | small | medium | large | legacy (default: medium)',
+    )
     .option('--dry-run', 'Preview without making changes')
     .option('--force', 'Skip backup of existing skills')
     .option(

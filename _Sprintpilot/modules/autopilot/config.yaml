@@ -2,6 +2,28 @@
 # Controls /sprint-autopilot-on session behavior.
 
 autopilot:
+  # Adaptive Process Scaling profile.
+  #
+  #   nano   — toy / tutorial / learning project, solo, small codebase.
+  #            Routes through bmad-quick-dev one-shot (PR 4+). Fastest.
+  #   small  — MVP / internal tool / prototype, solo or 1–2 devs.
+  #   medium — team product with real users. Default, recommended.
+  #   large  — production system, compliance / uptime stakes. Full
+  #            reconciliation, interactive retrospectives, tighter
+  #            checkpoints, parallelism on by default.
+  #   legacy — rollback to v1.0.5 behavior. No v2 optimizations active.
+  #            Pinned by version_pinned in profiles/legacy.yaml so future
+  #            changes cannot silently affect legacy users.
+  #
+  # Profile defaults live in _Sprintpilot/modules/autopilot/profiles/*.yaml.
+  # Override specific knobs here or in git/ma config.yaml — user overrides
+  # always win over profile defaults. See docs/adaptive-process-scaling.md.
+  #
+  # Missing key defaults to 'medium' (matches v1.0.5 behavior byte-for-byte).
+  # Upgrading v1 installs don't need to set this; new installs get it from
+  # the installer prompt or `sprintpilot install --profile <name>`.
+  complexity_profile: medium
+
   # Maximum stories to FULLY IMPLEMENT in a single autopilot session.
   #
   # "Fully implement" means the complete per-story cycle:

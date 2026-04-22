@@ -3,11 +3,23 @@
 This project uses the **BMad Method** for structured AI-driven development, with [Sprintpilot](https://github.com/ikunin/sprintpilot) as the autopilot and multi-agent addon.
 See `_Sprintpilot/Sprintpilot.md` for the full skill catalog and detailed workflow reference.
 
-## BMad Method is non-negotiable — no exceptions
+## Flow selection is profile-driven (Sprintpilot v2+)
 
-**NEVER write implementation code without first completing the mandatory BMad Method story sequence.**
+The per-story flow depends on the active `complexity_profile` in
+`_Sprintpilot/modules/autopilot/config.yaml`.
 
-### Mandatory sequence per story
+- **`small`, `medium`, `large`, `legacy`** — full mandatory 7-step BMad cycle
+  (see below). Non-negotiable for these profiles.
+- **`nano`** — routes through `bmad-quick-dev` per story (one-shot
+  Implement → Review → Classify → Commit per `step-oneshot.md`). Quality
+  gates preserved via quick-dev's internal review step.
+
+This policy is enforced by `_Sprintpilot/skills/sprint-autopilot-on/workflow.md`
+at runtime via `_Sprintpilot/scripts/resolve-profile.js`. When the profile
+key is absent, the autopilot falls back to `medium` — matching v1.0.5
+behavior byte-for-byte.
+
+### Mandatory sequence per story (all profiles except `nano`)
 
 1. `bmad-create-story` — story file complete
 2. `bmad-check-implementation-readiness` — no blockers
