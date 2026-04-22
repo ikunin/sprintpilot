@@ -99,6 +99,31 @@ A running log of non-obvious implementation choices made during the v2 rollout. 
 **Decision:** Nano routing is verified by asserting the *resolver output*, not by exercising workflow.md directly.
 **Rationale:** Workflow.md is instruction text read by an LLM; there is no in-process "workflow runner" to unit-test. The routing correctness depends entirely on what `resolve-profile.js` returns for `autopilot.implementation_flow` (and related keys). If the resolver is right, the LLM-executed gates will pick the right branch. Asserting the resolver is the load-bearing test.
 **Impact:** Low. Workflow gates are still reviewed manually; the unit test locks down the profile-to-flow contract.
+
+## PR 5 — Nano orchestration cuts
+
+### D5.1 — architecture / epic-id derivation
+**Decision:** `{{epic_id}}` is derived lexically from `{{current_story}}` (leading numeric segment before the first `-`), not read from an "epics" structure.
+**Rationale:** BMad encodes epic membership in the story key (`1-2-foo` → epic 1). Reading the epics file would couple the autopilot to its schema, which is out of scope for PR 5. The lexical rule handles every story key Sprintpilot has seen in real projects; stories with non-standard keys fall back to single-story "epic" behavior (first = last = true), which is the safe default.
+**Impact:** Low. If a future BMad version changes the story-key convention, the autopilot's branching falls back to per-story anyway (the regex miss leaves `epic_id` empty, and the first/last defaults both become `true`).
+
+### D5.2 — architecture / deferred push
+**Decision:** Under `granularity=epic`, intermediate stories record `push_status=deferred`, `pr_url=DEFERRED` rather than "pending" or "skipped".
+**Rationale:** "pending" already means "attempted but not complete"; "skipped" means "explicitly disabled". "deferred" is the new, distinct state "will be done at end of epic". Keeping these separate preserves the recovery semantics of boot branch-reconciliation — it retries `pending` branches, leaves `skipped` branches alone, and ignores `deferred` ones until the epic closes.
+**Impact:** Low. Downstream consumers of git-status.yaml (sprint-report.txt, health-check.js) already treat unknown statuses as "don't touch", so the new value is forward-compatible.
+
+### D5.3 — scope / merge strategy
+**Decision:** `squash_on_merge=true` composes a single commit `feat(<epic_id>): epic <id> (<branch>)` and does NOT include every story's commit message in the squashed commit body.
+**Rationale:** Squash commit bodies are trivially reconstructable via `git log <branch> ^<base>` after the fact, and adding them to the merge-commit message risks formatting quirks that break PR body generation. Keeping the squashed commit terse matches GitHub/GitLab's default squash-PR experience.
+**Impact:** Low. PR bodies (via `create-pr.js`) still show the per-story commits when the platform renders the diff; the squashed commit is just a pointer.
+
+### D5.4 — test-strategy / workflow coverage
+**Decision:** PR 5 adds a sync-status.js passthrough test but no workflow-level unit test for the epic-branch decision tree.
+**Rationale:** Same rationale as D4.3 — workflow.md branches are LLM-driven. The load-bearing parts are (a) sync-status.js correctly records epic_id + granularity (tested directly) and (b) the resolver returns `granularity=epic` for nano (tested by nano-routing.test.ts). The LLM's branch-picking then follows the rule that's spelled out in the workflow text.
+**Impact:** Medium-low. Without an e2e fixture specifically exercising epic granularity end-to-end, regressions in the decision tree would escape unit tests. The existing greenfield e2e covers story granularity, so at minimum the default path is safe.
+**Decision:** Nano routing is verified by asserting the *resolver output*, not by exercising workflow.md directly.
+**Rationale:** Workflow.md is instruction text read by an LLM; there is no in-process "workflow runner" to unit-test. The routing correctness depends entirely on what `resolve-profile.js` returns for `autopilot.implementation_flow` (and related keys). If the resolver is right, the LLM-executed gates will pick the right branch. Asserting the resolver is the load-bearing test.
+**Impact:** Low. Workflow gates are still reviewed manually; the unit test locks down the profile-to-flow contract.
 **Decision:** PR 3 ships the scripts + schema but leaves workflow.md's state-write path untouched.
 **Rationale:** Acceptance criterion #5 (`state_sharding: never` falls back to direct writes) is satisfied trivially if direct writes are still the only path in workflow.md. Rewriting STATE_FIELDS writes to route through shards is a PR 6 concern (coalescing) and PR 11 (parallel). Shipping the scripts now unblocks those PRs without destabilizing the current single-writer path.
 **Impact:** Medium-low. Users see no behavior change on `auto` or `never`. The `always` mode is available for PR 6 to opt into.

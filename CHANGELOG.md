@@ -2,6 +2,28 @@
 
 ## [Unreleased]
 
+**PR 5 of 12 — Nano orchestration cuts (epic-granularity, squash merge, in-place branching)**
+
+When `git.granularity: epic`, the autopilot creates one branch per epic and one PR per epic (merged with `--squash`) instead of one branch / PR per story. When `git.worktree.enabled: false`, stories run in-place on the shared branch with no worktree. Both settings are nano defaults; other profiles keep story granularity.
+
+### Added
+- `_Sprintpilot/modules/git/config.yaml` — new `git.granularity` key (`story | epic`, default `story`) with inline docs.
+- `_Sprintpilot/scripts/sync-status.js` — accepts `--granularity <story|epic>` and `--epic-id <id>` passthrough; records them on the story block so downstream code can reconstruct the epic → branch mapping.
+- `tests/unit/sync-status-granularity.test.ts` — 3 tests covering the new fields + validation.
+
+### Changed
+- `_Sprintpilot/skills/sprint-autopilot-on/workflow.md`:
+  - Boot reads `git.granularity`, `git.worktree.enabled`, `git.squash_on_merge` from config.yaml and overrides them with the resolver's profile value.
+  - Step 3 computes `{{epic_id}}`, `{{is_first_story_of_epic}}`, `{{is_last_story_of_epic}}` from the story key + sprint-status. Under `granularity=epic`, the branch name is forced to `epic-<id>` so every story in the epic lands on the same branch. Under `worktree.enabled=false`, the autopilot checks out that branch in place instead of creating a worktree.
+  - Step 7 defers push + PR until the last story of the epic under `granularity=epic`. Earlier stories record `push_status=deferred`, `pr_url=DEFERRED`.
+  - Merge step uses `git merge --squash` + a single epic commit when `squash_on_merge=true`; otherwise keeps the existing merge-commit path.
+- `_Sprintpilot/modules/autopilot/profiles/nano.yaml`: already had the settings; PR 5 makes the workflow honor them.
+
+### Rollback
+- Flip `git.granularity: story`, `git.worktree.enabled: true`, `git.squash_on_merge: false` on the active profile (or just switch off `nano`). Workflow reverts to one branch per story, one PR per story, merge-commit.
+
+## [Unreleased — PR 4]
+
 **PR 4 of 12 — Nano routing through `bmad-quick-dev`**
 
 When the active profile declares `implementation_flow: quick` (nano only, by default), the autopilot routes each story through BMad's `bmad-quick-dev` one-shot skill instead of the 7-step cycle. Quick-dev runs Implement → Review → Classify → Commit internally (BMad `step-oneshot.md:44`), so `bmad-create-story`, `bmad-check-implementation-readiness`, `bmad-dev-story`, and `bmad-code-review` are not invoked under nano. Quality gates are preserved via quick-dev's internal review.

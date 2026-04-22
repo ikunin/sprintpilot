@@ -134,6 +134,14 @@ Resolve:
   - `{{create_pr}}` from `git.push.create_pr` (true)
   - `{{pr_template}}` from `git.push.pr_template` ("modules/git/templates/pr-body.md")
   - `{{cleanup_on_merge}}` from `git.worktree.cleanup_on_merge` (true)
+  - `{{granularity}}` from `git.granularity` ("story"). Resolver override wins below.
+  - `{{worktree_enabled}}` from `git.worktree.enabled` (true). Resolver override wins below.
+  - `{{squash_on_merge}}` from `git.squash_on_merge` (false). Resolver override wins below.
+  </action>
+  <action>**Apply profile overrides** via resolver — run each and set only if the resolver returns a value:
+  - `node {{project_root}}/_Sprintpilot/scripts/resolve-profile.js get git.granularity` → override `{{granularity}}`.
+  - `node {{project_root}}/_Sprintpilot/scripts/resolve-profile.js get git.worktree.enabled` → override `{{worktree_enabled}}`.
+  - `node {{project_root}}/_Sprintpilot/scripts/resolve-profile.js get git.squash_on_merge` → override `{{squash_on_merge}}`.
   </action>
   <action>Read `{project-root}/_Sprintpilot/modules/autopilot/config.yaml` (if present) and set:
   - `{{session_story_limit}}` from `autopilot.session_story_limit` (default: 3). A value of 0 disables the limit (run until sprint complete).
@@ -439,10 +447,22 @@ Resolve:
   <action>Create per-story step tasks if not already created</action>
 </check>
 
-<!-- GIT: Enter worktree before dev-story OR quick-dev (nano flow).
-     Nano's profile sets worktree.enabled=false so the worktree creation
-     inside this block is a no-op then — PR 5 handles the in-place
-     branch fallback. -->
+<!-- PR 5: determine per-story epic key + title so the workflow can branch
+     per-epic under granularity=epic and decide "is this the last story
+     of the epic". Epic ID is the leading numeric segment of the story
+     key (e.g. '1-2-foo' → '1'); slug is the epic's title from sprint-
+     status.yaml (or the epic header in the epics file). Skip if empty. -->
+<action>Set `{{epic_id}}` = leading numeric segment of `{{current_story}}` (e.g. `1-2-foo` → `1`). If the key doesn't match `^\d+-`, leave `{{epic_id}}` = "".</action>
+<action>Set `{{epic_branch_name}}` = `epic-{{epic_id}}` (only used when `{{granularity}} = epic`).</action>
+<action>**Detect first vs last story of epic** — read `{status_file}` (BMAD-owned; do not modify). Find all stories with the same `{{epic_id}}`:
+  - `{{is_first_story_of_epic}}` = true if no story in this epic has status `in-progress` or `done` yet (i.e. current story is the first to enter dev-story / quick-dev).
+  - `{{is_last_story_of_epic}}` = true if this is the final undone story in the epic (after this story, all other stories in the epic are `done`).
+  Both default to true when `{{epic_id}}` = "" (single-story "epic").
+</action>
+
+<!-- GIT: Enter worktree OR create/reuse epic branch before dev-story OR quick-dev.
+     Nano's profile sets worktree.enabled=false + granularity=epic, so this
+     block falls through to in-place branching. -->
 <check if="{{git_enabled}} AND ({{next_skill}} is bmad-dev-story OR {{next_skill}} is bmad-quick-dev)">
   <action>**Sanitize branch name**: `node {{project_root}}/_Sprintpilot/scripts/sanitize-branch.js "{{current_story}}" --prefix "{{branch_prefix}}" --max-length 60`. Set `{{branch_name}}` = output. Full ref: `{{branch_prefix}}{{branch_name}}`.</action>
 
@@ -457,14 +477,34 @@ Resolve:
   Detached HEAD is fine — `git worktree add` below creates a new branch from HEAD.
   </action>
 
-  <action>Run: `node {{project_root}}/_Sprintpilot/scripts/log-timing.js start --story "{{current_story}}" --phase "worktree.add" --project-root "{{project_root}}"` — ignore failures.</action>
-  <action>**Create worktree.** Try: `git worktree add "{{project_root}}/.worktrees/{{current_story}}" -b "{{branch_prefix}}{{branch_name}}" 2>&1`. If it fails because the branch already exists, retry without `-b`: `git worktree add "{{project_root}}/.worktrees/{{current_story}}" "{{branch_prefix}}{{branch_name}}" 2>&1`.
+  <!-- PR 5: epic granularity — share one branch per epic instead of one per story.
+       Under worktree.enabled=false + granularity=epic (nano default),
+       subsequent stories of the same epic check out the epic branch in
+       place and commit there; no worktree is created. -->
+  <check if="{{granularity}} is epic">
+    <action>Override `{{branch_name}}` = `{{epic_branch_name}}` (shared across all stories in this epic).</action>
+    <check if="{{is_first_story_of_epic}} is true">
+      <action>Log: "Epic granularity: creating epic branch {{branch_prefix}}{{epic_branch_name}} for the first story of epic {{epic_id}}"</action>
+    </check>
+    <check if="{{is_first_story_of_epic}} is false">
+      <action>Log: "Epic granularity: reusing existing epic branch {{branch_prefix}}{{epic_branch_name}} for story {{current_story}}"</action>
+    </check>
+  </check>
+
+  <check if="{{worktree_enabled}} is false">
+    <action>**In-place branching** (granularity=epic or worktree.enabled=false): `git checkout -B {{branch_prefix}}{{branch_name}} 2>&1`. No worktree. Set `{{in_worktree}}` = false. Skip the worktree-add block below.</action>
+  </check>
+
+  <check if="{{worktree_enabled}} is true">
+    <action>Run: `node {{project_root}}/_Sprintpilot/scripts/log-timing.js start --story "{{current_story}}" --phase "worktree.add" --project-root "{{project_root}}"` — ignore failures.</action>
+    <action>**Create worktree.** Try: `git worktree add "{{project_root}}/.worktrees/{{current_story}}" -b "{{branch_prefix}}{{branch_name}}" 2>&1`. If it fails because the branch already exists, retry without `-b`: `git worktree add "{{project_root}}/.worktrees/{{current_story}}" "{{branch_prefix}}{{branch_name}}" 2>&1`.
 
   If both fail (disk/permissions): log "WARN: worktree add failed — continuing without isolation", set `{{in_worktree}}` = false, and fall back to branch-only mode: `git checkout -b {{branch_prefix}}{{branch_name}}` (retry without `-b` if branch exists). HALT only if the checkout also fails. Git push/PR still work on the branch.
-  </action>
-  <action>Run: `node {{project_root}}/_Sprintpilot/scripts/log-timing.js end --story "{{current_story}}" --phase "worktree.add" --project-root "{{project_root}}"` — ignore failures.</action>
+    </action>
+    <action>Run: `node {{project_root}}/_Sprintpilot/scripts/log-timing.js end --story "{{current_story}}" --phase "worktree.add" --project-root "{{project_root}}"` — ignore failures.</action>
+  </check>
 
-  <check if="worktree add succeeded">
+  <check if="{{worktree_enabled}} is true AND worktree add succeeded">
     <action>`cd {{project_root}}/.worktrees/{{current_story}}`. All subsequent commands run from here. Set `{{worktree_path}}` = this path.</action>
     <action>Run: `node {{project_root}}/_Sprintpilot/scripts/log-timing.js start --story "{{current_story}}" --phase "worktree.submodule-init" --project-root "{{project_root}}"` — ignore failures.</action>
     <action>**Init submodules** if `.gitmodules` exists (check with your file-exists tool or `node -e "process.exit(require('fs').existsSync('.gitmodules')?0:1)"`). Run `git submodule update --init --recursive` (~30s). On failure/hang: warn "Submodule init failed (may need auth). Continuing." and proceed.</action>
@@ -689,8 +729,19 @@ Instruct: "Re-verify code review for story {{current_story}} — all patch findi
   - Final test count: `N/N passed`
 </action>
 
-<!-- GIT: Push, PR, exit worktree -->
-<check if="{{git_enabled}} AND {{in_worktree}}">
+<!-- PR 5: epic granularity — defer push/PR until the LAST story of the epic.
+     For intermediate stories (granularity=epic AND not is_last_story_of_epic):
+     the work is already committed to the epic branch locally via stage-and-
+     commit.js; no push or PR is attempted. The epic's last story pushes
+     the accumulated commits and opens one PR for the whole epic. -->
+<check if="{{granularity}} is epic AND {{is_last_story_of_epic}} is false">
+  <action>Log: "Epic granularity: skipping push/PR for {{current_story}} — will push at end of epic {{epic_id}}"</action>
+  <action>Set `{{push_status}}` = "deferred", `{{pr_url}}` = "DEFERRED", `{{merge_status}}` = "deferred"</action>
+  <!-- Skip the whole git-push block; fall through to the artifact-sync block below. -->
+</check>
+
+<!-- GIT: Push, PR, exit worktree (story granularity OR last story of an epic) -->
+<check if="{{git_enabled}} AND ({{granularity}} is story OR {{is_last_story_of_epic}} is true) AND ({{in_worktree}} OR {{worktree_enabled}} is false)">
   <check if="{{push_auto}} is true">
     <action>**Push branch**.
     Run: `git push -u origin {{branch_prefix}}{{branch_name}} 2>&1`
@@ -728,14 +779,19 @@ Instruct: "Re-verify code review for story {{current_story}} — all patch findi
   </action>
 
   <check if="{{create_pr}} is false OR {{platform}} is git_only OR {{pr_url}} is null or SKIPPED">
-    <action>**Merge story branch to main.** If `{{has_origin}}` is false (local-only), substitute `origin/{{base_branch}}` → `{{base_branch}}` and skip all `git push origin` / `git fetch origin` calls below.
-    1. `git checkout -B {{base_branch}} origin/{{base_branch}}` then `git merge {{branch_prefix}}{{branch_name}} --no-edit`.
-    2. On success: `git push origin {{base_branch}}`, set `{{merge_status}}` = "merged".
-    3. On conflict: `git merge --abort`, `git fetch origin`, re-checkout base, retry merge once. On retry success: push + merged. On retry failure: `{{merge_status}}` = "failed", log warning, continue — the branch is preserved and boot reconciliation retries next session.
+    <action>**Merge story/epic branch to main.** If `{{has_origin}}` is false (local-only), substitute `origin/{{base_branch}}` → `{{base_branch}}` and skip all `git push origin` / `git fetch origin` calls below.
+    Choose merge strategy by `{{squash_on_merge}}` (PR 5): if true, use `git merge --squash` + single commit; otherwise standard merge commit.
+    1. `git checkout -B {{base_branch}} origin/{{base_branch}}`
+    2. If `{{squash_on_merge}}` is true:
+       `git merge --squash {{branch_prefix}}{{branch_name}}` then
+       `git commit -m "feat({{epic_id}}): epic {{epic_id}} ({{branch_prefix}}{{branch_name}})"`.
+       Otherwise: `git merge {{branch_prefix}}{{branch_name}} --no-edit`.
+    3. On success: `git push origin {{base_branch}}`, set `{{merge_status}}` = "merged".
+    4. On conflict: `git merge --abort`, `git fetch origin`, re-checkout base, retry merge once. On retry success: push + merged. On retry failure: `{{merge_status}}` = "failed", log warning, continue — the branch is preserved and boot reconciliation retries next session.
 
     `{{merge_status}}` is persisted by the sync-status.js call later in this step (via `--merge-status`). Do NOT call sync-status.js here — it does full block replacement and would destroy other fields.
     </action>
-    <check if="{{cleanup_on_merge}} is true">
+    <check if="{{cleanup_on_merge}} is true AND {{in_worktree}} is true">
       <action>**Cleanup worktree** (ignore failures — may already be gone): `git worktree remove .worktrees/{{current_story}} --force` then `git worktree prune`</action>
     </check>
   </check>

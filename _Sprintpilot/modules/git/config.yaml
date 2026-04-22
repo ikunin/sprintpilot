@@ -6,6 +6,14 @@ git:
   base_branch: main
   # Git status is tracked in git-status.yaml (Sprintpilot-owned), NOT sprint-status.yaml (BMad Method-owned)
 
+  # Branch + PR granularity.
+  #   story — one branch + one PR per story (default).
+  #   epic  — one branch + one PR per epic; stories committed on it.
+  #           Epic branch name: {branch_prefix}epic-{epic_id}.
+  #           Epic PR merges with --squash; the PR body lists each
+  #           story commit. Set on nano profile by default.
+  granularity: story
+
   # Branch naming
   branch_prefix: "story/" # prefix for story branches (e.g., story/1-2-user-auth)
   max_branch_length: 60 # truncate + 6-char hash if longer

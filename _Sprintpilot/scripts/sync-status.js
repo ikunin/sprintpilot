@@ -120,6 +120,17 @@ function main() {
     worktreeCleaned = v === true || String(v).toLowerCase() === 'true' ? 'true' : 'false';
   }
 
+  // Epic-granularity metadata (PR 5). When the autopilot runs with
+  // git.granularity=epic, every story in the epic shares one branch.
+  // We record epic_id + granularity on every block so downstream code
+  // can "find the branch for this epic" by scanning the file.
+  const epicId = opts['epic-id'];
+  const granularity = opts.granularity || 'story';
+  if (!['story', 'epic'].includes(granularity)) {
+    log.error(`invalid --granularity '${granularity}': must be story|epic`);
+    process.exit(1);
+  }
+
   const fields = [
     { key: 'branch', value: branch },
     { key: 'worktree', value: worktree },
@@ -130,6 +141,8 @@ function main() {
     { key: 'merge_status', value: mergeStatus },
     { key: 'pr_url', value: prUrl },
     { key: 'worktree_cleaned', value: worktreeCleaned, raw: true },
+    { key: 'epic_id', value: epicId },
+    { key: 'granularity', value: granularity === 'story' ? undefined : granularity },
   ];
 
   const block = buildBlock(story, fields);
