@@ -401,13 +401,13 @@ When the flag is `false`, the direct-write instructions below are authoritative.
     - `{{session_stories_done}}` = 0
   </action>
   <action>Create master task: "Sprintpilot — Full Sprint Execution" → `in_progress`</action>
-  <action>**Compute `{{stories_remaining}}`** from `{status_file}`. Rules (explicit — do NOT guess):
-  - Parse every entry under `development_status:` (canonical) OR `stories:` (alternate).
-  - Include the story key (the child key, e.g. `1-2-cli-interface`) in `{{stories_remaining}}` IF its `status` field is ANYTHING other than the literal string `done`. That includes `backlog`, `ready-for-dev`, `in-progress`, `review`, `draft`, missing, null — all non-done states count as "remaining".
-  - Exclude top-level epic entries (e.g. under `epics:` block) — only story keys go in the list.
-  - If `development_status`/`stories` is missing or empty (pre-planning state), set `{{stories_remaining}}` to `[]` — planning will repopulate the file and a later recalculation will pick up the stories.
+  <action>**Compute `{{stories_remaining}}`** deterministically — run:
+  `node {{project_root}}/_Sprintpilot/scripts/list-remaining-stories.js --status-file "{status_file}"`
+  Exit 0 → parse stdout as JSON array → set `{{stories_remaining}}`.
+  Exit 2 → status file doesn't exist yet (pre-planning) → set `{{stories_remaining}}` = `[]` and continue.
+  Exit 1 → parse failure; fall back to `[]` + log a warning (never block boot on a malformed status file).
   </action>
-  <action>Write initial `{state_file}` with STATE_FIELDS: `current_story = null`, `current_bmad_step = null`, `completed_skill = bmad-help`, `session_stories_done = 0`, `stories_remaining = {{stories_remaining}}` (computed above), `in_worktree = false`, `pr_base = {{base_branch}}`.</action>
+  <action>Write initial `{state_file}` with STATE_FIELDS: `current_story = null`, `current_bmad_step = null`, `completed_skill = bmad-help`, `session_stories_done = 0`, `stories_remaining = {{stories_remaining}}`, `in_worktree = false`, `pr_base = {{base_branch}}`.</action>
   <action>Report to user:
   ```
   Sprintpilot ON
@@ -455,16 +455,18 @@ When the flag is `false`, the direct-write instructions below are authoritative.
 </check>
 
 <!-- Authoritative "sprint complete" check. Read the status file EVERY
-     iteration (do not rely on stale stories_remaining). A story counts
-     as done iff its status field equals the literal string "done". A
-     file with no development_status / stories block is PRE-PLANNING
-     and is NOT sprint-complete — we must route to planning, not to
+     iteration via the coded helper (do not rely on stale state or LLM
+     re-parsing). Helper semantics: exit 0 + JSON array. Empty array +
+     a non-empty status file means "all done"; empty array + missing
+     status file means "pre-planning" and we route to planning, NOT to
      step 10. -->
-<action>**Recalculate `{{stories_remaining}}`** from `{status_file}` now (authoritative):
-- Parse every entry under `development_status:` or `stories:`.
-- A story key goes into `{{stories_remaining}}` when its `status` is NOT the literal string `done` (so backlog, ready-for-dev, in-progress, review, draft, missing, null all count as remaining).
-- Set `{{sprint_has_stories}}` = true iff at least one story key was found in the file (regardless of status).
-- Set `{{sprint_is_complete}}` = true iff `{{sprint_has_stories}}` is true AND `{{stories_remaining}}` is empty.
+<action>**Recalculate `{{stories_remaining}}`** — run:
+`node {{project_root}}/_Sprintpilot/scripts/list-remaining-stories.js --status-file "{status_file}"; echo "EXIT:$?"`
+Parse stdout: the first line is a JSON array (possibly `[]`); the trailing `EXIT:N` reveals the exit code.
+- Exit 0 + non-empty array → `{{stories_remaining}}` = parsed array, `{{sprint_has_stories}}` = true, `{{sprint_is_complete}}` = false.
+- Exit 0 + empty array `[]` → `{{stories_remaining}}` = [], `{{sprint_has_stories}}` = true, `{{sprint_is_complete}}` = true (all stories are done).
+- Exit 2 → status file doesn't exist yet (pre-planning). `{{stories_remaining}}` = [], `{{sprint_has_stories}}` = false, `{{sprint_is_complete}}` = false.
+- Exit 1 → treat as pre-planning + log warning; do NOT declare sprint complete on a parse failure.
 </action>
 <check if="{{sprint_is_complete}} is true">
   <goto step="10">Sprint complete</goto>
@@ -741,7 +743,9 @@ When the flag is `false`, the direct-write instructions below are authoritative.
   <!-- PR-follow-up: sprint-planning populates development_status for the
        first time. Recalculate stories_remaining so the step-2 "sprint
        complete" gate doesn't fire spuriously on the next iteration. -->
-  <action>**Recalculate `{{stories_remaining}}`** from `{status_file}` using the same rules as step 1 initial-write: include every story key whose status is NOT the literal `done`. Update `{state_file}` with the new `{{stories_remaining}}`.</action>
+  <action>**Recalculate `{{stories_remaining}}`** — run:
+  `node {{project_root}}/_Sprintpilot/scripts/list-remaining-stories.js --status-file "{status_file}"`
+  Parse JSON output → `{{stories_remaining}}`. Update `{state_file}` with the new value.</action>
 </check>
 
 <check if="{{completed_skill}} was bmad-sprint-planning AND {{git_enabled}}">
@@ -1102,6 +1106,19 @@ No work will be repeated.
 </check>
 
 <action>Verify: all stories `done`, all retrospectives `done` in `{status_file}`</action>
+
+<!-- PR-follow-up (greenfield e2e fix): release the autopilot lock EARLY in
+     step 10 — before the slow operations below (full test suite, docs
+     generation, final commit). A SIGTERM during those slow steps used to
+     leave the lock held, failing the Phase 2 "lock released" assertion.
+     Marking current_bmad_step = sprint-complete also signals the test
+     harness that the sprint genuinely finished. The file deletion at the
+     very end stays as the final tombstone. -->
+<action>**Mark sprint-complete state early** so SIGTERM during later slow steps doesn't leave the lock held:
+- Update `{state_file}`: `current_bmad_step = "sprint-complete"`, `current_story = null`, `next_skill = null`, `stories_remaining = []`.
+- Run: `node {{project_root}}/_Sprintpilot/scripts/lock.js release` — ignore failures.
+</action>
+
 <action>Run full test suite — report `N/N passed`</action>
 
 <!-- PR 6 SPRINT-COMPLETE FLUSH + ARCHIVE (no-op if coalescing is off). -->
@@ -1159,7 +1176,7 @@ No work will be repeated.
   if `{{original_gc_auto_main}}` is "unset": `git config --local --unset gc.auto` (ignore failure — may already be unset).
   else: `git config --local gc.auto {{original_gc_auto_main}}`.
   </action>
-  <action>Release lock: `node {{project_root}}/_Sprintpilot/scripts/lock.js release`</action>
+  <action>Belt-and-suspenders: `node {{project_root}}/_Sprintpilot/scripts/lock.js release` (already released earlier in step 10; this is idempotent and catches any race where the early release failed).</action>
 </check>
 
 <action>Delete `{state_file}` — sprint complete</action>

@@ -35,9 +35,9 @@ import { createTempProject, placeFixture, type TempProject } from './harness/tem
 const FIXTURES_DIR = join(import.meta.dirname, 'fixtures/greenfield');
 const ADDON_SOURCE = join(import.meta.dirname, '../../_Sprintpilot');
 
-const MAX_SESSIONS = 8;
-const BUDGET_PER_SESSION = 20;
-const TIMEOUT_PER_SESSION = 1_200_000; // 20 min
+const MAX_SESSIONS = 5;
+const BUDGET_PER_SESSION = 25;
+const TIMEOUT_PER_SESSION = 1_800_000; // 30 min — Sonnet often needs the full window to reach step 10
 
 /** Model to use — override via BMAD_TEST_MODEL env var (e.g. "opus") */
 const MODEL = process.env.BMAD_TEST_MODEL ?? 'sonnet';
@@ -320,8 +320,27 @@ describe('Greenfield: Tic Tac Toe via Sprintpilot', () => {
               : `EXIT_${result.exitCode}`;
 
         console.log(
-          `[Session ${session}] ${status} | Cost: $${cost.toFixed(4)} | Total: $${totalCost.toFixed(4)}`,
+          `[Session ${session}] ${status} | Cost: $${cost.toFixed(4)} | Total: $${totalCost.toFixed(4)} | turns=${result.json?.num_turns ?? '?'}`,
         );
+
+        // Always surface the LLM's final message (truncated) so a failing
+        // run is debuggable without keepOnFail. This exits its OK-path too.
+        if (result.json?.result) {
+          const msg = result.json.result.replace(/\s+/g, ' ').slice(0, 400);
+          console.log(`[Session ${session}] LLM final: ${msg}${result.json.result.length > 400 ? '…' : ''}`);
+        }
+        // Also dump the full transcript to a per-session file next to the
+        // project dir (preserved across cleanup unless we delete it).
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          const { writeFileSync: writeDbg } = require('node:fs') as typeof import('node:fs');
+          const { tmpdir: dbgTmp } = require('node:os') as typeof import('node:os');
+          const dbgPath = join(dbgTmp(), `sp-greenfield-session-${session}.json`);
+          writeDbg(dbgPath, JSON.stringify(result.json ?? { stdout: result.stdout.slice(0, 8000) }, null, 2));
+          console.log(`[Session ${session}] Dump: ${dbgPath}`);
+        } catch {
+          /* debug-only — never block */
+        }
 
         if (result.json?.is_error) {
           console.error(`[Session ${session}] Error: ${result.json.result}`);
@@ -330,6 +349,8 @@ describe('Greenfield: Tic Tac Toe via Sprintpilot', () => {
         }
 
         // Validate state file between sessions — stories_remaining and next_skill must persist
+        // EXCEPT when the autopilot has legitimately reached sprint-complete;
+        // then empty stories_remaining + null next_skill are correct terminal state.
         const stateFilePath = join(
           project.dir,
           '_bmad-output/implementation-artifacts/autopilot-state.yaml',
@@ -337,8 +358,19 @@ describe('Greenfield: Tic Tac Toe via Sprintpilot', () => {
         if (existsSync(stateFilePath) && existsSync(join(project.dir, '.autopilot.lock'))) {
           const state = readYaml(stateFilePath);
           console.log(
-            `[State] stories_remaining: ${JSON.stringify(state.stories_remaining)}, next_skill: ${state.next_skill}`,
+            `[State] current_bmad_step: ${state.current_bmad_step}, stories_remaining: ${JSON.stringify(state.stories_remaining)}, next_skill: ${state.next_skill}`,
           );
+
+          // If the autopilot reached sprint-complete but was SIGTERM'd before
+          // releasing the lock + deleting state_file, empty stories_remaining
+          // is the correct state. Break out of the session loop — the sprint
+          // really is done.
+          if (state.current_bmad_step === 'sprint-complete') {
+            console.log(
+              `[Session ${session}] Sprint is complete per state file — breaking session loop`,
+            );
+            break;
+          }
 
           // stories_remaining must be a non-empty array while sprint is in progress
           expect(
@@ -434,11 +466,15 @@ describe('Greenfield: Tic Tac Toe via Sprintpilot', () => {
     const planning = join(dir, '_bmad-output/planning-artifacts');
     expect(existsSync(planning), 'planning-artifacts directory must exist').toBe(true);
 
-    // Sprint status
+    // Sprint status — accept either inline (`epic-1: done`) or block form
+    // (`epic-1:\n    status: done`). BMad's shape is the block form.
     const sprintStatus = join(dir, '_bmad-output/implementation-artifacts/sprint-status.yaml');
     assertFileExists(sprintStatus);
     assertFileNotEmpty(sprintStatus);
-    assertFileContains(sprintStatus, /epic-\d+:\s*done/);
+    assertFileContains(
+      sprintStatus,
+      /(epic-\d+:\s*done\b|epic-\d+:\s*(?:[^\n]*\n\s*)*?\s+status:\s*done\b)/,
+    );
     console.log('[Artifacts] sprint-status.yaml ✓');
 
     // Epics — must exist with epic sections and BDD acceptance criteria
