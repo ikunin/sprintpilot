@@ -119,6 +119,17 @@ Resolve:
 
 **`{state_file}` schema** (referenced as `STATE_FIELDS` below): `last_updated`, `current_story`, `current_bmad_step`, `completed_skill`, `next_skill`, `session_stories_done`, `stories_remaining`, `git_enabled`, `platform`, `in_worktree`, `pr_base`. Always update `last_updated` on every write.
 
+**PR 6 state-write policy (`autopilot.coalesce_state_writes`):**
+
+When the resolved profile sets `autopilot.coalesce_state_writes: true` (nano/small/medium/large by default; `legacy` false), state writes route through `state-shard.js` using a `sprint`-keyed shard as the authoritative state for sprint-level fields, and per-story shards for story-scoped fields. Policy:
+
+- **Critical keys** (`current_story`, `current_bmad_step`, `in_worktree`, `patch_commits`) always go to shard via `state-shard.js batch`, which auto-flushes and writes straight through because the script recognizes them as crash-recovery keys.
+- **Non-critical fields** (test counts, file lists, next_skill, session_stories_done, stories_remaining, etc.) go to `state-shard.js batch`, accumulating in the pending buffer. Flushed at each story boundary (step 7) and session checkpoint (step 9).
+- **Merged authoritative state** (`autopilot-state.yaml`) is rebuilt via `merge-shards.js` at story boundary + session checkpoint + sprint complete.
+- **Rollback** (`coalesce_state_writes: false`): every `Update {state_file}` action writes directly to `autopilot-state.yaml` via the existing STATE_FIELDS shape — no shard indirection. This is the v1.0.5 path byte-for-byte.
+
+When the flag is `false`, the direct-write instructions below are authoritative. When `true`, substitute each `Update {state_file} with STATE_FIELDS: <changes>` with a `state-shard.js batch --story sprint --json <changes>` call, followed by a `merge-shards.js --project-root "{{project_root}}"` at the story boundary / checkpoint. The merged `autopilot-state.yaml` remains the single source of truth for resume-after-crash.
+
 ### Git integration bootstrap
 
 <action>Check if `{project-root}/_Sprintpilot/manifest.yaml` exists</action>
@@ -152,6 +163,9 @@ Resolve:
   `node {{project_root}}/_Sprintpilot/scripts/resolve-profile.js get autopilot.implementation_flow`
   Output: `full` or `quick`. Set `{{implementation_flow}}` = output. Default to `full` if the call fails.
   Run: `node {{project_root}}/_Sprintpilot/scripts/resolve-profile.js get autopilot.session_story_limit` → override `{{session_story_limit}}` if the resolver produces a different value than config.yaml (profile overrides config silence). Same pattern for `autopilot.retrospective_mode`.
+  </action>
+  <action>**Resolve coalesce flag** — run:
+  `node {{project_root}}/_Sprintpilot/scripts/resolve-profile.js get autopilot.coalesce_state_writes` → `{{coalesce_state_writes}}`. Default `false` on failure.
   </action>
   <!-- PR 11: detect the running host and resolve parallel-dispatch config. -->
   <action>**Detect host agent** — run:
@@ -574,6 +588,11 @@ Resolve:
 </check>
 
 <action>Update `{state_file}` with STATE_FIELDS (set `current_bmad_step = executing`, `completed_skill = <previous skill>`).</action>
+<check if="{{coalesce_state_writes}} is true">
+  <action>Mirror critical keys to the shard (bypasses batching for crash-recovery correctness):
+  `node {{project_root}}/_Sprintpilot/scripts/state-shard.js batch --story sprint --json "{\"current_bmad_step\":\"executing\",\"current_story\":\"{{current_story}}\",\"completed_skill\":\"<previous skill>\"}" --project-root "{{project_root}}"` — ignore failures.
+  </action>
+</check>
 
 <!-- Autopilot menu handling rules apply — see AUTOPILOT RULES section above -->
 
@@ -878,6 +897,17 @@ Instruct: "Re-verify code review for story {{current_story}} — all patch findi
 <action>**Increment `{{session_stories_done}}` by 1** — this is the ONLY place the counter ticks up. It runs only after the story's full implementation cycle (dev-story GREEN + code-review + patches + artifacts committed + optional push/PR). Creating a story file in step 3 never increments this counter.</action>
 <action>Remove `{{current_story}}` from `{{stories_remaining}}` list</action>
 
+<!-- PR 6 STORY-BOUNDARY FLUSH: if coalescing is on, flush the sprint
+     shard's pending buffer now (writes accumulated non-critical fields
+     to the shard) and merge all shards into the authoritative
+     autopilot-state.yaml / decision-log.yaml. Fast on a single-story
+     sprint; amortized when multiple stories complete per session. -->
+<check if="{{coalesce_state_writes}} is true">
+  <action>Run: `node {{project_root}}/_Sprintpilot/scripts/state-shard.js flush --story sprint --project-root "{{project_root}}"` — ignore failures.</action>
+  <action>Run: `node {{project_root}}/_Sprintpilot/scripts/state-shard.js flush --story "{{current_story}}" --project-root "{{project_root}}"` — ignore failures (no-op if no per-story shard was ever batched).</action>
+  <action>Run: `node {{project_root}}/_Sprintpilot/scripts/merge-shards.js --project-root "{{project_root}}"` — ignore failures. Produces merged autopilot-state.yaml + decision-log.yaml.</action>
+</check>
+
 <action>Report: "Story {{current_story}} done — N/N passing{{#if pr_url}} — PR: {{pr_url}}{{/if}}"</action>
 
 <action>Check if ALL stories in this epic are `done`</action>
@@ -965,6 +995,10 @@ Instruct: "Re-verify code review for story {{current_story}} — all patch findi
 </check>
 
 <action>Update `{state_file}` with STATE_FIELDS.</action>
+<check if="{{coalesce_state_writes}} is true">
+  <action>Run: `node {{project_root}}/_Sprintpilot/scripts/state-shard.js flush --story sprint --project-root "{{project_root}}"` — ignore failures.</action>
+  <action>Run: `node {{project_root}}/_Sprintpilot/scripts/merge-shards.js --project-root "{{project_root}}"` — ignore failures.</action>
+</check>
 
 <!-- Phase-timing session snapshot (no-op if autopilot.phase_timings is false). -->
 <action>Run: `node {{project_root}}/_Sprintpilot/scripts/summarize-timings.js --session-only --format md --quiet --project-root "{{project_root}}"` — ignore failures. The stdout line is the artifact path; include it in the checkpoint report if non-empty.</action>
@@ -1015,6 +1049,12 @@ No work will be repeated.
 
 <action>Verify: all stories `done`, all retrospectives `done` in `{status_file}`</action>
 <action>Run full test suite — report `N/N passed`</action>
+
+<!-- PR 6 SPRINT-COMPLETE FLUSH + ARCHIVE (no-op if coalescing is off). -->
+<check if="{{coalesce_state_writes}} is true">
+  <action>Run: `node {{project_root}}/_Sprintpilot/scripts/state-shard.js flush --story sprint --project-root "{{project_root}}"` — ignore failures.</action>
+  <action>Run: `node {{project_root}}/_Sprintpilot/scripts/merge-shards.js --archive --layer "sprint-complete-$(date -u +%Y%m%dT%H%M%SZ)" --project-root "{{project_root}}"` — ignore failures. --archive moves merged shards to .archive/layer-... so next sprint starts clean.</action>
+</check>
 
 <!-- Final phase-timing hotspot report (no-op if autopilot.phase_timings is false). -->
 <action>Run: `node {{project_root}}/_Sprintpilot/scripts/summarize-timings.js --format md --quiet --project-root "{{project_root}}"` — ignore failures. The stdout line is the artifact path; include it in the sprint report if non-empty.</action>
