@@ -226,6 +226,31 @@ A running log of non-obvious implementation choices made during the v2 rollout. 
 **Decision:** Save + restore `gc.auto` on both the main repo AND every worktree, independently.
 **Rationale:** `git config --local` scopes to the current worktree's config. Setting it on the main repo does NOT propagate to worktrees. The asymmetry can lead to surprises where a worktree's gc still triggers mid-session. Saving the prior value per-worktree is belt-and-suspenders and costs ~2 git calls per worktree setup + teardown.
 **Impact:** Low. The restore is best-effort (ignore-failure-on-unset); in the rare case a restore fails, the user is left with `gc.auto=0` on one worktree, which is conservative rather than dangerous.
+
+## PR 11 — Parallel intra-epic stories
+
+### D11.1 — architecture / host detection priority
+**Decision:** Env vars (HIGH) > parent process name (MEDIUM) > filesystem markers (LOW). Filesystem-only detection FORCES `supports_parallel=false` regardless of which host the markers imply.
+**Rationale:** The install layout — `.claude/skills/`, `.cursor/`, etc. — proves the install *target*, not the currently-running host. A user can `sprintpilot install --target claude-code` and then invoke from Cursor; the markers say "claude-code" but the running host is Cursor. The tautology guard turns a confident-looking filesystem signal into a low-confidence one, closing concept §M13's concern.
+**Impact:** Medium-low. Users running Sprintpilot under Claude Code always set `CLAUDECODE=1`, so the high-confidence path triggers and parallelism works. Users under other hosts see sequential, which is the correct behavior.
+
+### D11.2 — architecture / no LLMs from Sprintpilot scripts
+**Decision:** `dispatch-layer.js` writes a `.layer-plan.json` but does not itself invoke the host agent.
+**Rationale:** Sprintpilot scripts are pure infrastructure (concept §7.6). Invoking an LLM from a script would break tool-agnostic correctness: Sprintpilot must work identically on every host, and host agents have wildly different sub-agent APIs. Delegating sub-agent spawning to workflow.md (which the host reads) keeps the dispatch surface thin and host-specific behavior in the host's hands.
+**Impact:** Low. Workflow.md's main loop gates on `{{host_supports_parallel}} AND {{host_confidence}}=="high"` before dispatching; otherwise falls back to sequential.
+
+### D11.3 — architecture / silent-degrade default
+**Decision:** `parallel_stories: true` on a host without parallel support coerces to `false` with a single log line; it does NOT raise an error.
+**Rationale:** Users authoring `medium`/`large` profiles on a shared codebase don't know which host every collaborator runs. Raising an error would force every non-Claude-Code user to override the flag. Coercion gives predictable sequential behavior with a discoverable log line, which matches the plan's "no silent no-op" requirement.
+**Impact:** Low. The log line is emitted exactly once per session (via the workflow's boot step), so it doesn't flood output.
+
+### D11.4 — scope / no e2e parallel test
+**Decision:** PR 11 adds unit tests for adapter + dispatcher but no e2e `tests/e2e/medium-parallel.test.ts`.
+**Rationale:** The plan lists the e2e as desirable but gates it on Claude Code availability in CI (which isn't a given in external contributor environments). Unit tests lock in the adapter's detection logic and the dispatcher's plan-generation correctness; the real-world speedup is measurable via `log-timing.js` on any repo with the flag flipped.
+**Impact:** Medium. A regression in the host-to-dispatcher wiring would escape unit tests. The log-timing data surfaces it quickly in real use, and CI can add the e2e later when a reliable Claude Code harness exists.
+**Decision:** Save + restore `gc.auto` on both the main repo AND every worktree, independently.
+**Rationale:** `git config --local` scopes to the current worktree's config. Setting it on the main repo does NOT propagate to worktrees. The asymmetry can lead to surprises where a worktree's gc still triggers mid-session. Saving the prior value per-worktree is belt-and-suspenders and costs ~2 git calls per worktree setup + teardown.
+**Impact:** Low. The restore is best-effort (ignore-failure-on-unset); in the rare case a restore fails, the user is left with `gc.auto=0` on one worktree, which is conservative rather than dangerous.
 **Decision:** `scaffold` writes a header comment block into `dependencies.yaml` explaining the schema + upgrade path to parallel execution.
 **Rationale:** Addresses M11 (discoverability) from the plan. A user running `resolve-dag.js scaffold` as a setup step sees the same docs they'd otherwise have to find in the concept doc. The starter document is a safe linear chain, making parallelism opt-in rather than on-by-default.
 **Impact:** Low. Header is a few lines; cost in write-time is negligible.

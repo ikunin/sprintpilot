@@ -7,3 +7,22 @@ multi_agent:
   max_parallel_research: 3 # Max concurrent research agents per batch
   max_parallel_analysis: 5 # Max concurrent codebase analysis agents
   # session_story_limit NOT duplicated here — uses autopilot's single authoritative limit
+
+  # PR 11: intra-epic parallel story execution.
+  #   parallel_stories: true enables dispatch-layer.js on Claude Code;
+  #     other hosts silently fall back to sequential (per agent-adapter.js
+  #     detection — confidence high + supports_parallel true).
+  #   max_parallel_stories: cap on concurrent sub-agents per layer.
+  #   min_epic_duration_for_parallel_sec: skip parallelism for epics
+  #     whose estimated wall-clock is below this threshold (saves
+  #     dispatch overhead).
+  #   max_consecutive_conflicts: disable parallelism for the rest of the
+  #     session once N consecutive merge conflicts occur.
+  #   effective_parallel_floor: never drop below this mid-session even
+  #     after failure-driven concurrency reduction.
+  parallel_stories: false
+  max_parallel_stories: 2
+  min_epic_duration_for_parallel_sec: 300
+  baseline_story_duration_sec: 180
+  max_consecutive_conflicts: 2
+  effective_parallel_floor: 1

@@ -2,6 +2,26 @@
 
 ## [Unreleased]
 
+**PR 11 of 12 — Parallel intra-epic stories (M2)**
+
+Ships the orchestrator + host detector for parallel story execution within an epic. `parallel_stories: true` runs N sub-agents concurrently on Claude Code (the only host with a first-class multi-agent API today). Other hosts silently fall back to sequential with a one-line log notice — no silent no-op, no false promise of wall-clock reductions. Host detection prioritizes env vars (high confidence), then parent-process name (medium), then filesystem markers (low); low-confidence detection forces `supports_parallel=false` to close the install-marker tautology.
+
+### Added
+- `_Sprintpilot/scripts/agent-adapter.js` — `detect` command. Emits `{host, supports_parallel, confidence, detection_reason}`. Host capability table starts with `claude-code: supports_parallel=true` and every other host false. Future hosts opt in here after validation.
+- `_Sprintpilot/scripts/dispatch-layer.js` — reads a comma-separated layer of story keys, creates one worktree per story, writes `_bmad-output/implementation-artifacts/.layer-plan.json` describing each story's worktree + branch. Script does NOT call LLMs; actual sub-agent spawning is the host workflow's job. `--max-parallel` caps concurrent worktrees, `--dry-run` computes the plan without touching the filesystem.
+- `tests/unit/agent-adapter.test.ts` — 9 tests: host-capability table, env-var precedence, filesystem-marker tautology guard, unknown-host default.
+- `tests/unit/dispatch-layer.test.ts` — 10 tests: layer parsing (including path-traversal rejection), effective-parallel bounds, plan file atomicity, CLI exit codes.
+
+### Changed
+- `_Sprintpilot/modules/ma/config.yaml`: new keys `parallel_stories` (default false), `max_parallel_stories` (2), `min_epic_duration_for_parallel_sec`, `baseline_story_duration_sec`, `max_consecutive_conflicts`, `effective_parallel_floor`.
+- `_Sprintpilot/modules/autopilot/profiles/_base.yaml` + `large.yaml`: profile defaults align with the plan (`medium`: off by default, opt-in max 2; `large`: on, max 3).
+- `_Sprintpilot/skills/sprint-autopilot-on/workflow.md`: boot detects the host and reads `ma.parallel_stories`. Coerces `parallel_stories=false` when the host's detection confidence is not `high` OR `supports_parallel=false`, and logs a one-line notice so users on non-Claude-Code hosts get a predictable sequential experience.
+
+### Rollback
+- Set `ma.parallel_stories: false` on the active profile (default on all profiles except `large`). Dispatcher is never invoked; autopilot reverts to sequential.
+
+## [Unreleased — PR 10]
+
 **PR 10 of 12 — Worktree cost mitigation + concurrent discipline**
 
 Makes per-worktree submodule init 2–5s instead of ~30s on git ≥ 2.18 via `--reference` + `--jobs=4`. Wraps ref-mutating git calls with a jittered-backoff retry so transient ref-lock contention in concurrent worktree setups doesn't fail builds. Per-submodule locks serialize concurrent `git submodule update` calls across worktrees. `gc.auto` is disabled for the duration of a sprint on both the main repo and every worktree, then restored.

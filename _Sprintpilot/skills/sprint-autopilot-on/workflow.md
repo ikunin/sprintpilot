@@ -153,6 +153,17 @@ Resolve:
   Output: `full` or `quick`. Set `{{implementation_flow}}` = output. Default to `full` if the call fails.
   Run: `node {{project_root}}/_Sprintpilot/scripts/resolve-profile.js get autopilot.session_story_limit` → override `{{session_story_limit}}` if the resolver produces a different value than config.yaml (profile overrides config silence). Same pattern for `autopilot.retrospective_mode`.
   </action>
+  <!-- PR 11: detect the running host and resolve parallel-dispatch config. -->
+  <action>**Detect host agent** — run:
+  `node {{project_root}}/_Sprintpilot/scripts/agent-adapter.js detect --project-root "{{project_root}}"`
+  Parse the JSON output: set `{{host_agent}}` = host, `{{host_supports_parallel}}` = supports_parallel, `{{host_confidence}}` = confidence.
+  </action>
+  <action>**Resolve parallelism flags** via the profile resolver:
+  - `{{parallel_stories}}` from `ma.parallel_stories` (default false).
+  - `{{max_parallel_stories}}` from `ma.max_parallel_stories` (default 2).
+  Silently coerce `{{parallel_stories}}` to false when `{{host_supports_parallel}}` is false OR `{{host_confidence}}` is not `high`. Log once:
+  `parallel_stories requested but host '{{host_agent}}' does not declare parallel support (confidence={{host_confidence}}); running sequentially`.
+  </action>
 </check>
 
 <check if="manifest does NOT exist">

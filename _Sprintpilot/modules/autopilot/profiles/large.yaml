@@ -12,4 +12,7 @@ autopilot:
 ma:
   parallel_stories: true
   max_parallel_stories: 3
+  # PR 11 safety rails (inherited defaults via _base, overridden here).
+  max_consecutive_conflicts: 2
+  effective_parallel_floor: 1
   state_sharding: always

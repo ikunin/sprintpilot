@@ -23,6 +23,12 @@ git:
 ma:
   parallel_stories: false
   max_parallel_stories: 2
+  # PR 11 intra-epic parallelism safety rails. Honored by dispatch-layer.js
+  # when a host declares parallel support (see agent-adapter.js).
+  min_epic_duration_for_parallel_sec: 300
+  baseline_story_duration_sec: 180
+  max_consecutive_conflicts: 2
+  effective_parallel_floor: 1
   parallel_epics: false
   # PR 3: state_sharding semantics — auto = shard when parallelism is active,
   # always = shard unconditionally (for forcing the code path in tests),
