@@ -2,6 +2,22 @@
 
 ## [Unreleased]
 
+**PR 6 of 12 — Coalesce state writes (M3)**
+
+Adds a `batch` / `flush` mode to `state-shard.js` that buffers non-critical field changes in a pending file and flushes them atomically at a story boundary — one shard write per story instead of 5+. Four crash-recovery keys (`current_story`, `current_bmad_step`, `in_worktree`, `patch_commits`) bypass the buffer and write straight through, keeping resume-after-crash semantics intact. Infrastructure ships now; PR 11 (parallel stories) is the first consumer.
+
+### Added
+- `_Sprintpilot/scripts/state-shard.js` — new `batch` and `flush` actions. `batch` accumulates partial updates into `.pending/<kind>/<story>.yaml`; `flush` merges pending into the shard and deletes the pending file. `write` auto-flushes pending first (so direct writes never leave stale buffers). Exports `CRITICAL_KEYS`, `containsCriticalKey`, `batchWrite`, `flushPending`.
+- `tests/unit/state-shard-coalesce.test.ts` — 9 new tests covering pending accumulation, idempotent flush, merge into existing shard, critical-key bypass (prior buffer + new write both land), and write auto-flush. Suite: 300 → 309 passing.
+
+### Changed
+- `_Sprintpilot/modules/autopilot/profiles/_base.yaml`: `coalesce_state_writes: false → true`. `legacy` keeps the pre-PR direct-write behavior.
+
+### Rollback
+- Set `autopilot.coalesce_state_writes: false` on the active profile. Callers fall back to direct `write` calls (the existing path).
+
+## [Unreleased — PR 5]
+
 **PR 5 of 12 — Nano orchestration cuts (epic-granularity, squash merge, in-place branching)**
 
 When `git.granularity: epic`, the autopilot creates one branch per epic and one PR per epic (merged with `--squash`) instead of one branch / PR per story. When `git.worktree.enabled: false`, stories run in-place on the shared branch with no worktree. Both settings are nano defaults; other profiles keep story granularity.

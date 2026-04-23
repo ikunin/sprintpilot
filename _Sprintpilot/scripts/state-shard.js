@@ -33,13 +33,27 @@ const log = require('../lib/runtime/log');
 
 const STORY_RE = /^[a-z0-9][a-z0-9-]*$/;
 const VALID_KINDS = ['state', 'decision-log'];
-const VALID_ACTIONS = ['write', 'read', 'append', 'init'];
+const VALID_ACTIONS = ['write', 'read', 'append', 'init', 'batch', 'flush'];
 const SCHEMA_VERSION = 1;
+
+// PR 6: critical-state keys that bypass buffering. Writing one of these
+// via `batch` flushes the pending buffer first and then the write itself
+// goes straight to the shard. Rationale: current_story / current_bmad_step
+// / in_worktree / patch_commits are required for crash-resume correctness,
+// so they cannot sit in an unflushed buffer when the process is killed.
+const CRITICAL_KEYS = new Set([
+  'current_story',
+  'current_bmad_step',
+  'in_worktree',
+  'patch_commits',
+]);
 
 const KIND_DIR = {
   state: '.autopilot-state',
   'decision-log': '.decision-log',
 };
+
+const PENDING_DIR = '.pending';
 
 function help() {
   log.out(
@@ -331,6 +345,84 @@ function listShardStories(projectRoot, kind) {
 }
 
 // --------------------------------------------------------------------------
+// Pending buffer (PR 6 — coalesce state writes)
+// --------------------------------------------------------------------------
+
+function pendingDir(projectRoot, kind) {
+  return path.join(projectRoot, '_bmad-output', 'implementation-artifacts', PENDING_DIR, KIND_DIR[kind]);
+}
+
+function pendingPath(projectRoot, story, kind) {
+  const dir = pendingDir(projectRoot, kind);
+  const full = path.join(dir, `${story}.yaml`);
+  const expectedPrefix = path.resolve(dir) + path.sep;
+  const resolved = path.resolve(full);
+  if (!resolved.startsWith(expectedPrefix)) {
+    throw new Error(`pending path escapes expected directory: ${resolved}`);
+  }
+  return full;
+}
+
+function readPending(projectRoot, story, kind) {
+  const file = pendingPath(projectRoot, story, kind);
+  if (!fs.existsSync(file)) return {};
+  const raw = fs.readFileSync(file, 'utf8');
+  try {
+    return yamlLoad(raw) || {};
+  } catch {
+    // Corrupt pending — drop it; the caller's write will overwrite atomically.
+    return {};
+  }
+}
+
+function writePendingAtomic(projectRoot, story, kind, obj) {
+  const file = pendingPath(projectRoot, story, kind);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const body = `${yamlDump(obj)}\n`;
+  const tmp = `${file}.tmp.${process.pid}.${process.hrtime.bigint().toString(36)}`;
+  fs.writeFileSync(tmp, body);
+  fs.renameSync(tmp, file);
+  return file;
+}
+
+function clearPending(projectRoot, story, kind) {
+  const file = pendingPath(projectRoot, story, kind);
+  try {
+    fs.unlinkSync(file);
+  } catch {
+    // Not present — nothing to clear.
+  }
+}
+
+function batchWrite(projectRoot, story, kind, partial) {
+  const pending = readPending(projectRoot, story, kind);
+  const merged = deepAssign(pending, partial);
+  writePendingAtomic(projectRoot, story, kind, merged);
+  return merged;
+}
+
+function flushPending(projectRoot, story, kind) {
+  const pending = readPending(projectRoot, story, kind);
+  if (!pending || Object.keys(pending).length === 0) {
+    clearPending(projectRoot, story, kind);
+    return { flushed: false, fields: 0 };
+  }
+  const existing = readShard(projectRoot, story, kind) || {};
+  const merged = deepAssign(stripReservedKeys(existing), pending);
+  writeShardAtomic(projectRoot, story, kind, merged);
+  clearPending(projectRoot, story, kind);
+  return { flushed: true, fields: Object.keys(pending).length };
+}
+
+function containsCriticalKey(partial) {
+  if (!partial || typeof partial !== 'object' || Array.isArray(partial)) return false;
+  for (const k of Object.keys(partial)) {
+    if (CRITICAL_KEYS.has(k)) return true;
+  }
+  return false;
+}
+
+// --------------------------------------------------------------------------
 // CLI
 // --------------------------------------------------------------------------
 
@@ -378,8 +470,8 @@ function main() {
     writeShardAtomic(projectRoot, story.value, kind.value, {});
     return;
   }
-  if (action === 'write') {
-    let next = existing;
+  if (action === 'write' || action === 'batch') {
+    const partial = {};
     if (opts.json !== undefined) {
       let parsed;
       try {
@@ -392,7 +484,7 @@ function main() {
         log.error('--json must be a JSON object');
         process.exit(1);
       }
-      next = deepAssign({ ...next }, parsed);
+      Object.assign(partial, parsed);
     }
     if (opts.field !== undefined) {
       const eq = opts.field.indexOf('=');
@@ -402,9 +494,34 @@ function main() {
       }
       const p = opts.field.slice(0, eq);
       const v = opts.field.slice(eq + 1);
-      next = setByDottedPath({ ...next }, p, parseFieldValue(v));
+      setByDottedPath(partial, p, parseFieldValue(v));
     }
+
+    if (action === 'batch') {
+      // Critical keys bypass the buffer — flush pending, re-read the now-
+      // flushed shard, then write straight through so crash-recovery always
+      // sees both the prior buffered fields and the new critical fields.
+      if (containsCriticalKey(partial)) {
+        flushPending(projectRoot, story.value, kind.value);
+        const fresh = readShard(projectRoot, story.value, kind.value) || {};
+        const next = deepAssign(stripReservedKeys(fresh), partial);
+        writeShardAtomic(projectRoot, story.value, kind.value, next);
+        return;
+      }
+      batchWrite(projectRoot, story.value, kind.value, partial);
+      return;
+    }
+    // action === 'write' — direct write to shard (also flushes any pending
+    // to keep flush-before-write invariant).
+    flushPending(projectRoot, story.value, kind.value);
+    const fresh = readShard(projectRoot, story.value, kind.value) || existing;
+    const next = deepAssign({ ...fresh }, partial);
     writeShardAtomic(projectRoot, story.value, kind.value, next);
+    return;
+  }
+  if (action === 'flush') {
+    const res = flushPending(projectRoot, story.value, kind.value);
+    process.stdout.write(`${JSON.stringify(res)}\n`);
     return;
   }
   if (action === 'append') {
@@ -449,10 +566,14 @@ module.exports = {
   VALID_ACTIONS,
   SCHEMA_VERSION,
   KIND_DIR,
+  PENDING_DIR,
+  CRITICAL_KEYS,
   validateStory,
   validateKind,
   shardDir,
   shardPath,
+  pendingDir,
+  pendingPath,
   nowStamp,
   yamlDump,
   yamlLoad,
@@ -468,6 +589,12 @@ module.exports = {
   deepAssign,
   stripTrailingComment,
   firstTopLevelColon,
+  readPending,
+  writePendingAtomic,
+  clearPending,
+  batchWrite,
+  flushPending,
+  containsCriticalKey,
 };
 
 if (require.main === module) {

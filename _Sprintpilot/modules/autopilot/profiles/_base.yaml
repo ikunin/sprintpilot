@@ -10,7 +10,7 @@ autopilot:
   session_story_limit: 5
   retrospective_mode: auto
   phase_timings: true              # M0, PR 2 — enabled by default (legacy overrides to false)
-  coalesce_state_writes: false     # M3, PR 6
+  coalesce_state_writes: true      # M3, PR 6 — batch non-critical writes, flush at story boundary
   conditional_boot_work: false     # M4, PR 7
   cache_shared_reads: false        # M5, PR 8
 

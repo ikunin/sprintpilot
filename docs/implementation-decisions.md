@@ -121,6 +121,31 @@ A running log of non-obvious implementation choices made during the v2 rollout. 
 **Decision:** PR 5 adds a sync-status.js passthrough test but no workflow-level unit test for the epic-branch decision tree.
 **Rationale:** Same rationale as D4.3 — workflow.md branches are LLM-driven. The load-bearing parts are (a) sync-status.js correctly records epic_id + granularity (tested directly) and (b) the resolver returns `granularity=epic` for nano (tested by nano-routing.test.ts). The LLM's branch-picking then follows the rule that's spelled out in the workflow text.
 **Impact:** Medium-low. Without an e2e fixture specifically exercising epic granularity end-to-end, regressions in the decision tree would escape unit tests. The existing greenfield e2e covers story granularity, so at minimum the default path is safe.
+
+## PR 6 — Coalesce state writes
+
+### D6.1 — architecture / pending file model
+**Decision:** Coalescing uses a persistent `.pending/<kind>/<story>.yaml` sibling rather than an in-process buffer.
+**Rationale:** State-shard.js is a cold process — one invocation per CLI call. An in-process buffer would evaporate between calls. A pending file is durable across subprocess invocations AND across the host agent's context compaction. Side benefit: a crash mid-story leaves the pending buffer on disk; the next invocation's `flush` recovers it, so batched writes are not silently lost.
+**Impact:** Low. Pending files are auto-cleared after flush and after any critical-key bypass. Directory `.pending/` sits alongside `.archive/` under `_bmad-output/implementation-artifacts/`, which is already gitignored in templates.
+
+### D6.2 — architecture / critical-key bypass
+**Decision:** Four keys bypass the buffer: `current_story`, `current_bmad_step`, `in_worktree`, `patch_commits`.
+**Rationale:** Each one is required for crash-resume correctness. `current_story` + `current_bmad_step` tell the next session where to pick up. `in_worktree` decides whether to `cd` into a worktree before any subsequent action. `patch_commits` must be persisted per-patch in step 6 so a crash mid-loop doesn't orphan a commit. All other fields (test counts, file lists, lint output, story metadata) are reconstructable or non-load-bearing.
+**Impact:** Low. Critical writes trigger an immediate flush-then-write, so the shard ends up with BOTH the prior buffered fields AND the critical payload. Verified by `batch with a critical key auto-flushes prior buffered fields + itself` test.
+
+### D6.3 — architecture / write semantics
+**Decision:** The direct `write` action auto-flushes pending before writing.
+**Rationale:** Without this, a caller who mixes `batch` and `write` would leave stale pending fields behind, where subsequent `read` sees them but `write` did not. Auto-flush preserves the invariant "after any action, pending is empty OR contains strictly-newer-than-shard data."
+**Impact:** Low. The cost is one extra shard read+write when both pending and direct-write happen in the same session. The win is that the shard's field set is always consistent with the caller's mental model.
+
+### D6.4 — scope / no workflow.md migration yet
+**Decision:** PR 6 ships the batch/flush API and the profile flag, but does NOT rewire the existing STATE_FIELDS direct writes in workflow.md to go through `batch`.
+**Rationale:** The current STATE_FIELDS path writes directly to `autopilot-state.yaml` (single-writer, pre-shard). Migrating it requires running `merge-shards.js` at every read, which only pays off once parallel sub-agents (PR 11) actually share a story's state. Shipping the API alone unblocks PR 11 without destabilizing the current single-writer path. Acceptance criterion #3 ("final merged state YAMLs identical to pre-PR") is trivially satisfied because the direct-write path hasn't changed.
+**Impact:** Medium-low. Users on non-legacy profiles see `coalesce_state_writes: true` but no behavior difference until PR 11 consumes it.
+**Decision:** PR 5 adds a sync-status.js passthrough test but no workflow-level unit test for the epic-branch decision tree.
+**Rationale:** Same rationale as D4.3 — workflow.md branches are LLM-driven. The load-bearing parts are (a) sync-status.js correctly records epic_id + granularity (tested directly) and (b) the resolver returns `granularity=epic` for nano (tested by nano-routing.test.ts). The LLM's branch-picking then follows the rule that's spelled out in the workflow text.
+**Impact:** Medium-low. Without an e2e fixture specifically exercising epic granularity end-to-end, regressions in the decision tree would escape unit tests. The existing greenfield e2e covers story granularity, so at minimum the default path is safe.
 **Decision:** Nano routing is verified by asserting the *resolver output*, not by exercising workflow.md directly.
 **Rationale:** Workflow.md is instruction text read by an LLM; there is no in-process "workflow runner" to unit-test. The routing correctness depends entirely on what `resolve-profile.js` returns for `autopilot.implementation_flow` (and related keys). If the resolver is right, the LLM-executed gates will pick the right branch. Asserting the resolver is the load-bearing test.
 **Impact:** Low. Workflow gates are still reviewed manually; the unit test locks down the profile-to-flow contract.
