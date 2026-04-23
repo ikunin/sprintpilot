@@ -50,6 +50,14 @@ describe('detectFromEnv', () => {
     });
   });
 
+  it('detects gemini-cli via GEMINI_CLI=1', () => {
+    expect(detectFromEnv({ GEMINI_CLI: '1' })?.host).toBe('gemini-cli');
+  });
+
+  it('detects gemini-cli via GEMINI_CLI_SURFACE (older subprocess env)', () => {
+    expect(detectFromEnv({ GEMINI_CLI_SURFACE: 'cli' })?.host).toBe('gemini-cli');
+  });
+
   it('detects cursor via CURSOR_SESSION_ID', () => {
     expect(detectFromEnv({ CURSOR_SESSION_ID: 'abc' })?.host).toBe('cursor');
   });
@@ -94,6 +102,16 @@ describe('detect — full decision tree', () => {
   it('unknown host returns confidence=low, supports_parallel=false', () => {
     const r = detect({ env: {}, projectRoot: tmpRoot });
     expect(r.host).toBe('unknown');
+    expect(r.supports_parallel).toBe(false);
+  });
+
+  it('gemini-cli via env is high confidence but supports_parallel stays false (experimental)', () => {
+    const r = detect({ env: { GEMINI_CLI: '1' }, projectRoot: tmpRoot });
+    expect(r.host).toBe('gemini-cli');
+    expect(r.confidence).toBe('high');
+    // Default false because worktree-scoped subagents aren't shipped
+    // upstream. Workflow-level opt-in flips this after the user sets
+    // ma.experimental_parallel_on_gemini: true in config.
     expect(r.supports_parallel).toBe(false);
   });
 });

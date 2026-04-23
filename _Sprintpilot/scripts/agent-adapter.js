@@ -33,10 +33,18 @@ const { parseArgs } = require('../lib/runtime/args');
 const log = require('../lib/runtime/log');
 
 // Host capability table. supports_parallel is true only for hosts with
-// a first-class multi-agent API — today, Claude Code is the only one.
-// Future hosts opt in here after validating parallel dispatch works.
+// a first-class multi-agent API that Sprintpilot's dispatch-layer.js
+// can reliably drive — which today means worktree-scoped sub-agents
+// with parallel fan-out. Claude Code is the only host that meets both
+// bars at the time of writing. Gemini CLI has a subagent primitive
+// (invoke_subagent) but its worktree-scoped variant is still open
+// upstream (github.com/google-gemini/gemini-cli#22967) and real-world
+// parallelism reports serialization + quota throttling (#25534); hence
+// supports_parallel=false by default, with an experimental opt-in via
+// `ma.experimental_parallel_on_gemini: true` handled at workflow level.
 const HOSTS = {
   'claude-code': { supports_parallel: true },
+  'gemini-cli': { supports_parallel: false, subagents: 'experimental' },
   cursor: { supports_parallel: false },
   windsurf: { supports_parallel: false },
   aider: { supports_parallel: false },
@@ -50,6 +58,9 @@ const HOSTS = {
 
 const ENV_DETECTORS = [
   { host: 'claude-code', match: (env) => env.CLAUDECODE === '1' || !!env.CLAUDE_CODE_SESSION_ID },
+  // Gemini CLI sets GEMINI_CLI=1 for every subprocess it spawns
+  // (docs/tools/shell.md + docs/reference/commands.md as of v0.33.x).
+  { host: 'gemini-cli', match: (env) => env.GEMINI_CLI === '1' || !!env.GEMINI_CLI_SURFACE },
   { host: 'cursor', match: (env) => !!env.CURSOR_SESSION_ID || !!env.CURSOR_TRACE_ID },
   { host: 'windsurf', match: (env) => !!env.WINDSURF_SESSION },
   { host: 'aider', match: (env) => !!env.AIDER_SESSION || !!env.AIDER_HISTORY_FILE },
@@ -58,6 +69,7 @@ const ENV_DETECTORS = [
 
 const PARENT_DETECTORS = [
   { host: 'claude-code', parent: 'claude' },
+  { host: 'gemini-cli', parent: 'gemini' },
   { host: 'cursor', parent: 'cursor-agent' },
   { host: 'aider', parent: 'aider' },
 ];

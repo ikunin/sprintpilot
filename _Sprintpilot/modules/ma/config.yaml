@@ -27,6 +27,20 @@ multi_agent:
   max_consecutive_conflicts: 2
   effective_parallel_floor: 1
 
+  # EXPERIMENTAL: enable parallel_stories dispatch on Gemini CLI.
+  #
+  # Gemini CLI has a subagent primitive (invoke_subagent) but its
+  # worktree-scoped variant is not yet shipped upstream (tracker:
+  # github.com/google-gemini/gemini-cli#22967) and real-world parallelism
+  # reports serialization + quota throttling. Sprintpilot detects Gemini
+  # CLI via GEMINI_CLI=1 (env, HIGH confidence) or parent process `gemini`
+  # (MEDIUM), but supports_parallel stays false by default.
+  #
+  # Flip to true PER PROJECT once upstream worktree support lands (or to
+  # experiment at your own risk). Workflow logs an "experimental parallel"
+  # warning once per session when this is true AND host=gemini-cli.
+  experimental_parallel_on_gemini: false
+
   # PR 12 — cross-epic parallelism (EXPERIMENTAL).
   # Off by default on ALL profiles including large. Enabling requires:
   #   1. Both epics carry `independent: true` in dependencies.yaml.

@@ -161,7 +161,18 @@ Resolve:
   <action>**Resolve parallelism flags** via the profile resolver:
   - `{{parallel_stories}}` from `ma.parallel_stories` (default false).
   - `{{max_parallel_stories}}` from `ma.max_parallel_stories` (default 2).
-  Silently coerce `{{parallel_stories}}` to false when `{{host_supports_parallel}}` is false OR `{{host_confidence}}` is not `high`. Log once:
+  - `{{experimental_parallel_on_gemini}}` from `ma.experimental_parallel_on_gemini` (default false).
+  </action>
+  <!-- Gemini CLI opt-in: when the user explicitly sets
+       experimental_parallel_on_gemini=true AND the detected host is
+       gemini-cli at HIGH confidence, promote supports_parallel=true
+       with a one-line warning. Worktree-scoped subagents aren't shipped
+       upstream yet, so this is user-opt-in-per-project. -->
+  <check if="{{experimental_parallel_on_gemini}} is true AND {{host_agent}} is gemini-cli AND {{host_confidence}} is high">
+    <action>Set `{{host_supports_parallel}}` = true</action>
+    <action>Log once: "EXPERIMENTAL: parallel_stories enabled on Gemini CLI via ma.experimental_parallel_on_gemini=true. Worktree-scoped subagents are not yet shipped upstream (gemini-cli#22967); expect possible serialization or quota throttling."</action>
+  </check>
+  <action>Silently coerce `{{parallel_stories}}` to false when `{{host_supports_parallel}}` is false OR `{{host_confidence}}` is not `high`. Log once:
   `parallel_stories requested but host '{{host_agent}}' does not declare parallel support (confidence={{host_confidence}}); running sequentially`.
   </action>
 </check>
