@@ -423,6 +423,31 @@ When the flag is `false`, the direct-write instructions below are authoritative.
 
 <step n="2" goal="Main execution loop — route to correct handler">
 
+<!-- PR 12 CROSS-EPIC PARALLELISM (experimental, off by default on every
+     profile including `large`). All safety rails must pass:
+       1. ma.parallel_epics is true.
+       2. Host confidence is HIGH AND supports_parallel is true (same as
+          intra-epic gate in PR 11).
+       3. Two or more epics in dependencies.yaml declare `independent: true`.
+       4. preflight-merge.js reports NO conflicts between all pairs.
+       5. Session-scoped disable flag {{cross_epic_disabled_this_session}}
+          is false (flips true after any cross-epic merge conflict).
+     Only on the first iteration of the loop — subsequent iterations
+     don't re-preflight; they consume the cached safe_pairs list. -->
+<action>Resolve `{{parallel_epics}}` from `ma.parallel_epics` (default false) via the resolver.</action>
+<check if="{{parallel_epics}} is true AND {{host_supports_parallel}} is true AND {{host_confidence}} is high AND {{cross_epic_preflight_done}} is not true AND {{cross_epic_disabled_this_session}} is not true">
+  <action>Read `_Sprintpilot/sprints/dependencies.yaml` (if present). Extract every epic id where `epics.<id>.independent` is true. Set `{{independent_epic_ids}}` = comma-joined list of ids.</action>
+  <check if="{{independent_epic_ids}} has fewer than 2 ids">
+    <action>Log once: "cross-epic parallelism enabled but fewer than 2 epics declare `independent: true` in dependencies.yaml — running sequentially"</action>
+    <action>Set `{{cross_epic_preflight_done}}` = true, `{{cross_epic_safe_pairs}}` = []</action>
+  </check>
+  <check if="{{independent_epic_ids}} has 2 or more ids">
+    <action>Run: `node {{project_root}}/_Sprintpilot/scripts/preflight-merge.js --epics "{{independent_epic_ids}}" --base "{{base_branch}}" --branch-prefix "{{branch_prefix}}" --project-root "{{project_root}}"`. Parse JSON — set `{{cross_epic_safe_pairs}}` = safe_pairs, `{{cross_epic_conflict_pairs}}` = conflict_pairs.</action>
+    <action>Log: "EXPERIMENTAL: parallel_epics preflight → safe={{cross_epic_safe_pairs.length}} conflict={{cross_epic_conflict_pairs.length}} checked=N"</action>
+    <action>Set `{{cross_epic_preflight_done}}` = true</action>
+  </check>
+</check>
+
 <check if="all stories in status_file are done">
   <goto step="10">Sprint complete</goto>
 </check>
@@ -866,6 +891,7 @@ Instruct: "Re-verify code review for story {{current_story}} — all patch findi
        Otherwise: `git merge {{branch_prefix}}{{branch_name}} --no-edit`.
     3. On success: `git push origin {{base_branch}}`, set `{{merge_status}}` = "merged".
     4. On conflict: `git merge --abort`, `git fetch origin`, re-checkout base, retry merge once. On retry success: push + merged. On retry failure: `{{merge_status}}` = "failed", log warning, continue — the branch is preserved and boot reconciliation retries next session.
+    5. **PR 12 cross-epic conflict interlock**: if this merge conflict involved two independent epics AND `{{parallel_epics}}` is true, set `{{cross_epic_disabled_this_session}}` = true and log "EXPERIMENTAL: cross-epic merge conflict detected; disabling parallel_epics for the remainder of this session." The flag resets on next session start.
 
     `{{merge_status}}` is persisted by the sync-status.js call later in this step (via `--merge-status`). Do NOT call sync-status.js here — it does full block replacement and would destroy other fields.
     </action>
