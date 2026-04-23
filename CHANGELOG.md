@@ -2,6 +2,23 @@
 
 ## [Unreleased]
 
+**PR 9 of 12 — Dependency sidecar + DAG resolver**
+
+Ships the Sprintpilot-owned `dependencies.yaml` format and a resolver that turns it into an execution DAG for parallel dispatch (PR 11+). Missing sidecar → linear chain from sprint-status order (no surprises). Cycles rejected with a clear diagnostic. Includes a `scaffold` subcommand that writes a safe linear starter + inline docs so users don't have to hand-craft the first file.
+
+### Added
+- `_Sprintpilot/scripts/resolve-dag.js` — commands: `graph`, `layers`, `width`, `scaffold`. Strategies: `explicit` (reads `_Sprintpilot/sprints/dependencies.yaml`), `ordering` (linear chain from sprint-status). Priority: explicit > ordering; a sidecar `force_independent` override strips inbound/outbound edges on listed keys; `force_sequential` adds a chain among listed keys; epic-filtered builds.
+- Purpose-built YAML parser inside `resolve-dag.js` for hand-authored block-form `dependencies.yaml`: nested objects, block-form lists with inline mappings (`- key: value`), flow-form arrays on value side (`["a","b"]`), quoted keys (`"2"`), trailing comments. Deliberately narrower than a full YAML impl so no install-time dep (mirrors the PR 1 `resolve-profile.js` invariant).
+- `tests/unit/resolve-dag.test.ts` — 22 new tests covering parser round-trip on the plan's canonical example, epic filter, cycle detection, `force_independent` / `force_sequential` overrides, scaffold (create, refuse-overwrite, `--force`), CLI exit codes.
+
+### LLM graph inference — not in scope
+Per concept §7.6, Sprintpilot scripts never call LLMs. Any future AI-inferred DAG would land as a separate `sprintpilot-infer-dependencies` skill writing a proposed `dependencies.yaml`; the resolver keeps consuming the human-affirmed sidecar via the `explicit` strategy.
+
+### Rollback
+- Delete or empty `_Sprintpilot/sprints/dependencies.yaml`. Resolver falls back to `ordering` (linear chain) and subsequent PRs (11+) serialize execution accordingly. No behavior change.
+
+## [Unreleased — PR 8]
+
 **PR 8 of 12 — Cached per-iteration reads (M5)**
 
 Ships a TTL + source-mtime-aware file cache for the autopilot loop. `sprint-status.yaml`, `git-status.yaml`, and `decision-log.yaml` get read 5+ times per story step today; cached reads cut those to one disk read per TTL window, invalidating automatically when the source file's mtime advances (so writes are seen immediately without an explicit `invalidate` call).

@@ -177,6 +177,36 @@ A running log of non-obvious implementation choices made during the v2 rollout. 
 **Decision:** PR 8 ships the helper + flag but does not rewrite every workflow.md read-site to route through it.
 **Rationale:** Systematically rewriting every read in workflow.md risks breaking subtly (especially inside `<check>` gates where the LLM is expected to evaluate YAML content). The helper is available for targeted callouts (PR 11 will use it in the main loop), and for users who want to experiment by wiring it into custom skills. The safety invariant is that `cache_shared_reads: false` and the helper being unused produce byte-identical behavior today.
 **Impact:** Medium-low. The win lands opportunistically as future PRs route reads through the cache.
+
+## PR 9 — Dependency sidecar + DAG resolver
+
+### D9.1 — architecture / purpose-built YAML parser
+**Decision:** `resolve-dag.js` ships its own YAML parser instead of reusing state-shard's flat-dotted-keys parser OR pulling in `js-yaml`.
+**Rationale:** Hand-authored `dependencies.yaml` uses block-form YAML per the plan's canonical example. The state-shard parser is deliberately flat-only (D3.1). `js-yaml` would break the "scripts have zero install-time deps" invariant set by `resolve-profile.js` and re-affirmed by D3.1. A purpose-built narrow parser — nested objects, block-form lists with inline mappings, flow-form arrays on the value side, quoted keys, trailing comments — handles everything the plan's schema uses and no more.
+**Impact:** Low. 22 tests pin the parser's shape; features not covered by them should either be added to the tests or stay out of the file format.
+
+### D9.2 — architecture / list-item indent rule
+**Decision:** List-item frames carry a `fromListItem` flag that softens the pop rule from `indent >= top.indent` to `indent > top.indent`.
+**Rationale:** YAML treats `- key: value` as equivalent to `-\n  key: value`. The "first key column" of a list entry matches the dash column + 2; subsequent sibling keys in that entry share the same column. Without the flag, a sibling key would be mistaken for an outdent sibling and get written to the parent list instead of the current item.
+**Impact:** Low. The flag is only set when a list item is pushed; normal object nesting is unaffected.
+
+### D9.3 — architecture / descend gate
+**Decision:** Descend into `top.pendingKey`'s value only when the current line's indent is strictly greater than `top.pendingKeyIndent`, not `top.indent`.
+**Rationale:** After a pop, `top.indent` may be far shallower than the freshly-popped frame's indent; using `top.indent` would incorrectly absorb outdent-sibling keys as nested children. `pendingKeyIndent` records where the pendingKey was assigned, so only indents past that line are true descendants.
+**Impact:** Low. Tested by the "overrides at indent 0 is a sibling of stories at indent 0" case in the full-document parser test.
+
+### D9.4 — scope / files strategy deferred
+**Decision:** The `files` strategy (edge inference from shared file-path touches in story Tasks/Subtasks) is listed as valid but not implemented.
+**Rationale:** Implementing it requires reading + parsing BMad story files, and its heuristic edges compete with the explicit sidecar anyway. Users who want AI-inferred graphs should route through a future `sprintpilot-infer-dependencies` skill that proposes a `dependencies.yaml` for human review (concept §7.6). Shipping a half-baked heuristic would encourage silent surprises.
+**Impact:** Low. Users who set `--strategy files` get the same output as the default `explicit,ordering`; the string is accepted but contributes no edges.
+
+### D9.5 — UX / scaffold ships inline docs
+**Decision:** `scaffold` writes a header comment block into `dependencies.yaml` explaining the schema + upgrade path to parallel execution.
+**Rationale:** Addresses M11 (discoverability) from the plan. A user running `resolve-dag.js scaffold` as a setup step sees the same docs they'd otherwise have to find in the concept doc. The starter document is a safe linear chain, making parallelism opt-in rather than on-by-default.
+**Impact:** Low. Header is a few lines; cost in write-time is negligible.
+**Decision:** PR 8 ships the helper + flag but does not rewrite every workflow.md read-site to route through it.
+**Rationale:** Systematically rewriting every read in workflow.md risks breaking subtly (especially inside `<check>` gates where the LLM is expected to evaluate YAML content). The helper is available for targeted callouts (PR 11 will use it in the main loop), and for users who want to experiment by wiring it into custom skills. The safety invariant is that `cache_shared_reads: false` and the helper being unused produce byte-identical behavior today.
+**Impact:** Medium-low. The win lands opportunistically as future PRs route reads through the cache.
 **Decision:** The test locks the per-profile value of `autopilot.conditional_boot_work`, not the workflow's runtime decision path.
 **Rationale:** Same reasoning as D4.3 and D5.4 — workflow.md is LLM-driven instruction text, not executable code. The load-bearing correctness claim is "large + legacy never fast-path; nano + small + medium do when the repo is clean." The unit test proves the profile half; the workflow text then enforces the cleanness predicate verbatim.
 **Impact:** Low. Regression surface is narrow: either a profile YAML flips the flag unintentionally (caught by the test) or the workflow's guard is rewritten (caught by code review / integration).
