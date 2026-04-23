@@ -2,6 +2,22 @@
 
 ## [Unreleased]
 
+**PR 8 of 12 — Cached per-iteration reads (M5)**
+
+Ships a TTL + source-mtime-aware file cache for the autopilot loop. `sprint-status.yaml`, `git-status.yaml`, and `decision-log.yaml` get read 5+ times per story step today; cached reads cut those to one disk read per TTL window, invalidating automatically when the source file's mtime advances (so writes are seen immediately without an explicit `invalidate` call).
+
+### Added
+- `_Sprintpilot/scripts/cached-read.js` — `read` / `invalidate` / `clear` / `stats` actions. Cache entries land under `<cache-root>/.cache/cached-reads/<sha256(path)>.json` carrying `{source, mtime_ms, cached_at, body}`. Default TTL 60s. Source mtime advances always force a miss.
+- `tests/unit/cached-read.test.ts` — 9 new tests: miss-then-hit, mtime-driven invalidation, ttl=0 = always-miss, invalidate, clearAll, stats, CLI round-trip, missing-source exit 2.
+
+### Changed
+- `_Sprintpilot/modules/autopilot/profiles/_base.yaml`: `cache_shared_reads: false → true`. `legacy` keeps the false default. Consumer gate — callers check `autopilot.cache_shared_reads` via `resolve-profile.js` before shelling out to `cached-read.js`; when the flag is false, read the file directly.
+
+### Rollback
+- Set `autopilot.cache_shared_reads: false` on the active profile. Callers skip the cache and read through.
+
+## [Unreleased — PR 7]
+
 **PR 7 of 12 — Conditional boot work (M4)**
 
 On a clean repo (no extra worktrees, no in-progress stories) the autopilot now skips `health-check.js` + branch reconciliation at boot. This is the common case when starting a fresh session on a merged-and-done sprint state; typical savings are ~8–28s of `git fetch` + worktree scans. The `large` profile keeps full reconciliation always (compliance/uptime rationale); `legacy` preserves v1.0.5 behavior.

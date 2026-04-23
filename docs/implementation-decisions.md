@@ -160,6 +160,26 @@ A running log of non-obvious implementation choices made during the v2 rollout. 
 **Decision:** The test locks the per-profile value of `autopilot.conditional_boot_work`, not the workflow's runtime decision path.
 **Rationale:** Same reasoning as D4.3 and D5.4 — workflow.md is LLM-driven instruction text, not executable code. The load-bearing correctness claim is "large + legacy never fast-path; nano + small + medium do when the repo is clean." The unit test proves the profile half; the workflow text then enforces the cleanness predicate verbatim.
 **Impact:** Low. Regression surface is narrow: either a profile YAML flips the flag unintentionally (caught by the test) or the workflow's guard is rewritten (caught by code review / integration).
+
+## PR 8 — Cached per-iteration reads
+
+### D8.1 — architecture / mtime-aware TTL
+**Decision:** Cache entries invalidate on BOTH TTL expiry AND source-file mtime advance — not just TTL.
+**Rationale:** Relying on explicit `invalidate` calls from workflow.md would make forgetting one an easy correctness bug (silently stale reads). Source-mtime has kernel-level guarantees on every supported platform — if any process writes to the source, its mtime advances, and our next read misses. This makes the cache safe against both our own writes AND external writes (git checkout, hand edits) without any caller cooperation.
+**Impact:** Low. Cache overhead is one extra `fs.statSync` per hit — negligible.
+
+### D8.2 — architecture / per-project cache root
+**Decision:** Cache root defaults to the project root; no system-wide cache.
+**Rationale:** Per-project keeps caches isolated across repos. A shared global cache would risk cross-project collision (same filename hash mapping to different projects) and complicate cleanup. The project-local `.cache/` sits alongside `.archive/` and is already in the repo's .gitignore scope.
+**Impact:** Low. Directory is auto-created on first write and cleared by `clearAll`.
+
+### D8.3 — scope / workflow consumption
+**Decision:** PR 8 ships the helper + flag but does not rewrite every workflow.md read-site to route through it.
+**Rationale:** Systematically rewriting every read in workflow.md risks breaking subtly (especially inside `<check>` gates where the LLM is expected to evaluate YAML content). The helper is available for targeted callouts (PR 11 will use it in the main loop), and for users who want to experiment by wiring it into custom skills. The safety invariant is that `cache_shared_reads: false` and the helper being unused produce byte-identical behavior today.
+**Impact:** Medium-low. The win lands opportunistically as future PRs route reads through the cache.
+**Decision:** The test locks the per-profile value of `autopilot.conditional_boot_work`, not the workflow's runtime decision path.
+**Rationale:** Same reasoning as D4.3 and D5.4 — workflow.md is LLM-driven instruction text, not executable code. The load-bearing correctness claim is "large + legacy never fast-path; nano + small + medium do when the repo is clean." The unit test proves the profile half; the workflow text then enforces the cleanness predicate verbatim.
+**Impact:** Low. Regression surface is narrow: either a profile YAML flips the flag unintentionally (caught by the test) or the workflow's guard is rewritten (caught by code review / integration).
 **Decision:** PR 6 ships the batch/flush API and the profile flag, but does NOT rewire the existing STATE_FIELDS direct writes in workflow.md to go through `batch`.
 **Rationale:** The current STATE_FIELDS path writes directly to `autopilot-state.yaml` (single-writer, pre-shard). Migrating it requires running `merge-shards.js` at every read, which only pays off once parallel sub-agents (PR 11) actually share a story's state. Shipping the API alone unblocks PR 11 without destabilizing the current single-writer path. Acceptance criterion #3 ("final merged state YAMLs identical to pre-PR") is trivially satisfied because the direct-write path hasn't changed.
 **Impact:** Medium-low. Users on non-legacy profiles see `coalesce_state_writes: true` but no behavior difference until PR 11 consumes it.
