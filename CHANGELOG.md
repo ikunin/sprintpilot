@@ -2,6 +2,27 @@
 
 ## [Unreleased]
 
+**PR 12 of 12 — Cross-epic parallelism (experimental)**
+
+Ships the dry-run merge probe that PR 12's cross-epic dispatcher gates on. `parallel_epics` stays **off by default on every profile including `large`** — the feature is experimental and requires users to opt in explicitly per project after reviewing the risk profile. The preflight script is safe to invoke at any time; it never commits, never leaves the preflight branch behind, and holds a per-project lock so two preflights never race.
+
+### Added
+- `_Sprintpilot/scripts/preflight-merge.js` — checks every pair of epic branches for merge conflicts. Output: `{safe_pairs: [["1","3"]], conflict_pairs: [["2","4"]], checked: N}`. Safety rails:
+  1. Lock acquisition via `lock.js --file .sprintpilot/preflight.lock` (default 60 s timeout). Only one preflight runs per project at a time.
+  2. Startup cleanup — deletes a stale `__sprintpilot_preflight` branch if a prior run crashed. Refuses to run if HEAD is already on the preflight branch (paranoia).
+  3. Per-pair cleanup — the preflight branch is checked out from base, merges land as commits on top, and the branch is force-deleted after every pair so base is never left mid-merge.
+  4. try/finally release of the lock, even on fatal errors.
+- `tests/unit/preflight-merge.test.ts` — 11 tests: epic input parsing, pair generation, real-repo safe vs. conflict detection, cleanup verification, mixed-layer triage, CLI exit codes. Uses a temp git repo per test (no mocks). Suite: 387 → 398 passing.
+
+### Changed
+- `_Sprintpilot/modules/ma/config.yaml`: new `parallel_epics` key (default `false`) with inline docs noting experimental status and hardcoded `max_parallel_epics=2`.
+- `_Sprintpilot/modules/autopilot/profiles/large.yaml`: explicitly pins `parallel_epics: false` (not inherited). Future `_base` changes cannot silently flip the flag for compliance-conscious users.
+
+### Rollback
+- The default IS rollback — `parallel_epics: false` on every profile. The script is latent unless a workflow integration invokes it; users who do opt in can flip the single key back to disable.
+
+## [Unreleased — PR 11]
+
 **PR 11 of 12 — Parallel intra-epic stories (M2)**
 
 Ships the orchestrator + host detector for parallel story execution within an epic. `parallel_stories: true` runs N sub-agents concurrently on Claude Code (the only host with a first-class multi-agent API today). Other hosts silently fall back to sequential with a one-line log notice — no silent no-op, no false promise of wall-clock reductions. Host detection prioritizes env vars (high confidence), then parent-process name (medium), then filesystem markers (low); low-confidence detection forces `supports_parallel=false` to close the install-marker tautology.

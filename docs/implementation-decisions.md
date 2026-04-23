@@ -248,6 +248,31 @@ A running log of non-obvious implementation choices made during the v2 rollout. 
 **Decision:** PR 11 adds unit tests for adapter + dispatcher but no e2e `tests/e2e/medium-parallel.test.ts`.
 **Rationale:** The plan lists the e2e as desirable but gates it on Claude Code availability in CI (which isn't a given in external contributor environments). Unit tests lock in the adapter's detection logic and the dispatcher's plan-generation correctness; the real-world speedup is measurable via `log-timing.js` on any repo with the flag flipped.
 **Impact:** Medium. A regression in the host-to-dispatcher wiring would escape unit tests. The log-timing data surfaces it quickly in real use, and CI can add the e2e later when a reliable Claude Code harness exists.
+
+## PR 12 — Cross-epic parallelism (experimental)
+
+### D12.1 — architecture / commit-between-merges
+**Decision:** `tryMergePair` drops `--no-commit` and lets each merge land as a commit on the preflight branch before attempting the next merge.
+**Rationale:** The plan's suggested sequence (`git merge --no-commit --no-ff epic-1 && git merge --no-commit --no-ff epic-2`) is a non-starter — git refuses a second merge while `MERGE_HEAD` is still set from the first. The only clean way to test conflict behavior *between* two epics on top of a fresh base is to commit merge A, then try merge B. The preflight branch is force-deleted afterwards, so the committed merges never reach a published branch.
+**Impact:** Low. Users who want to replicate the preflight manually can do it in 3 git commands: `git checkout -B tmp main && git merge --no-edit <a> && git merge --no-edit <b>`.
+
+### D12.2 — architecture / per-pair cleanup inside try/finally
+**Decision:** `tryMergePair` checks out the base branch and `branch -D __sprintpilot_preflight` in a `finally` block, so even a mid-merge throw leaves the repo on base with no stale branch.
+**Rationale:** A conflict during the first merge leaves the worktree with merge markers AND `MERGE_HEAD` set; an unhandled exception would leave the user stuck. Wrapping in `finally` plus the `--abort` inside the error path keeps the invariant "after preflight, you are on base, no preflight branch exists" regardless of success/failure.
+**Impact:** Low. Startup-cleanup at the next run's beginning is the second line of defense.
+
+### D12.3 — architecture / opt-in everywhere (including large)
+**Decision:** `parallel_epics: false` is pinned explicitly on `large.yaml`, not inherited from `_base`.
+**Rationale:** `_base` is where future profile-wide defaults flip on (as PRs 2, 6, 7, 8 already did). Without an explicit pin, a future `_base` flip to `parallel_epics: true` would silently enable cross-epic parallelism for users on the compliance-oriented `large` profile. That's the opposite of what `large`'s caller wants. The explicit pin is a tripwire that surfaces such changes at review time.
+**Impact:** Low. Duplication is the point, as with `legacy.yaml`'s settings (D1.2).
+
+### D12.4 — scope / workflow dispatcher not yet wired
+**Decision:** PR 12 ships the preflight script but does NOT add a cross-epic dispatcher gate to workflow.md.
+**Rationale:** Cross-epic dispatch requires both epics' branches to be pushed AND both epics' stories to be reasonably done (otherwise parallel "execution" is just parallel git operations). That's a richer orchestration than PR 11's intra-epic dispatch, and adds three new failure modes (partial-epic state reconciliation, cross-epic decision-log merges, cross-epic retrospective ordering). Shipping the probe alone unblocks users to write their own cross-epic harness and surfaces any preflight bugs early. The workflow integration can land in a follow-up PR once one real user has exercised the probe.
+**Impact:** Medium. `parallel_epics: true` today has no effect without a dispatcher. The flag and the script are consistent in meaning; users can call the script directly via `node _Sprintpilot/scripts/preflight-merge.js --epics 1,2 --base main`.
+**Decision:** PR 11 adds unit tests for adapter + dispatcher but no e2e `tests/e2e/medium-parallel.test.ts`.
+**Rationale:** The plan lists the e2e as desirable but gates it on Claude Code availability in CI (which isn't a given in external contributor environments). Unit tests lock in the adapter's detection logic and the dispatcher's plan-generation correctness; the real-world speedup is measurable via `log-timing.js` on any repo with the flag flipped.
+**Impact:** Medium. A regression in the host-to-dispatcher wiring would escape unit tests. The log-timing data surfaces it quickly in real use, and CI can add the e2e later when a reliable Claude Code harness exists.
 **Decision:** Save + restore `gc.auto` on both the main repo AND every worktree, independently.
 **Rationale:** `git config --local` scopes to the current worktree's config. Setting it on the main repo does NOT propagate to worktrees. The asymmetry can lead to surprises where a worktree's gc still triggers mid-session. Saving the prior value per-worktree is belt-and-suspenders and costs ~2 git calls per worktree setup + teardown.
 **Impact:** Low. The restore is best-effort (ignore-failure-on-unset); in the rare case a restore fails, the user is left with `gc.auto=0` on one worktree, which is conservative rather than dangerous.

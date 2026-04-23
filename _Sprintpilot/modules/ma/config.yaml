@@ -26,3 +26,12 @@ multi_agent:
   baseline_story_duration_sec: 180
   max_consecutive_conflicts: 2
   effective_parallel_floor: 1
+
+  # PR 12 — cross-epic parallelism (EXPERIMENTAL).
+  # Off by default on ALL profiles including large. Enabling requires:
+  #   1. Both epics carry `independent: true` in dependencies.yaml.
+  #   2. preflight-merge.js reports no conflicts between them.
+  #   3. max_parallel_epics is hardcoded at 2 — no tuning knob.
+  # A single cross-epic merge conflict in a session disables parallel_epics
+  # for the rest of the session.
+  parallel_epics: false
