@@ -11,7 +11,7 @@ autopilot:
   retrospective_mode: auto
   phase_timings: true              # M0, PR 2 — enabled by default (legacy overrides to false)
   coalesce_state_writes: true      # M3, PR 6 — batch non-critical writes, flush at story boundary
-  conditional_boot_work: false     # M4, PR 7
+  conditional_boot_work: true      # M4, PR 7 — skip health-check + branch reconciliation on a clean repo
   cache_shared_reads: false        # M5, PR 8
 
 git:

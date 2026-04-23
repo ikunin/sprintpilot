@@ -12,4 +12,4 @@ autopilot:
 ma:
   parallel_stories: true
   max_parallel_stories: 3
-  state_sharding: true
+  state_sharding: always

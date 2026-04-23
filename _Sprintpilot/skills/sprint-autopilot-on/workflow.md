@@ -205,6 +205,26 @@ Resolve:
   Log: "Platform detected: {{platform}}"
   </action>
 
+  <!-- PR 7 CONDITIONAL BOOT WORK: a clean repo — main worktree only, zero
+       in-progress stories — can skip the slow health-check + branch
+       reconciliation below. Gate honored by non-legacy, non-large profiles
+       (large keeps full reconciliation for compliance/uptime reasons). -->
+  <action>Read `autopilot.conditional_boot_work` from the resolver:
+  `node {{project_root}}/_Sprintpilot/scripts/resolve-profile.js get autopilot.conditional_boot_work` → `{{conditional_boot_work}}`. Default to `false` on failure.
+  </action>
+  <action>Count worktrees (every supported git install ships `git worktree list --porcelain`):
+  `git worktree list --porcelain 2>/dev/null | grep -c '^worktree '` → `{{worktree_count}}`. Fail-open to 2 (force full path) if the command fails.
+  </action>
+  <action>Count in-progress stories: read `{status_file}` and count stories whose status is NOT in {`done`, `backlog`}. Set `{{in_progress_count}}`. Fail-open to 1 (force full path) if the file is unreadable.</action>
+
+  <check if="{{conditional_boot_work}} is true AND {{worktree_count}} is 1 AND {{in_progress_count}} is 0">
+    <action>Log: "Boot fast-path (PR 7): clean repo — skipping health-check + branch reconciliation"</action>
+    <action>Run: `node {{project_root}}/_Sprintpilot/scripts/log-timing.js once --story "sprint" --phase "boot.fast-path" --meta "{\"reason\":\"clean-repo\"}" --project-root "{{project_root}}"` — ignore failures.</action>
+    <action>Set `{{git_enabled}}` = true, `{{platform}}` = detected value</action>
+  </check>
+
+  <check if="NOT ({{conditional_boot_work}} is true AND {{worktree_count}} is 1 AND {{in_progress_count}} is 0)">
+
   <action>**Worktree health check** — run:
   `node {{project_root}}/_Sprintpilot/scripts/health-check.js --base-branch {{base_branch}} --status-file {{status_file}}`
   Output classifies each worktree as CLEAN_DONE, COMMITTED, STALE, DIRTY, or ORPHAN.
@@ -256,6 +276,8 @@ Resolve:
   </action>
 
   <action>Set `{{git_enabled}}` = true, `{{platform}}` = detected value</action>
+
+  </check><!-- end PR 7 conditional boot work (non-fast-path branch) -->
 </check>
 
 ---

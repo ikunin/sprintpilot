@@ -2,6 +2,23 @@
 
 ## [Unreleased]
 
+**PR 7 of 12 — Conditional boot work (M4)**
+
+On a clean repo (no extra worktrees, no in-progress stories) the autopilot now skips `health-check.js` + branch reconciliation at boot. This is the common case when starting a fresh session on a merged-and-done sprint state; typical savings are ~8–28s of `git fetch` + worktree scans. The `large` profile keeps full reconciliation always (compliance/uptime rationale); `legacy` preserves v1.0.5 behavior.
+
+### Added
+- `tests/unit/conditional-boot-work.test.ts` — locks in the per-profile default: nano/small/medium=`true`, large/legacy=`false`.
+
+### Changed
+- `_Sprintpilot/modules/autopilot/profiles/_base.yaml`: `conditional_boot_work: false → true`. Inherited by nano/small/medium.
+- `_Sprintpilot/modules/autopilot/profiles/large.yaml`: already set `conditional_boot_work: false` (unchanged). Also fixed `ma.state_sharding: true → always` to match the PR 3 tri-valued string.
+- `_Sprintpilot/skills/sprint-autopilot-on/workflow.md`: boot resolves `conditional_boot_work` via the profile, counts worktrees via `git worktree list --porcelain` and in-progress stories via `sprint-status.yaml`. When both counts imply a clean repo AND the flag is on, the autopilot logs a `boot.fast-path` once-marker and skips the health-check / reconciliation block; otherwise it runs the existing full path.
+
+### Rollback
+- Set `autopilot.conditional_boot_work: false` on the active profile, or switch to `legacy` / `large`. Boot reverts to the full path unconditionally.
+
+## [Unreleased — PR 6]
+
 **PR 6 of 12 — Coalesce state writes (M3)**
 
 Adds a `batch` / `flush` mode to `state-shard.js` that buffers non-critical field changes in a pending file and flushes them atomically at a story boundary — one shard write per story instead of 5+. Four crash-recovery keys (`current_story`, `current_bmad_step`, `in_worktree`, `patch_commits`) bypass the buffer and write straight through, keeping resume-after-crash semantics intact. Infrastructure ships now; PR 11 (parallel stories) is the first consumer.

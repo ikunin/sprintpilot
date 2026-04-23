@@ -143,6 +143,26 @@ A running log of non-obvious implementation choices made during the v2 rollout. 
 **Decision:** PR 6 ships the batch/flush API and the profile flag, but does NOT rewire the existing STATE_FIELDS direct writes in workflow.md to go through `batch`.
 **Rationale:** The current STATE_FIELDS path writes directly to `autopilot-state.yaml` (single-writer, pre-shard). Migrating it requires running `merge-shards.js` at every read, which only pays off once parallel sub-agents (PR 11) actually share a story's state. Shipping the API alone unblocks PR 11 without destabilizing the current single-writer path. Acceptance criterion #3 ("final merged state YAMLs identical to pre-PR") is trivially satisfied because the direct-write path hasn't changed.
 **Impact:** Medium-low. Users on non-legacy profiles see `coalesce_state_writes: true` but no behavior difference until PR 11 consumes it.
+
+## PR 7 — Conditional boot work
+
+### D7.1 — architecture / fail-open counting
+**Decision:** When `git worktree list --porcelain` or the status-file read fails, `{{worktree_count}}` and `{{in_progress_count}}` default to values that FORCE the full path (2 and 1 respectively).
+**Rationale:** The guard condition is `flag AND worktree_count==1 AND in_progress_count==0`. Any counting failure must not accidentally satisfy the clean-repo predicate — because a clean repo means "we're sure there's nothing to reconcile", and uncertainty is the opposite. Fail-open to the full reconciliation keeps the safety-critical path intact.
+**Impact:** Low. Users whose `git` is degraded (< 2.5) or whose sprint-status.yaml is missing see the full boot path anyway.
+
+### D7.2 — scope / large profile never fast-paths
+**Decision:** `large.yaml` pins `conditional_boot_work: false` explicitly — not inherited from `_base`.
+**Rationale:** The `large` profile targets production systems with compliance/uptime stakes. Skipping health-checks to save 8–30s of boot time is the wrong tradeoff when a silent worktree-orphan or unmerged branch could turn into a release-day surprise. Pinning explicitly is easier to audit than deriving it by deduction from the base.
+**Impact:** Low. `large` users pay a few seconds more per session and trade it for the boot-time audit trail.
+
+### D7.3 — test-strategy / profile table over workflow execution
+**Decision:** The test locks the per-profile value of `autopilot.conditional_boot_work`, not the workflow's runtime decision path.
+**Rationale:** Same reasoning as D4.3 and D5.4 — workflow.md is LLM-driven instruction text, not executable code. The load-bearing correctness claim is "large + legacy never fast-path; nano + small + medium do when the repo is clean." The unit test proves the profile half; the workflow text then enforces the cleanness predicate verbatim.
+**Impact:** Low. Regression surface is narrow: either a profile YAML flips the flag unintentionally (caught by the test) or the workflow's guard is rewritten (caught by code review / integration).
+**Decision:** PR 6 ships the batch/flush API and the profile flag, but does NOT rewire the existing STATE_FIELDS direct writes in workflow.md to go through `batch`.
+**Rationale:** The current STATE_FIELDS path writes directly to `autopilot-state.yaml` (single-writer, pre-shard). Migrating it requires running `merge-shards.js` at every read, which only pays off once parallel sub-agents (PR 11) actually share a story's state. Shipping the API alone unblocks PR 11 without destabilizing the current single-writer path. Acceptance criterion #3 ("final merged state YAMLs identical to pre-PR") is trivially satisfied because the direct-write path hasn't changed.
+**Impact:** Medium-low. Users on non-legacy profiles see `coalesce_state_writes: true` but no behavior difference until PR 11 consumes it.
 **Decision:** PR 5 adds a sync-status.js passthrough test but no workflow-level unit test for the epic-branch decision tree.
 **Rationale:** Same rationale as D4.3 — workflow.md branches are LLM-driven. The load-bearing parts are (a) sync-status.js correctly records epic_id + granularity (tested directly) and (b) the resolver returns `granularity=epic` for nano (tested by nano-routing.test.ts). The LLM's branch-picking then follows the rule that's spelled out in the workflow text.
 **Impact:** Medium-low. Without an e2e fixture specifically exercising epic granularity end-to-end, regressions in the decision tree would escape unit tests. The existing greenfield e2e covers story granularity, so at minimum the default path is safe.
