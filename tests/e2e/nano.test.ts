@@ -36,7 +36,19 @@ const BUDGET_PER_SESSION = 20;
 const TIMEOUT_PER_SESSION = 1_200_000; // 20 min
 const MODEL = process.env.BMAD_TEST_MODEL ?? 'sonnet';
 const REMOTE_URL = process.env.BMAD_TEST_REMOTE_URL ?? '';
-const HAS_API_KEY = !!process.env.ANTHROPIC_API_KEY;
+// claude CLI may authenticate via keychain (Claude Code install) OR an
+// ANTHROPIC_API_KEY env var. Skip only when BOTH are missing AND the
+// binary isn't on PATH (avoids false positives in restricted CI).
+const HAS_CLAUDE = (() => {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { execFileSync } = require('node:child_process') as typeof import('node:child_process');
+    execFileSync('claude', ['--version'], { stdio: 'ignore', timeout: 5_000 });
+    return true;
+  } catch {
+    return !!process.env.ANTHROPIC_API_KEY;
+  }
+})();
 
 let project: TempProject;
 
@@ -80,7 +92,7 @@ function skillsInvoked(dir: string): Set<string> {
   return skills;
 }
 
-describe.skipIf(!HAS_API_KEY)('Nano profile (Claude Code)', () => {
+describe.skipIf(!HAS_CLAUDE)('Nano profile (Claude Code)', () => {
   beforeAll(() => {
     project = createTempProject({
       remoteUrl: REMOTE_URL,
