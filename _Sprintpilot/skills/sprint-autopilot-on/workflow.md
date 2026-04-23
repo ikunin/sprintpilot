@@ -401,7 +401,13 @@ When the flag is `false`, the direct-write instructions below are authoritative.
     - `{{session_stories_done}}` = 0
   </action>
   <action>Create master task: "Sprintpilot — Full Sprint Execution" → `in_progress`</action>
-  <action>Write initial `{state_file}` with STATE_FIELDS: `current_story = null`, `current_bmad_step = null`, `completed_skill = bmad-help`, `session_stories_done = 0`, `stories_remaining = [from sprint-status]`, `in_worktree = false`, `pr_base = {{base_branch}}`.</action>
+  <action>**Compute `{{stories_remaining}}`** from `{status_file}`. Rules (explicit — do NOT guess):
+  - Parse every entry under `development_status:` (canonical) OR `stories:` (alternate).
+  - Include the story key (the child key, e.g. `1-2-cli-interface`) in `{{stories_remaining}}` IF its `status` field is ANYTHING other than the literal string `done`. That includes `backlog`, `ready-for-dev`, `in-progress`, `review`, `draft`, missing, null — all non-done states count as "remaining".
+  - Exclude top-level epic entries (e.g. under `epics:` block) — only story keys go in the list.
+  - If `development_status`/`stories` is missing or empty (pre-planning state), set `{{stories_remaining}}` to `[]` — planning will repopulate the file and a later recalculation will pick up the stories.
+  </action>
+  <action>Write initial `{state_file}` with STATE_FIELDS: `current_story = null`, `current_bmad_step = null`, `completed_skill = bmad-help`, `session_stories_done = 0`, `stories_remaining = {{stories_remaining}}` (computed above), `in_worktree = false`, `pr_base = {{base_branch}}`.</action>
   <action>Report to user:
   ```
   Sprintpilot ON
@@ -448,17 +454,32 @@ When the flag is `false`, the direct-write instructions below are authoritative.
   </check>
 </check>
 
-<check if="all stories in status_file are done">
+<!-- Authoritative "sprint complete" check. Read the status file EVERY
+     iteration (do not rely on stale stories_remaining). A story counts
+     as done iff its status field equals the literal string "done". A
+     file with no development_status / stories block is PRE-PLANNING
+     and is NOT sprint-complete — we must route to planning, not to
+     step 10. -->
+<action>**Recalculate `{{stories_remaining}}`** from `{status_file}` now (authoritative):
+- Parse every entry under `development_status:` or `stories:`.
+- A story key goes into `{{stories_remaining}}` when its `status` is NOT the literal string `done` (so backlog, ready-for-dev, in-progress, review, draft, missing, null all count as remaining).
+- Set `{{sprint_has_stories}}` = true iff at least one story key was found in the file (regardless of status).
+- Set `{{sprint_is_complete}}` = true iff `{{sprint_has_stories}}` is true AND `{{stories_remaining}}` is empty.
+</action>
+<check if="{{sprint_is_complete}} is true">
   <goto step="10">Sprint complete</goto>
+</check>
+<check if="{{sprint_has_stories}} is false">
+  <action>Log: "Sprint pre-planning: no stories in status file yet. Routing through bmad-help to the next planning skill (do NOT go to step 10)."</action>
 </check>
 
 <check if="{{next_skill}} is empty">
   <action>**Recover next_skill** — re-read `{status_file}`, find first story with status != "done"</action>
-  <check if="no undone stories found">
+  <check if="no undone stories found AND {{sprint_has_stories}} is true">
     <goto step="10">Sprint complete</goto>
   </check>
-  <action>Set `{{current_story}}` = first undone story from `{status_file}`</action>
-  <action>Invoke `bmad-help` — "Story {{current_story}} needs attention. What is the next required workflow step?"</action>
+  <action>If `{{sprint_has_stories}}` is true: set `{{current_story}}` = first undone story from `{status_file}`.</action>
+  <action>Invoke `bmad-help` — "Story {{current_story}} needs attention (or: sprint in planning phase — no stories yet). What is the next required workflow step?"</action>
   <action>Extract `{{next_skill}}` from bmad-help response</action>
 </check>
 
@@ -714,6 +735,13 @@ When the flag is `false`, the direct-write instructions below are authoritative.
   - After rewriting, re-read the file and verify: heading structure intact, all stories still present, Given/When/Then present in every story
   - Log: "Fixed N stories with non-BDD acceptance criteria"
   </action>
+</check>
+
+<check if="{{completed_skill}} was bmad-sprint-planning">
+  <!-- PR-follow-up: sprint-planning populates development_status for the
+       first time. Recalculate stories_remaining so the step-2 "sprint
+       complete" gate doesn't fire spuriously on the next iteration. -->
+  <action>**Recalculate `{{stories_remaining}}`** from `{status_file}` using the same rules as step 1 initial-write: include every story key whose status is NOT the literal `done`. Update `{state_file}` with the new `{{stories_remaining}}`.</action>
 </check>
 
 <check if="{{completed_skill}} was bmad-sprint-planning AND {{git_enabled}}">
