@@ -1,235 +1,99 @@
 # Changelog
 
-## [Unreleased]
-
-**PR 12 of 12 — Cross-epic parallelism (experimental)**
-
-Ships the dry-run merge probe that PR 12's cross-epic dispatcher gates on. `parallel_epics` stays **off by default on every profile including `large`** — the feature is experimental and requires users to opt in explicitly per project after reviewing the risk profile. The preflight script is safe to invoke at any time; it never commits, never leaves the preflight branch behind, and holds a per-project lock so two preflights never race.
-
-### Added
-- `_Sprintpilot/scripts/preflight-merge.js` — checks every pair of epic branches for merge conflicts. Output: `{safe_pairs: [["1","3"]], conflict_pairs: [["2","4"]], checked: N}`. Safety rails:
-  1. Lock acquisition via `lock.js --file .sprintpilot/preflight.lock` (default 60 s timeout). Only one preflight runs per project at a time.
-  2. Startup cleanup — deletes a stale `__sprintpilot_preflight` branch if a prior run crashed. Refuses to run if HEAD is already on the preflight branch (paranoia).
-  3. Per-pair cleanup — the preflight branch is checked out from base, merges land as commits on top, and the branch is force-deleted after every pair so base is never left mid-merge.
-  4. try/finally release of the lock, even on fatal errors.
-- `tests/unit/preflight-merge.test.ts` — 11 tests: epic input parsing, pair generation, real-repo safe vs. conflict detection, cleanup verification, mixed-layer triage, CLI exit codes. Uses a temp git repo per test (no mocks). Suite: 387 → 398 passing.
-
-### Changed
-- `_Sprintpilot/modules/ma/config.yaml`: new `parallel_epics` key (default `false`) with inline docs noting experimental status and hardcoded `max_parallel_epics=2`.
-- `_Sprintpilot/modules/autopilot/profiles/large.yaml`: explicitly pins `parallel_epics: false` (not inherited). Future `_base` changes cannot silently flip the flag for compliance-conscious users.
-
-### Rollback
-- The default IS rollback — `parallel_epics: false` on every profile. The script is latent unless a workflow integration invokes it; users who do opt in can flip the single key back to disable.
-
-## [Unreleased — PR 11]
-
-**PR 11 of 12 — Parallel intra-epic stories (M2)**
-
-Ships the orchestrator + host detector for parallel story execution within an epic. `parallel_stories: true` runs N sub-agents concurrently on Claude Code (the only host with a first-class multi-agent API today). Other hosts silently fall back to sequential with a one-line log notice — no silent no-op, no false promise of wall-clock reductions. Host detection prioritizes env vars (high confidence), then parent-process name (medium), then filesystem markers (low); low-confidence detection forces `supports_parallel=false` to close the install-marker tautology.
-
-### Added
-- `_Sprintpilot/scripts/agent-adapter.js` — `detect` command. Emits `{host, supports_parallel, confidence, detection_reason}`. Host capability table starts with `claude-code: supports_parallel=true` and every other host false. Future hosts opt in here after validation.
-- `_Sprintpilot/scripts/dispatch-layer.js` — reads a comma-separated layer of story keys, creates one worktree per story, writes `_bmad-output/implementation-artifacts/.layer-plan.json` describing each story's worktree + branch. Script does NOT call LLMs; actual sub-agent spawning is the host workflow's job. `--max-parallel` caps concurrent worktrees, `--dry-run` computes the plan without touching the filesystem.
-- `tests/unit/agent-adapter.test.ts` — 9 tests: host-capability table, env-var precedence, filesystem-marker tautology guard, unknown-host default.
-- `tests/unit/dispatch-layer.test.ts` — 10 tests: layer parsing (including path-traversal rejection), effective-parallel bounds, plan file atomicity, CLI exit codes.
-
-### Changed
-- `_Sprintpilot/modules/ma/config.yaml`: new keys `parallel_stories` (default false), `max_parallel_stories` (2), `min_epic_duration_for_parallel_sec`, `baseline_story_duration_sec`, `max_consecutive_conflicts`, `effective_parallel_floor`.
-- `_Sprintpilot/modules/autopilot/profiles/_base.yaml` + `large.yaml`: profile defaults align with the plan (`medium`: off by default, opt-in max 2; `large`: on, max 3).
-- `_Sprintpilot/skills/sprint-autopilot-on/workflow.md`: boot detects the host and reads `ma.parallel_stories`. Coerces `parallel_stories=false` when the host's detection confidence is not `high` OR `supports_parallel=false`, and logs a one-line notice so users on non-Claude-Code hosts get a predictable sequential experience.
-
-### Rollback
-- Set `ma.parallel_stories: false` on the active profile (default on all profiles except `large`). Dispatcher is never invoked; autopilot reverts to sequential.
-
-## [Unreleased — PR 10]
-
-**PR 10 of 12 — Worktree cost mitigation + concurrent discipline**
-
-Makes per-worktree submodule init 2–5s instead of ~30s on git ≥ 2.18 via `--reference` + `--jobs=4`. Wraps ref-mutating git calls with a jittered-backoff retry so transient ref-lock contention in concurrent worktree setups doesn't fail builds. Per-submodule locks serialize concurrent `git submodule update` calls across worktrees. `gc.auto` is disabled for the duration of a sprint on both the main repo and every worktree, then restored.
-
-### Added
-- `_Sprintpilot/scripts/with-retry.js` — 3-attempt jittered-backoff retry (500ms–2s) triggered only when stderr matches a ref-lock regex (configurable via `--pattern`). Non-matching failures pass through unchanged — no blind retry hiding real bugs.
-- `_Sprintpilot/scripts/submodule-lock.js` — thin wrapper over `lock.js --file` keyed by submodule slug. Locks live under `<project>/.sprintpilot/submodule-locks/` (outside `.git/`) so git doesn't warn about foreign files.
-- `tests/unit/with-retry.test.ts` — 11 tests: default regex coverage, custom `--pattern`, retry success after N attempts, give-up after attempts exhausted, non-retriable pass-through, CLI exit codes.
-- `tests/unit/submodule-lock.test.ts` — 10 tests: slugify, lock-path resolution, acquire/release/check, cross-submodule non-contention, CLI exit codes.
-- `tests/unit/worktree-path-audit.test.ts` — regression guard: scans workflow.md + every script for commands that treat `<worktree>/.git` as a directory. In a worktree, `.git` is a file pointer; `ls .git/refs/...` would break silently.
-
-### Changed
-- `_Sprintpilot/skills/sprint-autopilot-on/workflow.md`:
-  - Boot saves + disables `gc.auto` on the main repo; sprint complete (step 10) restores it.
-  - Each worktree saves + disables `gc.auto` on worktree entry.
-  - Submodule init now uses `git submodule update --init --recursive --reference "$GIT_COMMON" --jobs=4 -- <path>` on git ≥ 2.18, wrapped with `with-retry.js`, with a per-submodule lock acquired before and released after. Falls back to the plain command on older git (degraded mode, already warned at boot by `check-prereqs.js`).
-
-### Rollback
-- Revert the PR. The retry wrapper is a no-op when not invoked; the per-submodule lock is a no-op when unused. The `gc.auto` change is self-unwinding because restore is symmetric.
-
-## [Unreleased — PR 9]
-
-**PR 9 of 12 — Dependency sidecar + DAG resolver**
-
-Ships the Sprintpilot-owned `dependencies.yaml` format and a resolver that turns it into an execution DAG for parallel dispatch (PR 11+). Missing sidecar → linear chain from sprint-status order (no surprises). Cycles rejected with a clear diagnostic. Includes a `scaffold` subcommand that writes a safe linear starter + inline docs so users don't have to hand-craft the first file.
-
-### Added
-- `_Sprintpilot/scripts/resolve-dag.js` — commands: `graph`, `layers`, `width`, `scaffold`. Strategies: `explicit` (reads `_Sprintpilot/sprints/dependencies.yaml`), `ordering` (linear chain from sprint-status). Priority: explicit > ordering; a sidecar `force_independent` override strips inbound/outbound edges on listed keys; `force_sequential` adds a chain among listed keys; epic-filtered builds.
-- Purpose-built YAML parser inside `resolve-dag.js` for hand-authored block-form `dependencies.yaml`: nested objects, block-form lists with inline mappings (`- key: value`), flow-form arrays on value side (`["a","b"]`), quoted keys (`"2"`), trailing comments. Deliberately narrower than a full YAML impl so no install-time dep (mirrors the PR 1 `resolve-profile.js` invariant).
-- `tests/unit/resolve-dag.test.ts` — 22 new tests covering parser round-trip on the plan's canonical example, epic filter, cycle detection, `force_independent` / `force_sequential` overrides, scaffold (create, refuse-overwrite, `--force`), CLI exit codes.
-
-### LLM graph inference — not in scope
-Per concept §7.6, Sprintpilot scripts never call LLMs. Any future AI-inferred DAG would land as a separate `sprintpilot-infer-dependencies` skill writing a proposed `dependencies.yaml`; the resolver keeps consuming the human-affirmed sidecar via the `explicit` strategy.
-
-### Rollback
-- Delete or empty `_Sprintpilot/sprints/dependencies.yaml`. Resolver falls back to `ordering` (linear chain) and subsequent PRs (11+) serialize execution accordingly. No behavior change.
-
-## [Unreleased — PR 8]
-
-**PR 8 of 12 — Cached per-iteration reads (M5)**
-
-Ships a TTL + source-mtime-aware file cache for the autopilot loop. `sprint-status.yaml`, `git-status.yaml`, and `decision-log.yaml` get read 5+ times per story step today; cached reads cut those to one disk read per TTL window, invalidating automatically when the source file's mtime advances (so writes are seen immediately without an explicit `invalidate` call).
-
-### Added
-- `_Sprintpilot/scripts/cached-read.js` — `read` / `invalidate` / `clear` / `stats` actions. Cache entries land under `<cache-root>/.cache/cached-reads/<sha256(path)>.json` carrying `{source, mtime_ms, cached_at, body}`. Default TTL 60s. Source mtime advances always force a miss.
-- `tests/unit/cached-read.test.ts` — 9 new tests: miss-then-hit, mtime-driven invalidation, ttl=0 = always-miss, invalidate, clearAll, stats, CLI round-trip, missing-source exit 2.
-
-### Changed
-- `_Sprintpilot/modules/autopilot/profiles/_base.yaml`: `cache_shared_reads: false → true`. `legacy` keeps the false default. Consumer gate — callers check `autopilot.cache_shared_reads` via `resolve-profile.js` before shelling out to `cached-read.js`; when the flag is false, read the file directly.
-
-### Rollback
-- Set `autopilot.cache_shared_reads: false` on the active profile. Callers skip the cache and read through.
-
-## [Unreleased — PR 7]
-
-**PR 7 of 12 — Conditional boot work (M4)**
-
-On a clean repo (no extra worktrees, no in-progress stories) the autopilot now skips `health-check.js` + branch reconciliation at boot. This is the common case when starting a fresh session on a merged-and-done sprint state; typical savings are ~8–28s of `git fetch` + worktree scans. The `large` profile keeps full reconciliation always (compliance/uptime rationale); `legacy` preserves v1.0.5 behavior.
-
-### Added
-- `tests/unit/conditional-boot-work.test.ts` — locks in the per-profile default: nano/small/medium=`true`, large/legacy=`false`.
-
-### Changed
-- `_Sprintpilot/modules/autopilot/profiles/_base.yaml`: `conditional_boot_work: false → true`. Inherited by nano/small/medium.
-- `_Sprintpilot/modules/autopilot/profiles/large.yaml`: already set `conditional_boot_work: false` (unchanged). Also fixed `ma.state_sharding: true → always` to match the PR 3 tri-valued string.
-- `_Sprintpilot/skills/sprint-autopilot-on/workflow.md`: boot resolves `conditional_boot_work` via the profile, counts worktrees via `git worktree list --porcelain` and in-progress stories via `sprint-status.yaml`. When both counts imply a clean repo AND the flag is on, the autopilot logs a `boot.fast-path` once-marker and skips the health-check / reconciliation block; otherwise it runs the existing full path.
-
-### Rollback
-- Set `autopilot.conditional_boot_work: false` on the active profile, or switch to `legacy` / `large`. Boot reverts to the full path unconditionally.
-
-## [Unreleased — PR 6]
-
-**PR 6 of 12 — Coalesce state writes (M3)**
-
-Adds a `batch` / `flush` mode to `state-shard.js` that buffers non-critical field changes in a pending file and flushes them atomically at a story boundary — one shard write per story instead of 5+. Four crash-recovery keys (`current_story`, `current_bmad_step`, `in_worktree`, `patch_commits`) bypass the buffer and write straight through, keeping resume-after-crash semantics intact. Infrastructure ships now; PR 11 (parallel stories) is the first consumer.
-
-### Added
-- `_Sprintpilot/scripts/state-shard.js` — new `batch` and `flush` actions. `batch` accumulates partial updates into `.pending/<kind>/<story>.yaml`; `flush` merges pending into the shard and deletes the pending file. `write` auto-flushes pending first (so direct writes never leave stale buffers). Exports `CRITICAL_KEYS`, `containsCriticalKey`, `batchWrite`, `flushPending`.
-- `tests/unit/state-shard-coalesce.test.ts` — 9 new tests covering pending accumulation, idempotent flush, merge into existing shard, critical-key bypass (prior buffer + new write both land), and write auto-flush. Suite: 300 → 309 passing.
-
-### Changed
-- `_Sprintpilot/modules/autopilot/profiles/_base.yaml`: `coalesce_state_writes: false → true`. `legacy` keeps the pre-PR direct-write behavior.
-
-### Rollback
-- Set `autopilot.coalesce_state_writes: false` on the active profile. Callers fall back to direct `write` calls (the existing path).
-
-## [Unreleased — PR 5]
-
-**PR 5 of 12 — Nano orchestration cuts (epic-granularity, squash merge, in-place branching)**
-
-When `git.granularity: epic`, the autopilot creates one branch per epic and one PR per epic (merged with `--squash`) instead of one branch / PR per story. When `git.worktree.enabled: false`, stories run in-place on the shared branch with no worktree. Both settings are nano defaults; other profiles keep story granularity.
-
-### Added
-- `_Sprintpilot/modules/git/config.yaml` — new `git.granularity` key (`story | epic`, default `story`) with inline docs.
-- `_Sprintpilot/scripts/sync-status.js` — accepts `--granularity <story|epic>` and `--epic-id <id>` passthrough; records them on the story block so downstream code can reconstruct the epic → branch mapping.
-- `tests/unit/sync-status-granularity.test.ts` — 3 tests covering the new fields + validation.
-
-### Changed
-- `_Sprintpilot/skills/sprint-autopilot-on/workflow.md`:
-  - Boot reads `git.granularity`, `git.worktree.enabled`, `git.squash_on_merge` from config.yaml and overrides them with the resolver's profile value.
-  - Step 3 computes `{{epic_id}}`, `{{is_first_story_of_epic}}`, `{{is_last_story_of_epic}}` from the story key + sprint-status. Under `granularity=epic`, the branch name is forced to `epic-<id>` so every story in the epic lands on the same branch. Under `worktree.enabled=false`, the autopilot checks out that branch in place instead of creating a worktree.
-  - Step 7 defers push + PR until the last story of the epic under `granularity=epic`. Earlier stories record `push_status=deferred`, `pr_url=DEFERRED`.
-  - Merge step uses `git merge --squash` + a single epic commit when `squash_on_merge=true`; otherwise keeps the existing merge-commit path.
-- `_Sprintpilot/modules/autopilot/profiles/nano.yaml`: already had the settings; PR 5 makes the workflow honor them.
-
-### Rollback
-- Flip `git.granularity: story`, `git.worktree.enabled: true`, `git.squash_on_merge: false` on the active profile (or just switch off `nano`). Workflow reverts to one branch per story, one PR per story, merge-commit.
-
-## [Unreleased — PR 4]
-
-**PR 4 of 12 — Nano routing through `bmad-quick-dev`**
-
-When the active profile declares `implementation_flow: quick` (nano only, by default), the autopilot routes each story through BMad's `bmad-quick-dev` one-shot skill instead of the 7-step cycle. Quick-dev runs Implement → Review → Classify → Commit internally (BMad `step-oneshot.md:44`), so `bmad-create-story`, `bmad-check-implementation-readiness`, `bmad-dev-story`, and `bmad-code-review` are not invoked under nano. Quality gates are preserved via quick-dev's internal review.
-
-### Added
-- `_Sprintpilot/modules/autopilot/profiles/nano.yaml` declares a `nano.fallback_on_tests_fail`, `nano.fallback_on_quick_dev_high_severity`, and `nano.fallback_target` escalation block.
-- `tests/unit/nano-routing.test.ts` — 9 tests asserting `implementation_flow` resolves correctly per profile and the nano-specific escalation + orchestration keys are exposed to the workflow.
-
-### Changed
-- `_Sprintpilot/skills/sprint-autopilot-on/workflow.md` — (1) boot resolves `{{implementation_flow}}` via `resolve-profile.js`; (2) step 3 overrides `{{next_skill}} = bmad-quick-dev` when `implementation_flow = quick AND next_skill in {bmad-dev-story, bmad-create-story, bmad-check-implementation-readiness}`; (3) step 4 adds a `bmad-quick-dev` completion handler that jumps directly to "mark story done" and escalates (session-scoped, not persisted) to `full` flow if tests fail or classify severity is high.
-- `AGENTS.md` — nano section spells out the skipped skills and the escalation safety net.
-
-### Rollback
-- Set `complexity_profile` to anything except `nano`. The autopilot falls back to the 7-step cycle immediately.
-
-## [Unreleased — PR 3]
-
-**PR 3 of 12 — State-shard infrastructure**
-
-Per-story shards for `autopilot-state.yaml` and `decision-log.yaml` so that parallel sub-agents (PR 11) can write without contention. The coordinator merges at layer boundaries. Shipping the scripts + schema; workflow consumers land in PR 6 (coalesce) and PR 11 (parallel).
-
-### Added
-- `_Sprintpilot/scripts/state-shard.js` — `write` / `read` / `append` / `init` over `.autopilot-state/<story>.yaml` and `.decision-log/<story>.yaml`. Atomic writes via tmp-sibling + `rename()`. Flat dotted-keys + JSON flow-form file shape — still valid YAML, round-trips without a general YAML parser so the installed script has zero install-time deps.
-- `_Sprintpilot/scripts/merge-shards.js` — merges shards into authoritative project-level YAMLs. Decision-log dedupe by `id`, sort by `ts`. Corruption recovery: a shard that fails to parse OR lacks `updated_at` is moved to `.archive/corrupt/` and flagged on the merged output; never deleted. Idempotent. `--archive` moves merged shards to `.archive/layer-<id>/`. `--dry-run` computes without writing.
-- 39 new unit tests (23 in `state-shard.test.ts`, 16 in `merge-shards.test.ts`), including concurrent-subprocess writes to distinct shards and corruption-archive verification. Suite: 249 → 288 passing.
-
-### Changed
-- `_Sprintpilot/modules/autopilot/profiles/_base.yaml` + `legacy.yaml`: `state_sharding` is now a tri-valued string (`never | auto | always`), default `auto` on non-legacy, `never` on legacy. Prior boolean shape is replaced (the key was never consumed).
-- Shard schema adds an intra-process `updated_at.monotonic` tiebreaker alongside `updated_at.wall` so parallel writers within a single process resolve conflicts without NTP drift interference.
-
-### Rollback
-- Set `ma.state_sharding: never` on the active profile. Future workflow consumers of sharding gate on this value and fall back to direct writes.
-
-## [Unreleased — PR 2]
-
-**PR 2 of 12 — M0 phase-timing instrumentation**
-
-Emits per-phase duration measurements so subsequent optimizations (PRs 3–12) can be validated against a real baseline instead of estimated percentages.
-
-### Added
-- `_Sprintpilot/scripts/log-timing.js` — append-only JSONL writer. Path-traversal-guarded `--story` / `--phase` arg validation, 2 KB cap on `--meta`, 4 KB cap on the full line so a single POSIX `write()` is atomic. Silently no-ops when the resolved `autopilot.phase_timings` is not `true`. Shard-per-story model (one sub-agent = one writer).
-- `_Sprintpilot/scripts/summarize-timings.js` — reads `.timings/<story>.jsonl` shards, pairs `start`/`end` events per story + phase, emits a hotspot report (phases consuming > 5% of total paired time). Formats: text (stdout), json (stdout), md (artifact + stdout). `--session-only` writes `summary-session-<ts>.md`; default writes `summary-<YYYY-MM-DD>.md`.
-- 40 new unit tests (23 in `log-timing.test.ts`, 17 in `summarize-timings.test.ts`), including a race-free subprocess append test (24 parallel writers to the same shard, all 24 lines present).
-
-### Changed
-- `_Sprintpilot/modules/autopilot/profiles/_base.yaml`: `phase_timings: true` default (was false). `legacy` profile stays `false` (explicit in `legacy.yaml`) to preserve v1.0.5 byte-for-byte behavior.
-- `_Sprintpilot/skills/sprint-autopilot-on/workflow.md`: wrapped the primary skill `INVOKE` site, the code-review re-invoke, worktree add / submodule-init, test verification, and `git.commit` with `log-timing.js start` / `end` hooks. Session checkpoint calls `summarize-timings.js --session-only`; sprint complete calls the full summarizer.
-
-### Rollback
-- Set `autopilot.phase_timings: false` in `_Sprintpilot/modules/autopilot/config.yaml`, or switch to `complexity_profile: legacy`. All instrumentation becomes a silent no-op.
-
 ## [2.0.0] - 2026-04-23
 
-**Major release: Adaptive Process Scaling — PR 1 of 12 (Foundation)**
+**Major release: Adaptive Process Scaling (12 PRs).**
 
-Introduces `complexity_profile` as a first-class config dimension. Existing installs are unaffected — the missing-key default matches v1.0.5 behavior byte-for-byte. Full concept and roadmap: `docs/adaptive-process-scaling.md` and `docs/implementation-plan.md`.
+Introduces `complexity_profile` as a first-class config dimension and ships 11 optimization layers on top of it: timing instrumentation, per-story state shards, nano-flow routing, epic-granularity orchestration, coalesced state writes, conditional boot work, cached reads, an explicit dependency sidecar + DAG resolver, worktree cost mitigation, intra-epic parallel dispatch (Claude Code today), and a cross-epic preflight probe (experimental). Existing installs are unaffected — the missing-`complexity_profile` default matches v1.0.5 behavior byte-for-byte, and every feature can be rolled back at the profile level without uninstalling.
 
-### Added
-- `_Sprintpilot/modules/autopilot/profiles/` — five profile YAMLs (`_base`, `nano`, `small`, `medium`, `large`, `legacy`). Base + overlay (DRY); `legacy` stands alone with `version_pinned: "v1.0.5"` so future refactors cannot silently drift legacy behavior.
-- `_Sprintpilot/scripts/resolve-profile.js` — `print` / `get` / `validate` commands. Missing `complexity_profile` key defaults to `medium` with a stderr notice. Consulted by `workflow.md` starting PR 4.
-- `_Sprintpilot/scripts/check-prereqs.js` — verifies node ≥ 18 and git ≥ 2.18. Warns (does not fail) on git 2.5–2.17 for degraded mode (no submodule speedups).
-- `sprintpilot install --profile <name>` — non-interactive CLI flag. Five values: `nano | small | medium | large | legacy`.
-- Interactive installer now asks for complexity profile between autopilot settings and tool selection. Upgrading users see their existing profile as the default.
-- `complexity_profile` key in `_Sprintpilot/modules/autopilot/config.yaml` with full documentation inline.
+Full concept and roadmap: `docs/adaptive-process-scaling.md` and `docs/implementation-plan.md`. Per-PR rationale: `docs/implementation-decisions.md`.
+
+### Added — Profiles + installer (PR 1)
+- `_Sprintpilot/modules/autopilot/profiles/` — six profile YAMLs (`_base`, `nano`, `small`, `medium`, `large`, `legacy`). Base + overlay (DRY); `legacy` stands alone with `version_pinned: "v1.0.5"` so future refactors cannot silently drift legacy behavior.
+- `_Sprintpilot/scripts/resolve-profile.js` — `print` / `get` / `validate`. Missing key defaults to `medium` with a stderr notice.
+- `_Sprintpilot/scripts/check-prereqs.js` — enforces node ≥ 18, git ≥ 2.18. Warns (does not fail) on git 2.5–2.17 (degraded mode: no submodule speedups).
+- `sprintpilot install --profile <nano|small|medium|large|legacy>` — non-interactive CLI flag. Interactive installer asks for the profile between autopilot settings and tool selection.
+
+### Added — Timing instrumentation (PR 2)
+- `_Sprintpilot/scripts/log-timing.js` — append-only JSONL writer. Path-traversal-guarded `--story` / `--phase`, 2 KB `--meta` cap, 4 KB line cap so a single POSIX `write()` is atomic. Silently no-ops when `autopilot.phase_timings !== true`.
+- `_Sprintpilot/scripts/summarize-timings.js` — pairs `start`/`end` per story+phase, emits hotspot report (phases > 5% of total paired time). Formats: text/json/md. `--session-only` writes a session artifact at checkpoint.
+- Workflow wraps the primary skill INVOKE, code-review re-invoke, worktree add/submodule-init, test verification, and `git.commit` with timing hooks.
+
+### Added — State shards (PR 3)
+- `_Sprintpilot/scripts/state-shard.js` — `write`/`read`/`append`/`init` over `.autopilot-state/<story>.yaml` and `.decision-log/<story>.yaml`. Atomic tmp-sibling + `rename()`. Flat dotted-keys + JSON flow-form shape keeps shards valid YAML while eliminating any install-time YAML-parser dep.
+- `_Sprintpilot/scripts/merge-shards.js` — merges shards into authoritative project YAMLs. Decision-log dedupe by `id`, sort by `ts`. Corrupt shards → `.archive/corrupt/` (never deleted). Idempotent; `--archive` moves merged shards to `.archive/layer-<id>/`.
+- Shard schema: `updated_at.wall` (ISO-8601 ms) + `updated_at.monotonic` (`hrtime.bigint()`) — NTP-safe intra-process tiebreaker + cross-process fallback.
+
+### Added — Nano flow (PR 4 + 5)
+- Nano profile routes each story through `bmad-quick-dev` (BMad `step-oneshot.md:44`). `bmad-create-story`, `bmad-check-implementation-readiness`, `bmad-dev-story`, `bmad-code-review` are not invoked; quality gates preserved via quick-dev's internal review. Session-scoped escalation to `full` if tests fail or classify severity is high — never persisted to `config.yaml`.
+- `git.granularity: epic` — one branch + one PR per epic (vs per story), merged with `--squash`. `git.worktree.enabled: false` — stories run in-place on the shared branch.
+- `sync-status.js` accepts `--granularity` + `--epic-id` passthrough so downstream code can reconstruct the epic→branch mapping.
+
+### Added — Coalesce state writes (PR 6)
+- `state-shard.js batch` + `flush` actions. Non-critical fields accumulate in `.pending/<kind>/<story>.yaml`; flushed atomically at story boundary + session checkpoint + sprint complete.
+- Four crash-recovery keys (`current_story`, `current_bmad_step`, `in_worktree`, `patch_commits`) bypass the buffer and write straight through, preserving resume-after-crash semantics.
+- Workflow mirrors critical keys to the `sprint` shard at every STATE_FIELDS update when `autopilot.coalesce_state_writes: true`.
+
+### Added — Conditional boot + cached reads (PR 7, 8)
+- On a clean repo (main worktree only, no in-progress stories) the autopilot skips the slow health-check + branch reconciliation block at boot. Typical save: 8–30s per session. `large` profile always runs full reconciliation.
+- `_Sprintpilot/scripts/cached-read.js` — TTL + source-mtime-aware file cache (`read`/`invalidate`/`clear`/`stats`). Any writer's mtime advance forces a miss without an explicit invalidate call.
+
+### Added — DAG resolver + dependency sidecar (PR 9)
+- `_Sprintpilot/scripts/resolve-dag.js` — `graph`/`layers`/`width`/`scaffold`. Strategies: `explicit` (sidecar) > `ordering` (linear chain from sprint-status). Overrides: `force_independent` strips edges; `force_sequential` adds edges; epic-filtered builds; Kahn's-algorithm cycle detection with a clear diagnostic on failure.
+- Purpose-built block-form YAML parser (nested objects, list items with inline mappings, flow-form arrays, quoted keys, trailing comments) — no install-time YAML dep.
+- `scaffold` subcommand writes a safe linear-chain starter with inline schema docs so users don't author from scratch.
+- Missing sidecar falls back to ordering; no behavior change until a user opts in.
+
+### Added — Worktree cost mitigation (PR 10)
+- `_Sprintpilot/scripts/with-retry.js` — 3-attempt jittered-backoff retry (500ms–2s) triggered ONLY when stderr matches a ref-lock regex (configurable via `--pattern`). Non-matching failures pass through — no blind retry hiding real bugs.
+- `_Sprintpilot/scripts/submodule-lock.js` — per-submodule lock keyed by slug, stored under `.sprintpilot/submodule-locks/` (outside `.git/`).
+- Submodule init uses `--reference "$GIT_COMMON"` + `--jobs=4` on git ≥ 2.18, wrapped in retry, serialized by per-submodule lock. Falls back to the plain command on older git.
+- Session saves + disables `gc.auto` on main repo AND every worktree; restored symmetrically at sprint complete.
+
+### Added — Parallel story dispatch (PR 11)
+- `_Sprintpilot/scripts/agent-adapter.js` — `detect` command. Priority: env vars (HIGH) > parent process name (MEDIUM) > filesystem markers (LOW). Tautology guard: filesystem markers prove the install target, not the current host; confidence=low forces `supports_parallel=false` regardless.
+- Host capability table: `claude-code` is the only host with `supports_parallel: true` today. **Gemini CLI** (`GEMINI_CLI=1`, parent `gemini`) is detected at HIGH confidence and can opt into experimental parallel via `ma.experimental_parallel_on_gemini: true` — worktree-scoped subagents are still open upstream (`gemini-cli#22967`) so this is per-project at your own risk.
+- `_Sprintpilot/scripts/dispatch-layer.js` — reads a comma-separated story layer, creates one worktree per story, writes `.layer-plan.json` describing each worktree + branch. Does NOT call LLMs; sub-agent spawning remains host-specific via workflow.md.
+- Sensible safety rails in `ma/config.yaml`: `min_epic_duration_for_parallel_sec`, `baseline_story_duration_sec`, `max_consecutive_conflicts`, `effective_parallel_floor`.
+
+### Added — Cross-epic parallelism (PR 12, EXPERIMENTAL)
+- `_Sprintpilot/scripts/preflight-merge.js` — dry-run merge-conflict probe for every pair of independent epics. Output: `{safe_pairs, conflict_pairs, checked}`. Safety rails: per-project lock (60s timeout), startup cleanup of any stale preflight branch, per-pair try/finally ensuring HEAD returns to base, refusal if HEAD is already on the preflight branch.
+- Workflow gate runs the preflight once per session when `ma.parallel_epics=true` AND host confidence=high AND ≥2 epics in `dependencies.yaml` declare `independent: true`. Any cross-epic merge conflict mid-session flips a session-scoped disable flag.
+- `parallel_epics` stays **off by default on every profile including `large`** — explicit opt-in required.
+
+### Added — Tests
+- **401 unit tests** across 32 files. Highlights: 24-writer race-free subprocess append test for timings, shard corruption-archive verification, real-temp-git-repo preflight conflict detection (no mocks), purpose-built YAML parser round-trip against the plan's canonical example, host-detection tautology guard.
+- **2 new e2e tests** (`tests/e2e/medium-parallel.test.ts`, `tests/e2e/nano.test.ts`) gated on `ANTHROPIC_API_KEY`. Scan `.timings/*.jsonl` for overlapping skill intervals (medium) or for quick-dev invocation + no bmad-dev-story (nano).
 
 ### Changed
-- `AGENTS.md` — "BMad Method is non-negotiable" section reframed as "Flow selection is profile-driven". The per-story 7-step cycle is still mandatory for `small`/`medium`/`large`/`legacy`; `nano` routes through `bmad-quick-dev` (behavior gated on PR 4).
+- `AGENTS.md` — "BMad Method is non-negotiable" section reframed as "Flow selection is profile-driven". `nano` documentation enumerates the skipped skills and the escalation safety net.
+- `_Sprintpilot/skills/sprint-autopilot-on/workflow.md` — extensive wiring: profile resolution at boot, host detection, timing hooks, epic-granularity branching, in-place checkout fallback, conditional boot fast-path, shard batch/flush, cross-epic preflight gate, gc.auto save/restore, retry-wrapped submodule init.
+- `_Sprintpilot/modules/git/config.yaml` — new `git.granularity: story | epic` (default `story`).
+- `_Sprintpilot/modules/ma/config.yaml` — new parallelism keys: `parallel_stories`, `max_parallel_stories`, `min_epic_duration_for_parallel_sec`, `baseline_story_duration_sec`, `max_consecutive_conflicts`, `effective_parallel_floor`, `experimental_parallel_on_gemini`, `parallel_epics`.
+- Profile defaults:
+  - `_base.yaml` (inherited by nano/small/medium/large): `phase_timings: true`, `coalesce_state_writes: true`, `conditional_boot_work: true`, `cache_shared_reads: true`, `state_sharding: auto`.
+  - `large.yaml`: `parallel_stories: true`, `max_parallel_stories: 3`, `conditional_boot_work: false`, `state_sharding: always`, `parallel_epics: false` (explicit pin).
+  - `nano.yaml`: `implementation_flow: quick`, `granularity: epic`, `worktree.enabled: false`, `squash_on_merge: true`, `session_story_limit: 0`, `retrospective_mode: skip`.
+  - `legacy.yaml`: every flag pinned to v1.0.5 behavior.
+
+### Rollback — one knob per feature
+| Feature | Disable via |
+|---|---|
+| All v2 features | `complexity_profile: legacy` |
+| Phase timings | `autopilot.phase_timings: false` |
+| State sharding | `ma.state_sharding: never` |
+| Nano routing | any profile ≠ `nano` |
+| Epic granularity | `git.granularity: story` |
+| Coalesced writes | `autopilot.coalesce_state_writes: false` |
+| Boot fast-path | `autopilot.conditional_boot_work: false` |
+| Read caching | `autopilot.cache_shared_reads: false` |
+| Parallel stories | `ma.parallel_stories: false` |
+| Gemini experimental parallel | `ma.experimental_parallel_on_gemini: false` (default) |
+| Cross-epic parallel | `ma.parallel_epics: false` (default) |
 
 ### Deprecation
 - **v1.x branch enters maintenance.** Security fixes + critical bug fixes only through **2026-10-31**. No new features. v2 active for 18 months after v3.0.0 ships.
-- **Rollback.** Set `complexity_profile: legacy` in `_Sprintpilot/modules/autopilot/config.yaml` to pin to v1.0.5 semantics.
 - **NPM upgrade path.** `npm i -g @ikunin/sprintpilot@latest` preserves behavior via the missing-key default. No interactive prompt on upgrade — scripted CI upgrades unaffected.
-
-### Unreleased (PRs 2–12, future versions)
-- **v2.1.0** (PRs 2–8): M0 phase-timing instrumentation, state-shard infrastructure, nano routing, nano orchestration cuts, M3/M4/M5 overhead cuts.
-- **v2.2.0** (PRs 9–11): dependency sidecar, worktree cost mitigation, parallel intra-epic stories (Claude Code only; sequential fallback on other hosts).
-- **v2.3.0** (PR 12): cross-epic parallelism (experimental).
 
 ## [1.0.5] - 2026-04-21
 
