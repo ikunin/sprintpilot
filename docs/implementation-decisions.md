@@ -204,6 +204,31 @@ A running log of non-obvious implementation choices made during the v2 rollout. 
 **Decision:** `scaffold` writes a header comment block into `dependencies.yaml` explaining the schema + upgrade path to parallel execution.
 **Rationale:** Addresses M11 (discoverability) from the plan. A user running `resolve-dag.js scaffold` as a setup step sees the same docs they'd otherwise have to find in the concept doc. The starter document is a safe linear chain, making parallelism opt-in rather than on-by-default.
 **Impact:** Low. Header is a few lines; cost in write-time is negligible.
+
+## PR 10 — Worktree cost mitigation
+
+### D10.1 — architecture / retry only on ref-lock stderr
+**Decision:** `with-retry.js` retries only when stderr matches the configured regex AND exit is non-zero. Other failures pass through unchanged.
+**Rationale:** Blind retry hides legitimate bugs (missing files, auth errors, syntax errors) behind repeated attempts. Limiting retry to the known-transient ref-lock failure pattern keeps the safety net narrow. Users can widen it via `--pattern` for specific call-sites where a different class of transient is known.
+**Impact:** Low. The default regex is the plan's verbatim set; custom patterns require explicit opt-in.
+
+### D10.2 — architecture / submodule lock path outside .git
+**Decision:** Submodule locks live at `<project>/.sprintpilot/submodule-locks/<slug>.lock`, not inside `.git/modules/`.
+**Rationale:** Files inside `.git/` that git doesn't recognize trigger warnings on some operations, and a future git version could treat them as stale worktree metadata and clean them up. `.sprintpilot/` is already gitignored alongside `_bmad-output/` in the templates, so locks don't leak into user commits either. Slugification (`[a-z0-9-]`, capped at 64 chars) keeps filesystem names safe on every supported platform.
+**Impact:** Low. Lock lifecycle is identical to `lock.js`'s; only the path differs.
+
+### D10.3 — scope / no submodule fixture yet
+**Decision:** PR 10 adds unit tests for the retry and lock helpers but does NOT ship the `tests/e2e/fixtures/with-submodule/` fixture from the plan.
+**Rationale:** The plan describes a real `.gitmodules` with an embedded sibling repo. Constructing that fixture involves `git init` + `git submodule add` over shelled-out commands, makes the fixture path depend on the host's git version, and the actual wall-clock improvement (2–5s vs ~30s) is indistinguishable from test-run variance without a multi-worktree test harness. The unit tests lock in retry + lock correctness; the wall-clock claim can be validated via `log-timing.js` in a real project.
+**Impact:** Medium. Regression in the workflow-level submodule init command (e.g. a typo in the `--reference` flag) would escape unit tests. The `worktree-path-audit.test.ts` catches the most common mistake (treating worktree `.git` as a dir); future fixture additions can extend coverage.
+
+### D10.4 — architecture / gc.auto save/restore on every worktree
+**Decision:** Save + restore `gc.auto` on both the main repo AND every worktree, independently.
+**Rationale:** `git config --local` scopes to the current worktree's config. Setting it on the main repo does NOT propagate to worktrees. The asymmetry can lead to surprises where a worktree's gc still triggers mid-session. Saving the prior value per-worktree is belt-and-suspenders and costs ~2 git calls per worktree setup + teardown.
+**Impact:** Low. The restore is best-effort (ignore-failure-on-unset); in the rare case a restore fails, the user is left with `gc.auto=0` on one worktree, which is conservative rather than dangerous.
+**Decision:** `scaffold` writes a header comment block into `dependencies.yaml` explaining the schema + upgrade path to parallel execution.
+**Rationale:** Addresses M11 (discoverability) from the plan. A user running `resolve-dag.js scaffold` as a setup step sees the same docs they'd otherwise have to find in the concept doc. The starter document is a safe linear chain, making parallelism opt-in rather than on-by-default.
+**Impact:** Low. Header is a few lines; cost in write-time is negligible.
 **Decision:** PR 8 ships the helper + flag but does not rewrite every workflow.md read-site to route through it.
 **Rationale:** Systematically rewriting every read in workflow.md risks breaking subtly (especially inside `<check>` gates where the LLM is expected to evaluate YAML content). The helper is available for targeted callouts (PR 11 will use it in the main loop), and for users who want to experiment by wiring it into custom skills. The safety invariant is that `cache_shared_reads: false` and the helper being unused produce byte-identical behavior today.
 **Impact:** Medium-low. The win lands opportunistically as future PRs route reads through the cache.

@@ -188,6 +188,11 @@ Resolve:
     <action>Set `{{platform}}` = "git_only"</action>
   </check>
 
+  <!-- PR 10: disable gc.auto on the main repo so git's auto-GC doesn't
+       race with concurrent worktree operations during the sprint. Save
+       the prior value so we can restore it at sprint complete (step 10). -->
+  <action>**Save + disable main-repo gc.auto**: set `{{original_gc_auto_main}}` = output of `git config --get gc.auto 2>/dev/null || echo unset`, then `git config --local gc.auto 0`.</action>
+
   <action>**Lock file** — run: `node {{project_root}}/_Sprintpilot/scripts/lock.js acquire`
   Output will be one of:
   - `ACQUIRED:<session-id>` → proceed
@@ -528,8 +533,18 @@ Resolve:
 
   <check if="{{worktree_enabled}} is true AND worktree add succeeded">
     <action>`cd {{project_root}}/.worktrees/{{current_story}}`. All subsequent commands run from here. Set `{{worktree_path}}` = this path.</action>
+    <action>**Disable gc.auto on this worktree** (PR 10): save original value `{{original_gc_auto_worktree}}` = output of `git -C {{project_root}}/.worktrees/{{current_story}} config --get gc.auto` (or "unset"), then `git -C {{project_root}}/.worktrees/{{current_story}} config --local gc.auto 0`.</action>
     <action>Run: `node {{project_root}}/_Sprintpilot/scripts/log-timing.js start --story "{{current_story}}" --phase "worktree.submodule-init" --project-root "{{project_root}}"` — ignore failures.</action>
-    <action>**Init submodules** if `.gitmodules` exists (check with your file-exists tool or `node -e "process.exit(require('fs').existsSync('.gitmodules')?0:1)"`). Run `git submodule update --init --recursive` (~30s). On failure/hang: warn "Submodule init failed (may need auth). Continuing." and proceed.</action>
+    <action>**Init submodules** if `.gitmodules` exists (file-exists check via `node -e "process.exit(require('fs').existsSync('.gitmodules')?0:1)"`). PR 10 fast-path:
+    Resolve the main repo's common git dir: `GIT_COMMON=$(git -C {{project_root}} rev-parse --git-common-dir)`.
+    For each submodule path in `.gitmodules`:
+      1. `node {{project_root}}/_Sprintpilot/scripts/submodule-lock.js acquire --submodule "<path>" --project-root "{{project_root}}"` — serializes concurrent submodule updates across worktrees.
+      2. With git ≥ 2.18 (confirmed at boot by check-prereqs): wrap the update with retry to survive ref-lock contention:
+         `node {{project_root}}/_Sprintpilot/scripts/with-retry.js -- git -C {{project_root}}/.worktrees/{{current_story}} submodule update --init --recursive --reference "$GIT_COMMON" --jobs=4 -- <path>`
+         With older git (degraded mode flagged by check-prereqs): fall back to `git -C ... submodule update --init --recursive -- <path>`.
+      3. `node {{project_root}}/_Sprintpilot/scripts/submodule-lock.js release --submodule "<path>" --project-root "{{project_root}}"` (best-effort, ignore failures).
+    If the loop fails or hangs: warn "Submodule init failed (may need auth). Continuing." and proceed.
+    </action>
     <action>Run: `node {{project_root}}/_Sprintpilot/scripts/log-timing.js end --story "{{current_story}}" --phase "worktree.submodule-init" --project-root "{{project_root}}"` — ignore failures.</action>
     <action>Set `{{in_worktree}}` = true</action>
   </check>
@@ -1023,6 +1038,11 @@ No work will be repeated.
 
 <check if="{{git_enabled}}">
   <action>**Cleanup remaining worktrees** (safety net): `git worktree list --porcelain` → for each non-main worktree: `git worktree remove <path> --force` then `git worktree prune` (log + continue on failure).</action>
+  <!-- PR 10: restore main-repo gc.auto to its prior value. -->
+  <action>**Restore main-repo gc.auto**:
+  if `{{original_gc_auto_main}}` is "unset": `git config --local --unset gc.auto` (ignore failure — may already be unset).
+  else: `git config --local gc.auto {{original_gc_auto_main}}`.
+  </action>
   <action>Release lock: `node {{project_root}}/_Sprintpilot/scripts/lock.js release`</action>
 </check>
 

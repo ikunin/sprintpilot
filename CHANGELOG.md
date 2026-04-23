@@ -2,6 +2,28 @@
 
 ## [Unreleased]
 
+**PR 10 of 12 — Worktree cost mitigation + concurrent discipline**
+
+Makes per-worktree submodule init 2–5s instead of ~30s on git ≥ 2.18 via `--reference` + `--jobs=4`. Wraps ref-mutating git calls with a jittered-backoff retry so transient ref-lock contention in concurrent worktree setups doesn't fail builds. Per-submodule locks serialize concurrent `git submodule update` calls across worktrees. `gc.auto` is disabled for the duration of a sprint on both the main repo and every worktree, then restored.
+
+### Added
+- `_Sprintpilot/scripts/with-retry.js` — 3-attempt jittered-backoff retry (500ms–2s) triggered only when stderr matches a ref-lock regex (configurable via `--pattern`). Non-matching failures pass through unchanged — no blind retry hiding real bugs.
+- `_Sprintpilot/scripts/submodule-lock.js` — thin wrapper over `lock.js --file` keyed by submodule slug. Locks live under `<project>/.sprintpilot/submodule-locks/` (outside `.git/`) so git doesn't warn about foreign files.
+- `tests/unit/with-retry.test.ts` — 11 tests: default regex coverage, custom `--pattern`, retry success after N attempts, give-up after attempts exhausted, non-retriable pass-through, CLI exit codes.
+- `tests/unit/submodule-lock.test.ts` — 10 tests: slugify, lock-path resolution, acquire/release/check, cross-submodule non-contention, CLI exit codes.
+- `tests/unit/worktree-path-audit.test.ts` — regression guard: scans workflow.md + every script for commands that treat `<worktree>/.git` as a directory. In a worktree, `.git` is a file pointer; `ls .git/refs/...` would break silently.
+
+### Changed
+- `_Sprintpilot/skills/sprint-autopilot-on/workflow.md`:
+  - Boot saves + disables `gc.auto` on the main repo; sprint complete (step 10) restores it.
+  - Each worktree saves + disables `gc.auto` on worktree entry.
+  - Submodule init now uses `git submodule update --init --recursive --reference "$GIT_COMMON" --jobs=4 -- <path>` on git ≥ 2.18, wrapped with `with-retry.js`, with a per-submodule lock acquired before and released after. Falls back to the plain command on older git (degraded mode, already warned at boot by `check-prereqs.js`).
+
+### Rollback
+- Revert the PR. The retry wrapper is a no-op when not invoked; the per-submodule lock is a no-op when unused. The `gc.auto` change is self-unwinding because restore is symmetric.
+
+## [Unreleased — PR 9]
+
 **PR 9 of 12 — Dependency sidecar + DAG resolver**
 
 Ships the Sprintpilot-owned `dependencies.yaml` format and a resolver that turns it into an execution DAG for parallel dispatch (PR 11+). Missing sidecar → linear chain from sprint-status order (no surprises). Cycles rejected with a clear diagnostic. Includes a `scaffold` subcommand that writes a safe linear starter + inline docs so users don't have to hand-craft the first file.
