@@ -1119,13 +1119,13 @@ No work will be repeated.
 
 <step n="10" goal="Sprint complete — emit summary and next steps">
 
-<!-- CRITICAL-PATH-FIRST: these 5 actions MUST run before anything else in
+<!-- CRITICAL-PATH-FIRST: these 6 actions MUST run before anything else in
      step 10. They put the repo into a correct terminal state — orphan
      worktrees removed, lock released, artifacts committed to main,
-     sprint-complete state marked, final verification. Even if the rest
-     of step 10 is interrupted (SIGTERM, LLM improvises an early summary,
-     context exhaustion), the harness invariants hold. DO NOT reorder
-     or skip these — the order matters: worktrees-before-lock so a
+     sprint-complete state marked, task checkboxes marked, final verification.
+     Even if the rest of step 10 is interrupted (SIGTERM, LLM improvises an
+     early summary, context exhaustion), the harness invariants hold. DO NOT
+     reorder or skip these — the order matters: worktrees-before-lock so a
      concurrent autopilot session doesn't see orphans, lock-before-commit
      so commits run with the repo already unlocked, etc. -->
 
@@ -1158,7 +1158,12 @@ Run: `node {{project_root}}/_Sprintpilot/scripts/lock.js release` — ignore fai
 
 <action>**[CRITICAL 4/5] Mark sprint-complete state**: update `{state_file}`: `current_bmad_step = "sprint-complete"`, `current_story = null`, `next_skill = null`, `stories_remaining = []`, `session_stories_done = {{session_stories_done}}`. This signals the test harness and any next /sprint-autopilot-on invocation that the sprint is genuinely done.</action>
 
-<action>**[CRITICAL 5/5] Verify** — `{status_file}` shows every story status=done and every epic status=done. If any are not done: log a warning but do NOT revert the above actions. The worktrees are gone; the lock is released; the artifacts are committed; the state is marked complete. Manual recovery only.</action>
+<action>**[CRITICAL 5/6] Mark every done story's Task/Subtask checkboxes** — safety net for LLM-skipped step-7 checkbox marking. Run:
+`node {{project_root}}/_Sprintpilot/scripts/mark-done-stories-tasks.js --status-file "{status_file}" --project-root "{{project_root}}"` — ignore failures.
+This finds every story with status="done" in sprint-status.yaml and replaces `- [ ]` with `- [x]` in its story file. Deterministic, atomic per file.
+</action>
+
+<action>**[CRITICAL 6/6] Verify** — `{status_file}` shows every story status=done and every epic status=done. If any are not done: log a warning but do NOT revert the above actions. The worktrees are gone; the lock is released; the artifacts are committed; the state is marked complete; task checkboxes are marked. Manual recovery only.</action>
 
 <action>Run full test suite — report `N/N passed`</action>
 

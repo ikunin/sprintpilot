@@ -477,35 +477,33 @@ describe('Greenfield: Tic Tac Toe via Sprintpilot', () => {
     assertFileExists(sprintStatus);
     assertFileNotEmpty(sprintStatus);
     const sprintBody = readFileSync(sprintStatus, 'utf-8');
-    // Accept either form by line inspection:
-    //   A. `  epic-1: done` or `  "1": done`  (inline)
-    //   B. some epic key on one line + a later indented `status: done`
-    //      where both lines share the same epic block.
+    // Accept every shape BMad has emitted:
+    //   A. inline: `  epic-1: done` or `  "1": done`
+    //   B. block dict: `  1:\n    status: done`
+    //   C. block list: `epics:\n  - id: "1"\n    status: done`
+    // Approach: locate the `epics:` section, then within its scope (up to
+    // the next top-level key) scan for any `status: done` line. O(N),
+    // no nested quantifiers — regex-only checks are single-line anchored.
     const epicDoneInline = /^\s*["']?(?:epic-)?\d+["']?\s*:\s*done\b/m.test(sprintBody);
-    // For block form: check that an epic key line is followed (within the
-    // next ~20 lines at deeper indent) by a `status: done` line. Done via
-    // one linear sweep — no catastrophic backtracking.
-    const lines = sprintBody.split(/\r?\n/);
-    let epicDoneBlock = false;
-    for (let i = 0; i < lines.length; i++) {
-      if (/^\s*["']?(?:epic-)?\d+["']?\s*:\s*(?:#.*)?$/.test(lines[i])) {
-        // Epic key with empty value (block form). Look ahead at deeper indent
-        // for status: done. Stop when we hit a line at same-or-lower indent.
-        const keyIndent = lines[i].match(/^(\s*)/)![1].length;
-        for (let j = i + 1; j < Math.min(i + 25, lines.length); j++) {
-          const lineIndent = lines[j].match(/^(\s*)/)![1].length;
-          if (lines[j].trim() === '') continue;
-          if (lineIndent <= keyIndent) break;
-          if (/^\s*status\s*:\s*["']?done["']?\b/.test(lines[j])) {
-            epicDoneBlock = true;
-            break;
-          }
-        }
-        if (epicDoneBlock) break;
+    const allLines = sprintBody.split(/\r?\n/);
+    let inEpicsBlock = false;
+    let epicsBlockDone = false;
+    for (let i = 0; i < allLines.length && !epicsBlockDone; i++) {
+      const line = allLines[i];
+      if (/^epics\s*:/.test(line)) {
+        inEpicsBlock = true;
+        continue;
+      }
+      // Leave the epics block on any new top-level key (column 0 + ':').
+      if (inEpicsBlock && /^[A-Za-z_][A-Za-z0-9_-]*\s*:/.test(line)) {
+        inEpicsBlock = false;
+      }
+      if (inEpicsBlock && /^\s+status\s*:\s*["']?done["']?\b/.test(line)) {
+        epicsBlockDone = true;
       }
     }
     expect(
-      epicDoneInline || epicDoneBlock,
+      epicDoneInline || epicsBlockDone,
       `sprint-status.yaml must record at least one done epic (inline or block form); body=${sprintBody.slice(0, 400)}`,
     ).toBe(true);
     console.log('[Artifacts] sprint-status.yaml ✓');
