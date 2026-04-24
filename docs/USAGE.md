@@ -76,7 +76,7 @@ This compares your installed version against npm, shows what's new, and asks for
 
 ### Session Management
 
-The autopilot checkpoints after every 3 stories (configurable). It saves state to `_bmad-output/implementation-artifacts/autopilot-state.yaml` and asks you to start a new session:
+The autopilot checkpoints after every 3 stories (configurable; nano profile: 5). It saves state to `_bmad-output/implementation-artifacts/autopilot-state.yaml` and asks you to start a new session:
 
 ```
 /sprint-autopilot-on    # resumes exactly where it left off
@@ -94,6 +94,14 @@ The state file tracks:
 All fields are persisted on every state write to prevent data loss across sessions. If `next_skill` is empty on resume, the autopilot recovers by re-reading `sprint-status.yaml` and determining the correct next step for the first undone story.
 
 This file is deleted automatically when the sprint completes.
+
+#### Fresh-context finalize (mandatory)
+
+When the last story is done, the autopilot **does not** run its cleanup step (step 10) in the same session that detected sprint-complete. Instead it writes `current_bmad_step = sprint-finalize-pending` to the state file, releases the lock, and asks you to run `/sprint-autopilot-on` one more time. That fresh session reads the pending marker, jumps straight to step 10, and runs the deterministic cleanup script calls (mark-done-stories task checkboxes, worktree removal, artifact commits, final report) with a clean context window.
+
+This trades one short extra session (~60-100 turns, usually under $2) for reliable end-of-sprint hygiene — without it, the tail of a long session regularly drops the CRITICAL cleanup actions. The test harness handles this automatically; you only notice it as an extra "All stories are done, pausing for finalization" checkpoint report.
+
+If step 10 is interrupted after writing `current_bmad_step = sprint-complete` but before deleting the state file, the next `/sprint-autopilot-on` detects it in step 1 and cleans up with an "already complete" message rather than looping.
 
 ### Submodules
 

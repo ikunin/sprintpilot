@@ -1,5 +1,39 @@
 # Changelog
 
+## [2.0.1] - 2026-04-24
+
+**Determinism + context-rot mitigation.** Replaces brittle LLM-prose steps with script-backed deterministic calls and forces a fresh-context session for step 10 finalization so CRITICAL cleanup actions (task checkboxes, worktree cleanup, lock release, artifact commit) run reliably. Validated end-to-end against the greenfield e2e (7/7 tests, $8.94, 3 sessions — previously required 9 fix-up iterations to stabilize).
+
+### Added
+- `_Sprintpilot/scripts/inject-tasks-section.js` — deterministic, idempotent replacement for the LLM-prose Tasks/Subtasks recovery heuristic in step 7. Scans only the bounded `## Acceptance Criteria` section, supports numbered / bullet / `**AC-N:**` entry styles, appends a `## Tasks / Subtasks` section with one `- [ ]` per AC entry.
+- `list-remaining-stories.js --format envelope` — emits `{"remaining":[...], "state":"pre-planning|sprint-in-progress|sprint-complete|parse-error"}` on every exit path. Callers never have to probe stderr or `$?` to disambiguate states.
+- `sprint-finalize-pending` state machine — when step 2 detects sprint-complete, the current session writes this marker and halts. The next `/sprint-autopilot-on` invocation routes step 10 straight to finalization with a clean context, avoiding late-session instruction decay. Workflow step 1 short-circuits on both `sprint-finalize-pending` (jump to step 10) and `sprint-complete` (cleanup + exit) so accidental re-runs don't loop.
+
+### Changed
+- `list-remaining-stories.js` / `parseStatuses` rewritten as an indent-agnostic scanner covering every BMad-observed shape: dict inline, block dict, block list (`- id:` / `- key:` / `- <key>:`), quoted keys, 2-space / 4-space / tab indent. Case-insensitive `isDone` so `Done`, `"DONE"`, `"done "` all collapse to the same class.
+- `mark-done-stories-tasks.js` — fenced-code-block aware (both ``` and ~~~); `- [ ]` inside examples round-trips verbatim. Durable-atomic writes (tmp + fsync + rename + dir fsync). Honors `output_folder` from `_bmad/bmm/config.yaml` and an explicit `--output-folder` flag.
+- Workflow step 10 CRITICAL block extended from 6 actions to 7 — state-file delete promoted into the deterministic early zone (was at the tail and regularly skipped under context pressure). Existing CRITICAL 5 sprint-complete write preserved as a crash-safe marker.
+- `git checkout -B base origin/base` replaced with non-destructive `git switch` + `git pull --ff-only` in step 10 CRITICAL 4 and the later README/docs commit block. `-B` silently discards local commits; the new pattern refuses to fast-forward past conflicts and logs a warning instead.
+- Step 10 worktree cleanup prose + filter aligned — scope is explicitly `{{project_root}}/.worktrees/` (autopilot-owned), not every non-main worktree. Prior prose was contradictory.
+- Workflow envelope protocol replaces the fragile `; echo "EXIT:$?"` shell-expansion trailer used by step 2's sprint-complete gate.
+- `autopilot.session_story_limit` defaults retuned for context rot:
+  - `_base` (medium, small): `5 → 3`
+  - `nano`: `0` (unlimited) `→ 5`
+  - `large` / `legacy`: unchanged at `3`
+
+### Fixed
+- Step 10 no longer runs in the same LLM session that first detected sprint-complete. That session is typically the most context-rotted one of the run, and empirically the one where CRITICAL actions were being skipped.
+- Two fallback sprint-complete detections (step 2 `next_skill is empty` branch and step 5 skill-routing branch) routed through the same finalize-pending handoff rather than bypassing it with a direct `goto step=10`.
+- Greenfield e2e test honesty: removed the in-test `mark-done-stories-tasks.js` invocation that was papering over step 10 skipping its CRITICAL 1/7; tightened `isGameComplete` to strip comments + string literals and require identifier-use patterns (no more false positives from TODO comments); tightened `getLatestStoryBranch` glob from `*story/*` (matched `feature/user-story/123`) to pinned `story/*` / `origin/story/*` patterns; non-destructive `gitCheckout` surfaces dirty-tree state instead of force-wiping; fixed dead no-op regex in the PR branch-mapping test.
+- `medium-parallel.test.ts` parallelism detection now only counts overlap in dispatcher-relevant phases (`bmad-dev-story`, `bmad-create-story`, `bmad-quick-dev`, `bmad-code-review`, `bmad-check-implementation-readiness`). Incidental `bmad-help` / `bmad-retrospective` overlap no longer passes the assertion.
+- `medium-parallel.test.ts` config rewrite robust to three starting shapes of `parallel_stories` (already-true, explicitly-false, absent).
+- Unit coverage expanded by ~32 cases across the three scripts — every shape that drove recent "greenfield iter N→N+1" commits is now pinned by a test (quoted keys, list form, 4-space / tab indent, case-insensitive status, fenced code blocks, `output_folder` override).
+
+### Ownership-boundary audit (no functional change, documentation only)
+- Confirmed zero new direct writes to `sprint-status.yaml` from the recent scripts or workflow.
+- Pre-existing `sprint-status.yaml` writes under `retrospective_mode: auto` and `skip` documented as sanctioned exceptions in the ownership-boundaries memory. Reason: `bmad-retrospective` is interactive and cannot be invoked from autopilot, and no BMAD skill closes the epic at the `epics.{id}.status` level. The writes augment rather than override BMAD-written fields.
+- Story-file writes (`mark-done-stories-tasks.js` checkbox repair, `inject-tasks-section.js` section injection) documented as sanctioned exceptions — narrow, cosmetic, applied only after BMAD has marked the story done or omitted the section.
+
 ## [2.0.0] - 2026-04-23
 
 **Major release: Adaptive Process Scaling (12 PRs).**

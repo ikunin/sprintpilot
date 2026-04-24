@@ -332,7 +332,7 @@ All parameters live in Sprintpilot-owned YAMLs. Defaults shown per profile.
 |---|---|---|---|---|---|---|
 | `complexity_profile` | Profile selector | nano | small | medium | large | legacy |
 | `implementation_flow` | Routing override | `quick` | `full` | `full` | `full` | `full` |
-| `session_story_limit` | Story count before checkpoint (0 = disabled) | 0 | 0 | 5 | 3 | 3 |
+| `session_story_limit` | Story count before checkpoint (0 = disabled) | 5 | 3 | 3 | 3 | 3 |
 | `retrospective_mode` | Retrospective handling | `skip` | `auto` | `auto` | `stop` | `auto` |
 | `auto_escalate_on_failure` | Nano escalation | true | n/a | n/a | n/a | false |
 | `skip_redundant_rereview` (M1) | Skip post-patch re-review when findings empty | n/a | true | true | false | false |
@@ -342,6 +342,8 @@ All parameters live in Sprintpilot-owned YAMLs. Defaults shown per profile.
 | `phase_timings` (M0) | Emit per-phase duration logs | on | on | on | on | off |
 
 **Session budget** is `session_story_limit` only (R8). Token estimation was researched and removed — it would require LLM observability Sprintpilot doesn't have (host agent owns all model interaction; no tool-agnostic API). Story count per profile is the entire mechanism. Users tune by changing the numeric limit.
+
+Defaults were retuned in 2.0.1 to mitigate context rot observed in end-to-end testing. Nano previously ran unlimited (`0`) and medium was `5`; both exposed step 10's CRITICAL cleanup actions to late-session instruction decay. All non-nano profiles now cap at 3 stories per session; nano at 5 (quick-dev is cheap enough to fit more, but unlimited is off the table). Independently, the autopilot now forces a one-session fresh-context handoff for step 10 regardless of where `session_story_limit` landed — see the `sprint-finalize-pending` state machine in `_Sprintpilot/skills/sprint-autopilot-on/workflow.md`.
 
 **M1 removed.** `skip_redundant_rereview` is gone from the concept entirely. BMad's own "Clean Review Shortcut" (`step-04-present.md:15-17`) handles this optimization internally; the autopilot always runs the second `bmad-code-review` invocation.
 
