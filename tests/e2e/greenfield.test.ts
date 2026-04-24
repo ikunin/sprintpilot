@@ -470,13 +470,44 @@ describe('Greenfield: Tic Tac Toe via Sprintpilot', () => {
     //   - inline + block form
     //   - hyphen form (`epic-1`) + bare-number form (`1`)
     //   - quoted + unquoted keys (`"1":` vs `1:`)
+    //
+    // Block-form matching is line-based (no nested quantifiers) to avoid
+    // catastrophic regex backtracking on large sprint-status.yaml files.
     const sprintStatus = join(dir, '_bmad-output/implementation-artifacts/sprint-status.yaml');
     assertFileExists(sprintStatus);
     assertFileNotEmpty(sprintStatus);
-    assertFileContains(
-      sprintStatus,
-      /["']?(?:epic-)?\d+["']?\s*:\s*(?:done\b|(?:[^\n]*\n\s*)*?\s+status:\s*done\b)/,
-    );
+    const sprintBody = readFileSync(sprintStatus, 'utf-8');
+    // Accept either form by line inspection:
+    //   A. `  epic-1: done` or `  "1": done`  (inline)
+    //   B. some epic key on one line + a later indented `status: done`
+    //      where both lines share the same epic block.
+    const epicDoneInline = /^\s*["']?(?:epic-)?\d+["']?\s*:\s*done\b/m.test(sprintBody);
+    // For block form: check that an epic key line is followed (within the
+    // next ~20 lines at deeper indent) by a `status: done` line. Done via
+    // one linear sweep — no catastrophic backtracking.
+    const lines = sprintBody.split(/\r?\n/);
+    let epicDoneBlock = false;
+    for (let i = 0; i < lines.length; i++) {
+      if (/^\s*["']?(?:epic-)?\d+["']?\s*:\s*(?:#.*)?$/.test(lines[i])) {
+        // Epic key with empty value (block form). Look ahead at deeper indent
+        // for status: done. Stop when we hit a line at same-or-lower indent.
+        const keyIndent = lines[i].match(/^(\s*)/)![1].length;
+        for (let j = i + 1; j < Math.min(i + 25, lines.length); j++) {
+          const lineIndent = lines[j].match(/^(\s*)/)![1].length;
+          if (lines[j].trim() === '') continue;
+          if (lineIndent <= keyIndent) break;
+          if (/^\s*status\s*:\s*["']?done["']?\b/.test(lines[j])) {
+            epicDoneBlock = true;
+            break;
+          }
+        }
+        if (epicDoneBlock) break;
+      }
+    }
+    expect(
+      epicDoneInline || epicDoneBlock,
+      `sprint-status.yaml must record at least one done epic (inline or block form); body=${sprintBody.slice(0, 400)}`,
+    ).toBe(true);
     console.log('[Artifacts] sprint-status.yaml ✓');
 
     // Epics — must exist with epic sections and BDD acceptance criteria
