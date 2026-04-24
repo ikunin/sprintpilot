@@ -466,16 +466,16 @@ describe('Greenfield: Tic Tac Toe via Sprintpilot', () => {
     const planning = join(dir, '_bmad-output/planning-artifacts');
     expect(existsSync(planning), 'planning-artifacts directory must exist').toBe(true);
 
-    // Sprint status — accept both BMad variants:
-    //   A. `epic-1: done` or `epic-1:\n  status: done`      (hyphen form)
-    //   B. `  1:\n    status: done` under an `epics:` block  (bare-number form — BMad v6 default)
+    // Sprint status — accept every BMad variant observed so far:
+    //   - inline + block form
+    //   - hyphen form (`epic-1`) + bare-number form (`1`)
+    //   - quoted + unquoted keys (`"1":` vs `1:`)
     const sprintStatus = join(dir, '_bmad-output/implementation-artifacts/sprint-status.yaml');
     assertFileExists(sprintStatus);
     assertFileNotEmpty(sprintStatus);
-    // Either form of epic done marker should be present.
     assertFileContains(
       sprintStatus,
-      /((?:epic-)?\d+:\s*done\b|(?:epic-)?\d+:\s*(?:[^\n]*\n\s*)*?\s+status:\s*done\b)/,
+      /["']?(?:epic-)?\d+["']?\s*:\s*(?:done\b|(?:[^\n]*\n\s*)*?\s+status:\s*done\b)/,
     );
     console.log('[Artifacts] sprint-status.yaml ✓');
 

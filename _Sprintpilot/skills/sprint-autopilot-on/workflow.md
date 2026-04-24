@@ -1119,14 +1119,15 @@ No work will be repeated.
 
 <step n="10" goal="Sprint complete — emit summary and next steps">
 
-<!-- CRITICAL-PATH-FIRST: these 4 actions MUST run before anything else in
-     step 10. They release the lock, commit artifacts to main, mark
-     sprint-complete, and delete the state file — in that order — so even
-     if the session is SIGTERM'd OR the LLM improvises an early summary,
-     the repo is left in a correct terminal state. The slower operations
-     (full test suite, docs generation, final report) come afterwards
-     and may be cut short without breaking the test harness's invariants.
-     DO NOT reorder or skip these — each has a specific purpose. -->
+<!-- CRITICAL-PATH-FIRST: these 5 actions MUST run before anything else in
+     step 10. They put the repo into a correct terminal state — orphan
+     worktrees removed, lock released, artifacts committed to main,
+     sprint-complete state marked, final verification. Even if the rest
+     of step 10 is interrupted (SIGTERM, LLM improvises an early summary,
+     context exhaustion), the harness invariants hold. DO NOT reorder
+     or skip these — the order matters: worktrees-before-lock so a
+     concurrent autopilot session doesn't see orphans, lock-before-commit
+     so commits run with the repo already unlocked, etc. -->
 
 <!-- GIT: Exit worktree if still in one (prerequisite for the rest) -->
 <check if="{{in_worktree}}">
@@ -1134,11 +1135,20 @@ No work will be repeated.
   <action>Set `{{in_worktree}}` = false</action>
 </check>
 
-<action>**[CRITICAL 1/4] Release lock immediately** — before any slow operation:
-Run: `node {{project_root}}/_Sprintpilot/scripts/lock.js release` — ignore failures. This is idempotent.
+<action>**[CRITICAL 1/5] Remove every non-main worktree** — no-op if none exist:
+<check if="{{git_enabled}}">
+  Run: `git worktree list --porcelain` to enumerate. For each worktree whose path is under `.worktrees/` (i.e. not the main repo):
+  - `git worktree remove <path> --force 2>&1` (ignore failures — best-effort).
+  Then once: `git worktree prune 2>&1` (ignore failures).
+  This is the SINGLE authoritative cleanup site — do not wait for a later "safety net" cleanup that might not run.
+</check>
 </action>
 
-<action>**[CRITICAL 2/4] Commit any final artifacts + planning docs to main** — even if the rest of step 10 is interrupted:
+<action>**[CRITICAL 2/5] Release lock immediately** — before any slow operation:
+Run: `node {{project_root}}/_Sprintpilot/scripts/lock.js release` — ignore failures. Idempotent.
+</action>
+
+<action>**[CRITICAL 3/5] Commit any final artifacts + planning docs to main** — even if the rest of step 10 is interrupted:
 <check if="{{git_enabled}}">
   1. `git checkout -B {{base_branch}} origin/{{base_branch}} 2>&1` (or just `{{base_branch}}` when `{{has_origin}}` is false).
   2. `git add _bmad-output/planning-artifacts _bmad-output/implementation-artifacts/sprint-status.yaml _bmad-output/implementation-artifacts/decision-log.yaml _bmad-output/stories _bmad-output/implementation-artifacts/retrospectives 2>/dev/null || true` (each path best-effort; never halt).
@@ -1146,9 +1156,9 @@ Run: `node {{project_root}}/_Sprintpilot/scripts/lock.js release` — ignore fai
 </check>
 </action>
 
-<action>**[CRITICAL 3/4] Mark sprint-complete state**: update `{state_file}`: `current_bmad_step = "sprint-complete"`, `current_story = null`, `next_skill = null`, `stories_remaining = []`, `session_stories_done = {{session_stories_done}}`. This signals the test harness and any next /sprint-autopilot-on invocation that the sprint is genuinely done.</action>
+<action>**[CRITICAL 4/5] Mark sprint-complete state**: update `{state_file}`: `current_bmad_step = "sprint-complete"`, `current_story = null`, `next_skill = null`, `stories_remaining = []`, `session_stories_done = {{session_stories_done}}`. This signals the test harness and any next /sprint-autopilot-on invocation that the sprint is genuinely done.</action>
 
-<action>**[CRITICAL 4/4] Verify** — `{status_file}` shows every story status=done and every epic status=done. If any are not done: log a warning but do NOT revert the above actions. The lock is already released; the artifacts are committed; the state is marked complete. A manual recovery is required.</action>
+<action>**[CRITICAL 5/5] Verify** — `{status_file}` shows every story status=done and every epic status=done. If any are not done: log a warning but do NOT revert the above actions. The worktrees are gone; the lock is released; the artifacts are committed; the state is marked complete. Manual recovery only.</action>
 
 <action>Run full test suite — report `N/N passed`</action>
 
@@ -1201,7 +1211,10 @@ Run: `node {{project_root}}/_Sprintpilot/scripts/lock.js release` — ignore fai
 <action>**Collect report data** from `{status_file}` (stories grouped by epic with titles, totals, final test count; PR/MR URLs, patch/dismissed counts per story if git_enabled) and `{decision_log_file}` (medium/high-impact decisions; counts of `review-accept`, `review-triage`, code-review rounds; per-story patches-applied / findings-dismissed).</action>
 
 <check if="{{git_enabled}}">
-  <action>**Cleanup remaining worktrees** (safety net): `git worktree list --porcelain` → for each non-main worktree: `git worktree remove <path> --force` then `git worktree prune` (log + continue on failure).</action>
+  <!-- Worktree cleanup already ran as CRITICAL 1/5 above. Intentionally
+       no duplicate here — relying on early cleanup to avoid orphans
+       when the LLM short-circuits late actions. -->
+  <action>(No-op: worktree cleanup already executed in CRITICAL 1/5.)</action>
   <!-- PR 10: restore main-repo gc.auto to its prior value. -->
   <action>**Restore main-repo gc.auto**:
   if `{{original_gc_auto_main}}` is "unset": `git config --local --unset gc.auto` (ignore failure — may already be unset).
