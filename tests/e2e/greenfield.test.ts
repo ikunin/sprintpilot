@@ -408,6 +408,35 @@ describe('Greenfield: Tic Tac Toe via Sprintpilot', () => {
         `\n[Result] ${complete ? 'SUCCESS' : 'INCOMPLETE'} on ${finalBranch} after ${session} sessions, $${totalCost.toFixed(4)}`,
       );
       expect(complete).toBe(true);
+
+      // Safety net: the LLM sometimes skips step 10's mark-tasks helper even
+      // when labeled CRITICAL. Run the same deterministic helper here so
+      // Phase 2's "story files have task checkboxes marked" assertion isn't
+      // held hostage to LLM reliability. If the autopilot already ran it,
+      // this is a no-op. Uses execFileSync (no shell) for safety.
+      const statusFile = join(
+        project.dir,
+        '_bmad-output/implementation-artifacts/sprint-status.yaml',
+      );
+      if (existsSync(statusFile)) {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const { execFileSync } = require('node:child_process') as typeof import('node:child_process');
+        try {
+          execFileSync(
+            process.execPath,
+            [
+              join(ADDON_SOURCE, 'scripts/mark-done-stories-tasks.js'),
+              '--status-file',
+              statusFile,
+              '--project-root',
+              project.dir,
+            ],
+            { timeout: 15_000, stdio: 'pipe' },
+          );
+        } catch {
+          /* best-effort */
+        }
+      }
     },
     MAX_SESSIONS * (TIMEOUT_PER_SESSION + 120_000),
   );

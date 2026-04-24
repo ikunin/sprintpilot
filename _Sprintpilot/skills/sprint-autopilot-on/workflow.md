@@ -1135,7 +1135,16 @@ No work will be repeated.
   <action>Set `{{in_worktree}}` = false</action>
 </check>
 
-<action>**[CRITICAL 1/5] Remove every non-main worktree** — no-op if none exist:
+<!-- Run the mark-tasks helper AS THE VERY FIRST action of step 10.
+     The LLM reliably executes the first critical action but sometimes
+     skips later ones once it feels "done" with the sprint. Putting this
+     first ensures every done-story's checkboxes get marked before the
+     LLM loses focus. -->
+<action>**[CRITICAL 1/6] Mark all done stories' Task checkboxes** — deterministic helper. Run:
+`node {{project_root}}/_Sprintpilot/scripts/mark-done-stories-tasks.js --status-file "{status_file}" --project-root "{{project_root}}"` — ignore failures. This finds every story with status="done" in sprint-status.yaml and replaces `- [ ]` with `- [x]` in its story file.
+</action>
+
+<action>**[CRITICAL 2/6] Remove every non-main worktree** — no-op if none exist:
 <check if="{{git_enabled}}">
   Run: `git worktree list --porcelain` to enumerate. For each worktree whose path is under `.worktrees/` (i.e. not the main repo):
   - `git worktree remove <path> --force 2>&1` (ignore failures — best-effort).
@@ -1144,11 +1153,11 @@ No work will be repeated.
 </check>
 </action>
 
-<action>**[CRITICAL 2/5] Release lock immediately** — before any slow operation:
+<action>**[CRITICAL 3/6] Release lock immediately** — before any slow operation:
 Run: `node {{project_root}}/_Sprintpilot/scripts/lock.js release` — ignore failures. Idempotent.
 </action>
 
-<action>**[CRITICAL 3/5] Commit any final artifacts + planning docs to main** — even if the rest of step 10 is interrupted:
+<action>**[CRITICAL 4/6] Commit any final artifacts + planning docs to main** — even if the rest of step 10 is interrupted:
 <check if="{{git_enabled}}">
   1. `git checkout -B {{base_branch}} origin/{{base_branch}} 2>&1` (or just `{{base_branch}}` when `{{has_origin}}` is false).
   2. `git add _bmad-output/planning-artifacts _bmad-output/implementation-artifacts/sprint-status.yaml _bmad-output/implementation-artifacts/decision-log.yaml _bmad-output/stories _bmad-output/implementation-artifacts/retrospectives 2>/dev/null || true` (each path best-effort; never halt).
@@ -1156,12 +1165,7 @@ Run: `node {{project_root}}/_Sprintpilot/scripts/lock.js release` — ignore fai
 </check>
 </action>
 
-<action>**[CRITICAL 4/5] Mark sprint-complete state**: update `{state_file}`: `current_bmad_step = "sprint-complete"`, `current_story = null`, `next_skill = null`, `stories_remaining = []`, `session_stories_done = {{session_stories_done}}`. This signals the test harness and any next /sprint-autopilot-on invocation that the sprint is genuinely done.</action>
-
-<action>**[CRITICAL 5/6] Mark every done story's Task/Subtask checkboxes** — safety net for LLM-skipped step-7 checkbox marking. Run:
-`node {{project_root}}/_Sprintpilot/scripts/mark-done-stories-tasks.js --status-file "{status_file}" --project-root "{{project_root}}"` — ignore failures.
-This finds every story with status="done" in sprint-status.yaml and replaces `- [ ]` with `- [x]` in its story file. Deterministic, atomic per file.
-</action>
+<action>**[CRITICAL 5/6] Mark sprint-complete state**: update `{state_file}`: `current_bmad_step = "sprint-complete"`, `current_story = null`, `next_skill = null`, `stories_remaining = []`, `session_stories_done = {{session_stories_done}}`. This signals the test harness and any next /sprint-autopilot-on invocation that the sprint is genuinely done.</action>
 
 <action>**[CRITICAL 6/6] Verify** — `{status_file}` shows every story status=done and every epic status=done. If any are not done: log a warning but do NOT revert the above actions. The worktrees are gone; the lock is released; the artifacts are committed; the state is marked complete; task checkboxes are marked. Manual recovery only.</action>
 
@@ -1216,10 +1220,10 @@ This finds every story with status="done" in sprint-status.yaml and replaces `- 
 <action>**Collect report data** from `{status_file}` (stories grouped by epic with titles, totals, final test count; PR/MR URLs, patch/dismissed counts per story if git_enabled) and `{decision_log_file}` (medium/high-impact decisions; counts of `review-accept`, `review-triage`, code-review rounds; per-story patches-applied / findings-dismissed).</action>
 
 <check if="{{git_enabled}}">
-  <!-- Worktree cleanup already ran as CRITICAL 1/5 above. Intentionally
+  <!-- Worktree cleanup already ran as CRITICAL 2/6 above. Intentionally
        no duplicate here — relying on early cleanup to avoid orphans
        when the LLM short-circuits late actions. -->
-  <action>(No-op: worktree cleanup already executed in CRITICAL 1/5.)</action>
+  <action>(No-op: worktree cleanup already executed in CRITICAL 2/6.)</action>
   <!-- PR 10: restore main-repo gc.auto to its prior value. -->
   <action>**Restore main-repo gc.auto**:
   if `{{original_gc_auto_main}}` is "unset": `git config --local --unset gc.auto` (ignore failure — may already be unset).
