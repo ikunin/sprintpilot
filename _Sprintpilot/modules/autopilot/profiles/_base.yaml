@@ -7,7 +7,12 @@ version_pinned: null
 
 autopilot:
   implementation_flow: full        # full | quick
-  session_story_limit: 5
+  # Proactive handoff threshold. Lowered from 5 → 3 because context rot
+  # (late-session instruction decay) caused the LLM to skip late-step
+  # actions in longer single-session runs. Keeping sessions short enough
+  # that every step 10 CRITICAL action fits comfortably inside the prompt
+  # budget is cheaper than paying for skipped cleanup actions.
+  session_story_limit: 3
   retrospective_mode: auto
   phase_timings: true              # M0, PR 2 — enabled by default (legacy overrides to false)
   coalesce_state_writes: true      # M3, PR 6 — batch non-critical writes, flush at story boundary

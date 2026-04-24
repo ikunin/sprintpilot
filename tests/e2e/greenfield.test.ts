@@ -35,9 +35,14 @@ import { createTempProject, placeFixture, type TempProject } from './harness/tem
 const FIXTURES_DIR = join(import.meta.dirname, 'fixtures/greenfield');
 const ADDON_SOURCE = join(import.meta.dirname, '../../_Sprintpilot');
 
-const MAX_SESSIONS = 5;
+// One extra session beyond the work budget is reserved for the mandatory
+// "sprint-complete → fresh context → step 10" handoff. The autopilot
+// deliberately stops when it detects all stories are done and requires a
+// new /sprint-autopilot-on invocation to finalize — a context-rot
+// mitigation that trades one cheap boot for reliable CRITICAL cleanup.
+const MAX_SESSIONS = 6;
 const BUDGET_PER_SESSION = 25;
-const TIMEOUT_PER_SESSION = 1_800_000; // 30 min — Sonnet often needs the full window to reach step 10
+const TIMEOUT_PER_SESSION = 1_800_000; // 30 min — Sonnet often needs the full window
 
 /** Model to use — override via BMAD_TEST_MODEL env var (e.g. "opus") */
 const MODEL = process.env.BMAD_TEST_MODEL ?? 'sonnet';
@@ -55,14 +60,29 @@ function git(cmd: string, dir: string): string {
   }).trim();
 }
 
-/** Force-checkout a branch, discarding local file changes that block checkout */
+/**
+ * Switch to a branch non-destructively. Surfaces dirty state before the
+ * switch instead of silently wiping autopilot leftovers (which would mask
+ * workflow bugs). Falls back to -f only when a plain checkout fails, so
+ * tests that legitimately need to escape a shadowed tree still work.
+ */
 function gitCheckout(branch: string, dir: string): void {
   try {
     execSync(`rm -rf "${dir}/node_modules/.vite"`, { timeout: 5_000 });
   } catch {
     /* */
   }
-  git(`checkout -f ${branch}`, dir);
+  const dirty = git('status --porcelain', dir);
+  if (dirty) {
+    console.warn(
+      `[Checkout] working tree dirty before switching to ${branch}:\n${dirty.slice(0, 500)}`,
+    );
+  }
+  try {
+    git(`checkout ${branch}`, dir);
+  } catch {
+    git(`checkout -f ${branch}`, dir);
+  }
 }
 
 /**
@@ -118,18 +138,53 @@ function isGameComplete(dir: string): boolean {
     return false;
   }
 
-  // Must have core features in source — use word-boundary patterns to avoid false positives
-  const srcFiles = findFiles(dir, /\.(ts|js)$/, ['node_modules', '.git', '_bmad', 'dist']);
-  const allSource = srcFiles
-    .map((f) => readFileSync(f, 'utf-8'))
-    .join('\n')
-    .toLowerCase();
+  // Must have core features *in code*, not in comments or string literals.
+  // Strip line comments, block comments, and string literals before matching
+  // so a `// TODO: add win/draw/board/move` never fakes a complete game.
+  const srcFiles = findFiles(dir, /\.(ts|tsx|js|mjs|cjs)$/, [
+    'node_modules',
+    '.git',
+    '_bmad',
+    'dist',
+  ]);
+
+  function stripCommentsAndStrings(src: string): string {
+    return src
+      .replace(/\/\*[\s\S]*?\*\//g, ' ')
+      .replace(/\/\/[^\n]*/g, ' ')
+      .replace(/"(?:\\.|[^"\\])*"/g, '""')
+      .replace(/'(?:\\.|[^'\\])*'/g, "''")
+      .replace(/`(?:\\.|[^`\\])*`/g, '``');
+  }
+
+  const code = srcFiles
+    .map((f) => stripCommentsAndStrings(readFileSync(f, 'utf-8')))
+    .join('\n');
+
+  // Require an actual identifier used as a function/const/method/class —
+  // e.g. `function checkWin`, `checkWin(`, `const winner =`, `class Board`.
+  // Prevents false positives from stray tokens in type names, enums used
+  // only for export, etc.
+  const identifierRe = (name: string) =>
+    new RegExp(
+      `(?:function|const|let|var|class|=>|\\bexport\\s+)?\\s*${name}\\s*[=(:<{]|\\b${name}\\s*\\(`,
+      'i',
+    );
 
   const features = {
-    hasWinDetection: /\bwin(?:ner|ning)?\b|check.?win\b/.test(allSource),
-    hasDrawDetection: /\bdraw\b|\btie\b|\bstalemate\b/.test(allSource),
-    hasBoardDisplay: /\bboard\b|\bgrid\b|display.?board|print.?board|render.?board/.test(allSource),
-    hasMoveLogic: /\bmove\b|place.?mark|make.?move/.test(allSource),
+    hasWinDetection:
+      identifierRe('(check|detect|is)?win(ner|ning)?').test(code) ||
+      identifierRe('winner').test(code),
+    hasDrawDetection:
+      identifierRe('(check|detect|is)?(draw|tie|stalemate)').test(code) ||
+      identifierRe('draw').test(code),
+    hasBoardDisplay:
+      identifierRe('(render|print|display|show|draw)?board').test(code) ||
+      identifierRe('board').test(code) ||
+      identifierRe('grid').test(code),
+    hasMoveLogic:
+      identifierRe('(make|place|apply|do)?move').test(code) ||
+      identifierRe('placemark').test(code),
   };
 
   const complete = Object.values(features).every(Boolean);
@@ -140,17 +195,25 @@ function isGameComplete(dir: string): boolean {
 /** Get the latest story branch by commit date (for PR-based flow where main may not have code yet) */
 function getLatestStoryBranch(dir: string): string | null {
   try {
-    const branches = execSync(`git -C "${dir}" branch -a --sort=-committerdate --list '*story/*'`, {
-      encoding: 'utf-8',
-      timeout: 10_000,
-    }).trim();
+    // Two narrow patterns — `story/*` for local branches and
+    // `remotes/origin/story/*` (via `-a`) for the remote side. The previous
+    // `*story/*` fnmatch was loose enough to match `feature/story-legacy`
+    // or any branch containing `story/`, so we pin the prefix instead.
+    const branches = execSync(
+      `git -C "${dir}" branch -a --sort=-committerdate --list 'story/*' 'origin/story/*' 'remotes/origin/story/*'`,
+      { encoding: 'utf-8', timeout: 10_000 },
+    ).trim();
     if (!branches) return null;
-    // Strip markers: * (current), + (worktree), whitespace; prefer remote tracking branches
-    // (local branches may be locked by worktrees and can't be checked out)
     const parsed = branches
       .split('\n')
       .map((b) => b.replace(/^\s*[*+]?\s*/, '').trim())
-      .filter(Boolean);
+      .filter(Boolean)
+      // Belt-and-suspenders: require the branch name to actually START with
+      // `story/` after stripping the optional `remotes/origin/` prefix.
+      .filter((b) => {
+        const bare = b.replace(/^remotes\/origin\//, '').replace(/^origin\//, '');
+        return bare.startsWith('story/');
+      });
     const remote = parsed.find((b) => b.startsWith('remotes/origin/story/'));
     if (remote) return remote.replace('remotes/origin/', 'origin/');
     return parsed[0] || null;
@@ -258,6 +321,24 @@ describe('Greenfield: Tic Tac Toe via Sprintpilot', () => {
       let totalCost = 0;
       let gameComplete = false;
 
+      // Helper: read saved state to distinguish the new intermediate
+      // "sprint-finalize-pending" checkpoint from the terminal
+      // "sprint-complete" state. The checkpoint releases the lock but
+      // step 10 has NOT run yet; we must loop again to let the fresh
+      // session execute finalization.
+      const stateFilePath = join(
+        project.dir,
+        '_bmad-output/implementation-artifacts/autopilot-state.yaml',
+      );
+      const readCurrentStep = (): string | null => {
+        if (!existsSync(stateFilePath)) return null;
+        try {
+          return (readYaml(stateFilePath)?.current_bmad_step as string | null) ?? null;
+        } catch {
+          return null;
+        }
+      };
+
       while (session < MAX_SESSIONS) {
         session++;
 
@@ -270,14 +351,30 @@ describe('Greenfield: Tic Tac Toe via Sprintpilot', () => {
             gameComplete = true;
             console.log(`[Session ${session}] Game code complete on ${checkBranch}`);
           }
-          // Check if sprint is also complete (lock released = autopilot finished cleanly)
-          if (!existsSync(join(project.dir, '.autopilot.lock'))) {
-            console.log(`[Session ${session}] Sprint complete (lock released) — done`);
+          const lockHeld = existsSync(join(project.dir, '.autopilot.lock'));
+          const savedStep = readCurrentStep();
+          const finalizePending = savedStep === 'sprint-finalize-pending';
+          // Only break when finalization is truly done: state file gone
+          // OR current_bmad_step == sprint-complete (step 10 set this).
+          // A released lock with sprint-finalize-pending is the midway
+          // checkpoint — we must loop and run the fresh finalize session.
+          if (!lockHeld && !finalizePending && savedStep !== 'sprint-complete' && !existsSync(stateFilePath)) {
+            console.log(`[Session ${session}] Sprint finalization complete (state cleaned) — done`);
             break;
           }
-          console.log(
-            `[Session ${session}] Game complete but lock still held — running another session to finish sprint`,
-          );
+          if (savedStep === 'sprint-complete') {
+            console.log(`[Session ${session}] Sprint-complete state reached — done`);
+            break;
+          }
+          if (finalizePending) {
+            console.log(
+              `[Session ${session}] sprint-finalize-pending detected — running fresh-context finalize session`,
+            );
+          } else if (lockHeld) {
+            console.log(
+              `[Session ${session}] Game complete but lock still held — continuing sprint`,
+            );
+          }
         }
 
         const systemPrompt = [
@@ -349,30 +446,31 @@ describe('Greenfield: Tic Tac Toe via Sprintpilot', () => {
         }
 
         // Validate state file between sessions — stories_remaining and next_skill must persist
-        // EXCEPT when the autopilot has legitimately reached sprint-complete;
-        // then empty stories_remaining + null next_skill are correct terminal state.
-        const stateFilePath = join(
-          project.dir,
-          '_bmad-output/implementation-artifacts/autopilot-state.yaml',
-        );
+        // while the sprint is actually in progress. There are two terminal
+        // / transitional states where empty stores and null next_skill are
+        // CORRECT and must not trip the invariant:
+        //   - sprint-complete          → step 10 finished; sprint truly done
+        //   - sprint-finalize-pending  → prior session checkpointed for
+        //                                fresh-context finalization
         if (existsSync(stateFilePath) && existsSync(join(project.dir, '.autopilot.lock'))) {
           const state = readYaml(stateFilePath);
           console.log(
             `[State] current_bmad_step: ${state.current_bmad_step}, stories_remaining: ${JSON.stringify(state.stories_remaining)}, next_skill: ${state.next_skill}`,
           );
 
-          // If the autopilot reached sprint-complete but was SIGTERM'd before
-          // releasing the lock + deleting state_file, empty stories_remaining
-          // is the correct state. Break out of the session loop — the sprint
-          // really is done.
           if (state.current_bmad_step === 'sprint-complete') {
             console.log(
               `[Session ${session}] Sprint is complete per state file — breaking session loop`,
             );
             break;
           }
+          if (state.current_bmad_step === 'sprint-finalize-pending') {
+            console.log(
+              `[Session ${session}] sprint-finalize-pending observed — invariants skipped; loop will schedule finalize session`,
+            );
+            continue;
+          }
 
-          // stories_remaining must be a non-empty array while sprint is in progress
           expect(
             Array.isArray(state.stories_remaining),
             `autopilot-state.yaml must have stories_remaining array (got ${typeof state.stories_remaining})`,
@@ -381,8 +479,6 @@ describe('Greenfield: Tic Tac Toe via Sprintpilot', () => {
             (state.stories_remaining as unknown[]).length,
             'stories_remaining must not be empty while sprint is in progress',
           ).toBeGreaterThan(0);
-
-          // next_skill must be set for resumption
           expect(
             state.next_skill,
             'autopilot-state.yaml must have next_skill set for resumption',
@@ -409,34 +505,11 @@ describe('Greenfield: Tic Tac Toe via Sprintpilot', () => {
       );
       expect(complete).toBe(true);
 
-      // Safety net: the LLM sometimes skips step 10's mark-tasks helper even
-      // when labeled CRITICAL. Run the same deterministic helper here so
-      // Phase 2's "story files have task checkboxes marked" assertion isn't
-      // held hostage to LLM reliability. If the autopilot already ran it,
-      // this is a no-op. Uses execFileSync (no shell) for safety.
-      const statusFile = join(
-        project.dir,
-        '_bmad-output/implementation-artifacts/sprint-status.yaml',
-      );
-      if (existsSync(statusFile)) {
-        // eslint-disable-next-line @typescript-eslint/no-require-imports
-        const { execFileSync } = require('node:child_process') as typeof import('node:child_process');
-        try {
-          execFileSync(
-            process.execPath,
-            [
-              join(ADDON_SOURCE, 'scripts/mark-done-stories-tasks.js'),
-              '--status-file',
-              statusFile,
-              '--project-root',
-              project.dir,
-            ],
-            { timeout: 15_000, stdio: 'pipe' },
-          );
-        } catch {
-          /* best-effort */
-        }
-      }
+      // Intentionally NO post-hoc `mark-done-stories-tasks.js` invocation
+      // from inside the test. That safety net masked the very workflow bug
+      // it was intended to paper over — if the autopilot skips CRITICAL
+      // 1/6 of step 10, the Phase 2 "task checkboxes marked" assertion
+      // SHOULD fail so the workflow gets fixed, not the test.
     },
     MAX_SESSIONS * (TIMEOUT_PER_SESSION + 120_000),
   );
@@ -709,13 +782,14 @@ describe('Greenfield: Tic Tac Toe via Sprintpilot', () => {
         expect(prUrl, `${key} must have a PR URL (got ${prUrl})`).toBeTruthy();
         expect(String(prUrl), `${key} PR should not be SKIPPED`).not.toBe('SKIPPED');
       } else {
-        // Without gh, PRs are skipped — verify story was merged to main instead
+        // Without gh, PRs are skipped — verify story was merged to main instead.
+        // Branch naming convention is `story/<full-story-key>`; the git-status
+        // key is the full story key already, so pass it through verbatim.
         console.warn(`[PR] ${key}: gh not available — expecting auto-merge fallback`);
         const merged = execSync(
-          `git -C "${dir}" merge-base --is-ancestor story/${key.replace(/^\d+-\d+-/, (m) => m)} main 2>/dev/null && echo yes || echo no`,
+          `git -C "${dir}" merge-base --is-ancestor story/${key} main 2>/dev/null && echo yes || echo no`,
           { encoding: 'utf-8', timeout: 5_000 },
         ).trim();
-        // Don't hard-fail, but log the state
         console.log(`[PR] ${key}: merged to main = ${merged}`);
       }
     }

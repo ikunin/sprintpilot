@@ -5,50 +5,73 @@
 //
 // Usage:
 //   mark-done-stories-tasks.js --status-file <path> [--project-root <path>]
+//                              [--output-folder <path>]
 //
 // Rationale: bmad-dev-story is supposed to check off its Tasks/Subtasks as
 // it implements each story, and workflow.md's step 7 has an explicit
 // "Mark all task checkboxes complete" action. Both are LLM-executed
 // instructions that the autopilot sometimes skips in long sessions. This
 // helper is the final deterministic safety net — it runs from step 10's
-// critical path and brings the filesystem state in line with the sprint-
-// status truth.
+// critical path and brings the filesystem state in line with sprint-status.
 //
-// Story file lookup: try every plausible BMad location:
-//   _bmad-output/stories/story-<key>.md
-//   _bmad-output/implementation-artifacts/story-<key>.md
-//   _bmad-output/stories/<key>.md
-//   _bmad-output/implementation-artifacts/<key>.md
+// Story file lookup: honors BMad's `output_folder` config
+// (_bmad/bmm/config.yaml). Resolves in this order:
+//   <output-folder>/stories/story-<key>.md
+//   <output-folder>/implementation-artifacts/story-<key>.md
+//   <output-folder>/stories/<key>.md
+//   <output-folder>/implementation-artifacts/<key>.md
 //
-// Only overwrites when a story's status == "done". All other stories are
-// untouched. Writes are atomic (tmp + rename) so a failure mid-write
-// never truncates a story file.
+// Checkbox replacement is fenced-code-aware: `- [ ]` inside triple-backtick
+// or triple-tilde blocks is NOT rewritten, because story templates commonly
+// show example task lists that must round-trip verbatim.
+//
+// Writes are durable-atomic: write to tmp, fsync tmp, rename, fsync parent
+// directory. A crash between rename and flush cannot leave a zero-byte
+// story file.
 
 const fs = require('node:fs');
 const path = require('node:path');
 
 const { parseArgs } = require('../lib/runtime/args');
 const log = require('../lib/runtime/log');
-const { parseStatuses } = require('./list-remaining-stories.js');
+const { parseStatuses, isDone } = require('./list-remaining-stories.js');
 
 function help() {
   log.out(
     [
       'Usage:',
       '  mark-done-stories-tasks.js --status-file <path> [--project-root <path>]',
+      '                             [--output-folder <path>]',
       '',
-      'For every story with status="done", replaces every `- [ ]` with',
-      '`- [x]` in its story markdown file. Emits JSON summary to stdout.',
+      'For every story with status="done" (case-insensitive), replaces every',
+      '`- [ ]` with `- [x]` in its story markdown file. Fenced code blocks',
+      'are preserved verbatim. Emits JSON summary to stdout.',
     ].join('\n'),
   );
 }
 
-function findStoryFile(projectRoot, storyKey) {
+// Read BMad's output_folder from _bmad/bmm/config.yaml if present. Returns
+// the folder name (relative to projectRoot) or null if not configurable.
+function readOutputFolder(projectRoot) {
+  const cfg = path.join(projectRoot, '_bmad', 'bmm', 'config.yaml');
+  if (!fs.existsSync(cfg)) return null;
+  try {
+    const body = fs.readFileSync(cfg, 'utf8');
+    const m = body.match(/^output_folder\s*:\s*(\S+)/m);
+    if (!m) return null;
+    return m[1].replace(/^["']|["']$/g, '').trim();
+  } catch {
+    return null;
+  }
+}
+
+function findStoryFile(projectRoot, storyKey, outputFolder) {
+  const folder = outputFolder || readOutputFolder(projectRoot) || '_bmad-output';
   const candidates = [
-    path.join(projectRoot, '_bmad-output', 'stories', `story-${storyKey}.md`),
-    path.join(projectRoot, '_bmad-output', 'implementation-artifacts', `story-${storyKey}.md`),
-    path.join(projectRoot, '_bmad-output', 'stories', `${storyKey}.md`),
-    path.join(projectRoot, '_bmad-output', 'implementation-artifacts', `${storyKey}.md`),
+    path.join(projectRoot, folder, 'stories', `story-${storyKey}.md`),
+    path.join(projectRoot, folder, 'implementation-artifacts', `story-${storyKey}.md`),
+    path.join(projectRoot, folder, 'stories', `${storyKey}.md`),
+    path.join(projectRoot, folder, 'implementation-artifacts', `${storyKey}.md`),
   ];
   for (const c of candidates) {
     if (fs.existsSync(c)) return c;
@@ -56,20 +79,83 @@ function findStoryFile(projectRoot, storyKey) {
   return null;
 }
 
+// Line-by-line replacement that tracks fenced code blocks. Inside ``` or
+// ~~~ blocks the original line is emitted verbatim. Outside, `- [ ]` (or
+// `* [ ]`) at any indent is rewritten to `- [x]`.
+//
+// Fence detection: a line whose first non-whitespace characters are ```
+// or ~~~ toggles the fenced state. Info strings after the opener (e.g.
+// ```ts) are allowed. Only the fence character is significant.
 function markAllTasksChecked(body) {
-  // Only replace top-level list items that start with `- [ ]` (possibly
-  // indented). Nested bullet items that happen to be `[ ]` inside a
-  // non-checklist context are untouched because they don't look like
-  // list items at the regex level.
-  const re = /^(\s*[-*]\s*)\[ \](\s*)/gm;
-  const out = body.replace(re, (_m, prefix, suffix) => `${prefix}[x]${suffix}`);
-  return out;
+  const lines = String(body).split('\n');
+  const out = new Array(lines.length);
+  let inFence = false;
+  let fenceChar = null;
+  const fenceOpenRe = /^\s*(`{3,}|~{3,})/;
+  const taskRe = /^(\s*[-*]\s*)\[ \](\s*)/;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const fence = line.match(fenceOpenRe);
+    if (fence) {
+      const ch = fence[1][0];
+      if (!inFence) {
+        inFence = true;
+        fenceChar = ch;
+      } else if (fenceChar === ch) {
+        inFence = false;
+        fenceChar = null;
+      }
+      out[i] = line;
+      continue;
+    }
+    if (inFence) {
+      out[i] = line;
+      continue;
+    }
+    out[i] = line.replace(taskRe, (_m, pre, post) => `${pre}[x]${post}`);
+  }
+  return out.join('\n');
 }
 
+// Durable-atomic write: tmp → fsync(tmp) → rename → fsync(parent dir).
+// Preserves file mode of the existing target if possible.
 function atomicWrite(file, body) {
-  const tmp = `${file}.tmp.${process.pid}.${process.hrtime.bigint().toString(36)}`;
-  fs.writeFileSync(tmp, body);
+  const dir = path.dirname(file);
+  const tmp = path.join(
+    dir,
+    `.${path.basename(file)}.tmp.${process.pid}.${process.hrtime.bigint().toString(36)}`,
+  );
+  let mode;
+  try {
+    mode = fs.statSync(file).mode;
+  } catch {
+    /* new file — leave mode unset */
+  }
+
+  const fd = fs.openSync(tmp, 'w', mode ?? 0o644);
+  try {
+    fs.writeFileSync(fd, body);
+    try {
+      fs.fsyncSync(fd);
+    } catch {
+      /* fsync not supported on this fs — best-effort */
+    }
+  } finally {
+    fs.closeSync(fd);
+  }
   fs.renameSync(tmp, file);
+  // Best-effort directory fsync so the rename itself is durable.
+  try {
+    const dfd = fs.openSync(dir, 'r');
+    try {
+      fs.fsyncSync(dfd);
+    } finally {
+      fs.closeSync(dfd);
+    }
+  } catch {
+    /* directory fsync unsupported on some filesystems — ignore */
+  }
 }
 
 function main() {
@@ -88,6 +174,7 @@ function main() {
     process.exit(2);
   }
   const projectRoot = opts['project-root'] || process.cwd();
+  const outputFolder = opts['output-folder'] || null;
 
   let raw;
   try {
@@ -98,7 +185,7 @@ function main() {
   }
 
   const stories = parseStatuses(raw);
-  const doneKeys = Object.keys(stories).filter((k) => stories[k].status === 'done');
+  const doneKeys = Object.keys(stories).filter((k) => isDone(stories[k].status));
 
   const summary = {
     done_stories: doneKeys.length,
@@ -108,7 +195,7 @@ function main() {
   };
 
   for (const key of doneKeys) {
-    const file = findStoryFile(projectRoot, key);
+    const file = findStoryFile(projectRoot, key, outputFolder);
     if (!file) {
       summary.missing_files.push(key);
       continue;
@@ -134,6 +221,7 @@ module.exports = {
   findStoryFile,
   markAllTasksChecked,
   atomicWrite,
+  readOutputFolder,
 };
 
 if (require.main === module) {

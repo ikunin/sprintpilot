@@ -11,7 +11,11 @@ name: nano
 
 autopilot:
   implementation_flow: quick
-  session_story_limit: 0
+  # Nano's quick-dev one-shot is cheaper per story, so nano can run longer
+  # sessions — but unlimited (0) runs into the same context-rot failure
+  # mode as the full flow. 5 stories per session keeps step 10's CRITICAL
+  # actions reliably in-context without paying for excessive session boots.
+  session_story_limit: 5
   retrospective_mode: skip
   # Nano safety net — if a story fails under quick-dev, escalate to the
   # small profile for the remainder of the session (scope: session only,

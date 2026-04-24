@@ -85,10 +85,15 @@ describe('PR 4 — nano routing', () => {
     expect(getByDottedKey(resolved, 'git.squash_on_merge')).toBe(true);
   });
 
-  it('nano profile disables session checkpointing and retrospectives', () => {
+  it('nano profile sets a bounded session_story_limit and skips retrospectives', () => {
+    // Nano previously ran unlimited (0) which exposed the autopilot to
+    // context-rot at the tail of long single-session runs — CRITICAL
+    // cleanup actions were silently skipped. Nano now caps sessions at
+    // 5 stories (quick-dev is cheap, so we can run longer than the 3
+    // for full flow) while still forcing a fresh-context handoff.
     tmpRoot = seedProjectRoot('nano');
     const { resolved } = resolveProfile(tmpRoot);
-    expect(getByDottedKey(resolved, 'autopilot.session_story_limit')).toBe(0);
+    expect(getByDottedKey(resolved, 'autopilot.session_story_limit')).toBe(5);
     expect(getByDottedKey(resolved, 'autopilot.retrospective_mode')).toBe('skip');
   });
 });

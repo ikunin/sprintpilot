@@ -50,10 +50,21 @@ const HAS_CLAUDE = (() => {
 let project: TempProject;
 
 /**
- * Scan .timings/*.jsonl for evidence of overlapping skill phases across
- * two or more stories. Returns the maximum concurrency observed —
- * 1 means sequential, 2+ means parallel.
+ * Scan .timings/*.jsonl for evidence of overlapping IMPLEMENTATION phases
+ * across two or more stories. Returns the maximum concurrency observed
+ * in dev-story / create-story / quick-dev / code-review — the phases the
+ * parallel dispatcher actually fans out. Incidental overlaps (e.g.
+ * bmad-help vs bmad-retrospective across stories) are ignored because
+ * they don't prove the dispatcher did anything.
  */
+const PARALLEL_RELEVANT_PHASES = new Set([
+  'skill.bmad-dev-story',
+  'skill.bmad-create-story',
+  'skill.bmad-quick-dev',
+  'skill.bmad-code-review',
+  'skill.bmad-check-implementation-readiness',
+]);
+
 function observedParallelism(dir: string): { max: number; examples: string[] } {
   const timingsDir = join(dir, '_bmad-output/implementation-artifacts/.timings');
   if (!existsSync(timingsDir)) return { max: 0, examples: [] };
@@ -100,8 +111,13 @@ function observedParallelism(dir: string): { max: number; examples: string[] } {
     const key = `${ev.story}::${ev.phase}`;
     if (ev.event === 'start') {
       open.set(key, ev);
+      // Only count open intervals whose phase is one the dispatcher
+      // actually fans out. Overlaps outside this set are incidental and
+      // do not demonstrate parallel dispatch.
       const activeStories = new Set(
-        [...open.values()].filter((o) => o.phase.startsWith('skill.')).map((o) => o.story),
+        [...open.values()]
+          .filter((o) => PARALLEL_RELEVANT_PHASES.has(o.phase))
+          .map((o) => o.story),
       );
       if (activeStories.size > max) {
         max = activeStories.size;
@@ -137,13 +153,21 @@ describe.skipIf(!HAS_CLAUDE)('Medium + parallel stories (Claude Code)', () => {
     }
     writeFileSync(autopilotCfg, body);
 
-    // Flip parallel_stories on in ma/config.yaml.
+    // Flip parallel_stories on in ma/config.yaml. Handle three starting
+    // shapes so the test is robust to config defaults changing:
+    //   - key absent             → inject under the root map
+    //   - key present = false    → replace with true
+    //   - key present = true     → no-op (already what we want)
     const maCfg = join(project.dir, '_Sprintpilot/modules/ma/config.yaml');
     if (existsSync(maCfg)) {
-      const ma = readFileSync(maCfg, 'utf-8').replace(
-        /parallel_stories:\s*false/,
-        'parallel_stories: true',
-      );
+      let ma = readFileSync(maCfg, 'utf-8');
+      if (/^\s*parallel_stories\s*:\s*true\b/m.test(ma)) {
+        // already true
+      } else if (/^\s*parallel_stories\s*:\s*\S+/m.test(ma)) {
+        ma = ma.replace(/^(\s*parallel_stories\s*:\s*)\S+/m, '$1true');
+      } else {
+        ma = ma.replace(/\s*$/, '') + '\nparallel_stories: true\n';
+      }
       writeFileSync(maCfg, ma);
     }
 

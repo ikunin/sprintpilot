@@ -38,6 +38,7 @@ Long autopilot runs will fill the context window. To prevent state loss:
 - **All state lives in files, never only in memory.** After every step, write progress to `{state_file}`.
 - **Story boundary = session boundary.** Never split a single story across sessions. Always finish the current story fully (dev → review → patches → done) before ending a session.
 - **Proactive session handoff.** After `{{session_story_limit}}` stories have been **fully implemented** in one session (default: 3) — meaning their complete cycle is finished (dev-story GREEN + code-review + patches + artifacts committed) — write state and tell user to start a new session with `/sprint-autopilot-on`. Configurable via `autopilot.session_story_limit` in `modules/autopilot/config.yaml`. Creating a story file does NOT count toward the limit — only finishing step 7 does. Do not wait for compaction to happen.
+- **Sprint-complete checkpoint (MANDATORY).** The moment step 2 detects `sprint_is_complete = true`, the current session NEVER runs step 10 itself. It writes `current_bmad_step = "sprint-finalize-pending"` to `{state_file}`, releases the lock, emits a handoff report, and STOPS. The next `/sprint-autopilot-on` invocation boots in a fresh context, sees the pending state, and runs step 10. This is non-negotiable because step 10 is the context-rot failure zone — its CRITICAL deterministic script calls were reliably skipped when packed into the tail of a long session.
 - **On startup: check for saved state first.** If `{state_file}` exists, this is a RESUME — read it and skip to the saved story/step. Never re-do completed work.
 
 ### Menu and interaction handling — CRITICAL
@@ -333,7 +334,7 @@ When the flag is `false`, the direct-write instructions below are authoritative.
   <action>Read `{state_file}` fully</action>
   <action>Extract saved state:
     - `{{current_story}}` — story in progress when last session ended
-    - `{{current_bmad_step}}` — BMAD step that was active (2–7)
+    - `{{current_bmad_step}}` — BMAD step that was active (2–7), or the reserved value `sprint-finalize-pending` meaning "the prior session detected sprint-complete and checkpointed; this session's only job is step 10"
     - `{{completed_skill}}` — last skill that ran
     - `{{next_skill}}` — next skill recommended at save time
     - `{{session_stories_done}}` = 0 (reset counter for new session)
@@ -371,6 +372,32 @@ When the flag is `false`, the direct-write instructions below are authoritative.
     - Update `{state_file}` with reconciled values
   </action>
 
+  <!-- Already-completed short-circuit. If the prior session wrote
+       sprint-complete (CRITICAL 5/7) but crashed before the state file
+       delete (CRITICAL 7/7), this invocation would otherwise loop into
+       the finalize handoff forever. Detect it and exit cleanly. -->
+  <check if="{{current_bmad_step}} is sprint-complete">
+    <action>Delete `{state_file}` — clean up the stale terminal marker.</action>
+    <action>Report: "Sprint already complete. Nothing to do — run `bmad-sprint-planning` to plan the next sprint, then re-run `/sprint-autopilot-on`." Then STOP.</action>
+  </check>
+
+  <!-- Fresh-context finalize path. If the prior session exited with
+       current_bmad_step = "sprint-finalize-pending", this invocation's
+       ONLY job is to run step 10 with a clean window. Verify the
+       sprint is still genuinely complete before jumping; if a user
+       added new work in between, fall through to the normal loop. -->
+  <check if="{{current_bmad_step}} is sprint-finalize-pending">
+    <action>Run: `node {{project_root}}/_Sprintpilot/scripts/list-remaining-stories.js --status-file "{status_file}" --format envelope` — parse stdout JSON.</action>
+    <check if="parsed .state is sprint-complete">
+      <action>Log: "Resuming for sprint finalization with fresh context (context-rot mitigation)."</action>
+      <goto step="10">Run finalization</goto>
+    </check>
+    <check if="parsed .state is NOT sprint-complete">
+      <action>Log: "sprint-finalize-pending flag was set but new work appeared since checkpoint. Clearing flag and resuming normal execution."</action>
+      <action>Update `{state_file}`: `current_bmad_step = null`.</action>
+    </check>
+  </check>
+
   <!-- Resume from a `retrospective_mode: stop` pause. -->
   <check if="{state_file}.paused_at is epic-complete-awaiting-retrospective">
     <action>Set `{{paused_epic_id}}` from `{state_file}.paused_epic_id`. Check if epic `{{paused_epic_id}}` is `done` in `{status_file}` OR an artifact exists at `{implementation_artifacts}/retrospectives/epic-{{paused_epic_id}}-*.md`.</action>
@@ -402,10 +429,11 @@ When the flag is `false`, the direct-write instructions below are authoritative.
   </action>
   <action>Create master task: "Sprintpilot — Full Sprint Execution" → `in_progress`</action>
   <action>**Compute `{{stories_remaining}}`** deterministically — run:
-  `node {{project_root}}/_Sprintpilot/scripts/list-remaining-stories.js --status-file "{status_file}"`
-  Exit 0 → parse stdout as JSON array → set `{{stories_remaining}}`.
-  Exit 2 → status file doesn't exist yet (pre-planning) → set `{{stories_remaining}}` = `[]` and continue.
-  Exit 1 → parse failure; fall back to `[]` + log a warning (never block boot on a malformed status file).
+  `node {{project_root}}/_Sprintpilot/scripts/list-remaining-stories.js --status-file "{status_file}" --format envelope`
+  The helper always emits a well-formed JSON object on stdout, on every exit path:
+  `{"remaining":[...],"state":"pre-planning|sprint-in-progress|sprint-complete|parse-error"}`.
+  Parse stdout as JSON → set `{{stories_remaining}}` = `.remaining`.
+  Ignore the exit code: `.state` is authoritative and covers every case (missing file, parse error, or normal).
   </action>
   <action>Write initial `{state_file}` with STATE_FIELDS: `current_story = null`, `current_bmad_step = null`, `completed_skill = bmad-help`, `session_stories_done = 0`, `stories_remaining = {{stories_remaining}}`, `in_worktree = false`, `pr_base = {{base_branch}}`.</action>
   <action>Report to user:
@@ -456,20 +484,45 @@ When the flag is `false`, the direct-write instructions below are authoritative.
 
 <!-- Authoritative "sprint complete" check. Read the status file EVERY
      iteration via the coded helper (do not rely on stale state or LLM
-     re-parsing). Helper semantics: exit 0 + JSON array. Empty array +
-     a non-empty status file means "all done"; empty array + missing
-     status file means "pre-planning" and we route to planning, NOT to
-     step 10. -->
+     re-parsing). The helper emits a JSON envelope on stdout on every
+     exit path, so there is no need to probe $? or stderr — .state is
+     authoritative. -->
 <action>**Recalculate `{{stories_remaining}}`** — run:
-`node {{project_root}}/_Sprintpilot/scripts/list-remaining-stories.js --status-file "{status_file}"; echo "EXIT:$?"`
-Parse stdout: the first line is a JSON array (possibly `[]`); the trailing `EXIT:N` reveals the exit code.
-- Exit 0 + non-empty array → `{{stories_remaining}}` = parsed array, `{{sprint_has_stories}}` = true, `{{sprint_is_complete}}` = false.
-- Exit 0 + empty array `[]` → `{{stories_remaining}}` = [], `{{sprint_has_stories}}` = true, `{{sprint_is_complete}}` = true (all stories are done).
-- Exit 2 → status file doesn't exist yet (pre-planning). `{{stories_remaining}}` = [], `{{sprint_has_stories}}` = false, `{{sprint_is_complete}}` = false.
-- Exit 1 → treat as pre-planning + log warning; do NOT declare sprint complete on a parse failure.
+`node {{project_root}}/_Sprintpilot/scripts/list-remaining-stories.js --status-file "{status_file}" --format envelope`
+Parse stdout as a single JSON object: `{"remaining":[...],"state":"..."}`.
+- `.state == "sprint-in-progress"` → `{{stories_remaining}}` = `.remaining`, `{{sprint_has_stories}}` = true, `{{sprint_is_complete}}` = false.
+- `.state == "sprint-complete"`    → `{{stories_remaining}}` = [],          `{{sprint_has_stories}}` = true, `{{sprint_is_complete}}` = true.
+- `.state == "pre-planning"`       → `{{stories_remaining}}` = [],          `{{sprint_has_stories}}` = false, `{{sprint_is_complete}}` = false.
+- `.state == "parse-error"`        → log warning; treat as pre-planning. NEVER declare sprint-complete on a parse failure.
 </action>
+<!-- Sprint-complete handoff. Never run step 10 in the same session that
+     first observed the sprint-complete condition — that session has
+     spent a long time in context and its tail is the context-rot zone.
+     Instead, mark the state as sprint-finalize-pending and stop; the
+     next /sprint-autopilot-on boot will route straight to step 10 (via
+     the step 1 gate) with a clean window. If we ALREADY are the
+     finalize session (current_bmad_step was sprint-finalize-pending on
+     entry), step 1 has already jumped to step 10 and we never reach
+     this check — so this gate is unambiguous. -->
 <check if="{{sprint_is_complete}} is true">
-  <goto step="10">Sprint complete</goto>
+  <action>Update `{state_file}` with STATE_FIELDS: `current_bmad_step = "sprint-finalize-pending"`, `current_story = null`, `next_skill = null`, `stories_remaining = []`, `session_stories_done = {{session_stories_done}}`.</action>
+  <action>Release autopilot lock (idempotent): `node {{project_root}}/_Sprintpilot/scripts/lock.js release` — ignore failures.</action>
+  <action>Report to user and STOP this session:
+  ```
+  Autopilot sprint-complete checkpoint
+
+  All stories are done. Pausing before finalization so step 10 runs
+  with a fresh context — this prevents late-session instruction decay
+  from skipping CRITICAL cleanup actions (commit artifacts, generate
+  docs, clean up worktrees, emit final report).
+
+  Completed {{session_stories_done}} stories this session.
+  State saved to: {state_file}
+
+  Run `/sprint-autopilot-on` once more to finalize.
+  ```
+  </action>
+  <action>HALT — do not continue the execution loop. The next invocation enters via step 1, sees `sprint-finalize-pending`, and jumps to step 10.</action>
 </check>
 <check if="{{sprint_has_stories}} is false">
   <action>Log: "Sprint pre-planning: no stories in status file yet. Routing through bmad-help to the next planning skill (do NOT go to step 10)."</action>
@@ -478,7 +531,12 @@ Parse stdout: the first line is a JSON array (possibly `[]`); the trailing `EXIT
 <check if="{{next_skill}} is empty">
   <action>**Recover next_skill** — re-read `{status_file}`, find first story with status != "done"</action>
   <check if="no undone stories found AND {{sprint_has_stories}} is true">
-    <goto step="10">Sprint complete</goto>
+    <!-- Fallback sprint-complete detection. Route through the same
+         finalize-pending handoff as the primary gate above — never
+         jump into step 10 from this long-running session. -->
+    <action>Update `{state_file}`: `current_bmad_step = "sprint-finalize-pending"`, `current_story = null`, `next_skill = null`, `stories_remaining = []`.</action>
+    <action>Release lock: `node {{project_root}}/_Sprintpilot/scripts/lock.js release` — ignore failures.</action>
+    <action>Report: "Sprint complete detected via fallback path. Pausing for fresh-context finalization — run /sprint-autopilot-on once more." Then HALT.</action>
   </check>
   <action>If `{{sprint_has_stories}}` is true: set `{{current_story}}` = first undone story from `{status_file}`.</action>
   <action>Invoke `bmad-help` — "Story {{current_story}} needs attention (or: sprint in planning phase — no stories yet). What is the next required workflow step?"</action>
@@ -744,8 +802,8 @@ Parse stdout: the first line is a JSON array (possibly `[]`); the trailing `EXIT
        first time. Recalculate stories_remaining so the step-2 "sprint
        complete" gate doesn't fire spuriously on the next iteration. -->
   <action>**Recalculate `{{stories_remaining}}`** — run:
-  `node {{project_root}}/_Sprintpilot/scripts/list-remaining-stories.js --status-file "{status_file}"`
-  Parse JSON output → `{{stories_remaining}}`. Update `{state_file}` with the new value.</action>
+  `node {{project_root}}/_Sprintpilot/scripts/list-remaining-stories.js --status-file "{status_file}" --format envelope`
+  Parse stdout as `{"remaining":[...],"state":"..."}` → `{{stories_remaining}}` = `.remaining`. Update `{state_file}` with the new value.</action>
 </check>
 
 <check if="{{completed_skill}} was bmad-sprint-planning AND {{git_enabled}}">
@@ -757,25 +815,17 @@ Parse stdout: the first line is a JSON array (possibly `[]`); the trailing `EXIT
 <check if="{{completed_skill}} was bmad-create-story">
   <!-- PR-follow-up (greenfield e2e fix): bmad-create-story sometimes omits
        the Tasks/Subtasks section entirely. Re-running the skill doesn't
-       always fix it. Fall back to manual injection so the story file
-       ALWAYS has checkboxes dev-story can mark. -->
+       always fix it. Fall back to a deterministic script so the story
+       file ALWAYS has checkboxes dev-story can mark — no LLM prose in
+       this path. -->
   <action>Locate the story file for `{{current_story}}` — glob
   `_bmad-output/**/story-{{current_story}}.md` and
   `_bmad-output/**/{{current_story}}.md`. Set `{{story_file_path}}`.
   </action>
-  <action>Grep the story file for a Tasks or Subtasks section: pattern
-  `/^##+\s+(Tasks|Subtasks)\b/` in the body. Set `{{has_tasks_section}}` accordingly.
+  <action>Run: `node {{project_root}}/_Sprintpilot/scripts/inject-tasks-section.js --story-file "{{story_file_path}}"`
+  — idempotent. The script checks for an existing `## Tasks` / `## Subtasks` section with at least one `- [ ]` checkbox and returns `{"action":"skip"}` if present. Otherwise it extracts every AC entry from the bounded `## Acceptance Criteria` section and appends a correctly-formatted section with one `- [ ] <AC>` bullet per entry.
+  Parse stdout JSON; the script never throws on a well-formed story file, so treat any non-zero exit as a log-and-proceed signal (the sprint can still complete without this guarantee — only the "task checkboxes marked" assertion degrades).
   </action>
-  <check if="{{has_tasks_section}} is false">
-    <action>Log: "bmad-create-story emitted {{story_file_path}} WITHOUT a Tasks/Subtasks section. Re-running once to fix."</action>
-    <action>Re-invoke `bmad-create-story` with an explicit instruction: "The story MUST include a `## Tasks / Subtasks` section with at least one `- [ ]` checkbox per Acceptance Criterion."</action>
-    <action>Re-grep. If STILL missing: manually inject a Tasks section into `{{story_file_path}}` by:
-    1. Reading every `N. ...` line under the `## Acceptance Criteria` section.
-    2. Appending a `## Tasks / Subtasks` section at the end of the story file with one `- [ ] <AC summary>` bullet per AC line.
-    This is a fallback for BMad skill quirks — it is NEVER incorrect because the checkboxes derive 1:1 from the explicit AC list.
-    </action>
-  </check>
-  <action>Assert the story file now has at least one `- [ ]` checkbox. If still zero: log a warning but proceed (the sprint can still complete; only the "task checkboxes marked" assertion fails).</action>
 </check>
 
 <check if="{{completed_skill}} was bmad-create-story AND {{git_enabled}}">
@@ -812,7 +862,11 @@ Parse stdout: the first line is a JSON array (possibly `[]`); the trailing `EXIT
   Log: "next_skill was empty but undone stories remain — resolved to {{next_skill}} for {{current_story}}".
   </action>
   <check if="all stories in status_file are done">
-    <goto step="10">Sprint complete</goto>
+    <!-- Same finalize-pending handoff as step 2 — never run step 10 in
+         the session that first noticed sprint-complete. -->
+    <action>Update `{state_file}`: `current_bmad_step = "sprint-finalize-pending"`, `current_story = null`, `next_skill = null`, `stories_remaining = []`.</action>
+    <action>Release lock: `node {{project_root}}/_Sprintpilot/scripts/lock.js release` — ignore failures.</action>
+    <action>Report: "Sprint complete detected during skill-recovery. Pausing for fresh-context finalization — run /sprint-autopilot-on once more." Then HALT.</action>
   </check>
 </check>
 
@@ -1140,34 +1194,48 @@ No work will be repeated.
      skips later ones once it feels "done" with the sprint. Putting this
      first ensures every done-story's checkboxes get marked before the
      LLM loses focus. -->
-<action>**[CRITICAL 1/6] Mark all done stories' Task checkboxes** — deterministic helper. Run:
+<action>**[CRITICAL 1/7] Mark all done stories' Task checkboxes** — deterministic helper. Run:
 `node {{project_root}}/_Sprintpilot/scripts/mark-done-stories-tasks.js --status-file "{status_file}" --project-root "{{project_root}}"` — ignore failures. This finds every story with status="done" in sprint-status.yaml and replaces `- [ ]` with `- [x]` in its story file.
 </action>
 
-<action>**[CRITICAL 2/6] Remove every non-main worktree** — no-op if none exist:
+<action>**[CRITICAL 2/7] Remove autopilot-owned worktrees** — no-op if none exist. Only worktrees we created (paths inside `{{project_root}}/.worktrees/`) are removed; any user-placed worktree elsewhere is left untouched.
 <check if="{{git_enabled}}">
-  Run: `git worktree list --porcelain` to enumerate. For each worktree whose path is under `.worktrees/` (i.e. not the main repo):
+  Run: `git worktree list --porcelain` to enumerate. For each worktree whose path starts with `{{project_root}}/.worktrees/`:
   - `git worktree remove <path> --force 2>&1` (ignore failures — best-effort).
   Then once: `git worktree prune 2>&1` (ignore failures).
-  This is the SINGLE authoritative cleanup site — do not wait for a later "safety net" cleanup that might not run.
+  This is the SINGLE authoritative cleanup site for autopilot-owned worktrees — do not wait for a later "safety net" cleanup that might not run.
 </check>
 </action>
 
-<action>**[CRITICAL 3/6] Release lock immediately** — before any slow operation:
+<action>**[CRITICAL 3/7] Release lock immediately** — before any slow operation:
 Run: `node {{project_root}}/_Sprintpilot/scripts/lock.js release` — ignore failures. Idempotent.
 </action>
 
-<action>**[CRITICAL 4/6] Commit any final artifacts + planning docs to main** — even if the rest of step 10 is interrupted:
+<action>**[CRITICAL 4/7] Commit any final artifacts + planning docs to main** — even if the rest of step 10 is interrupted. The checkout is deliberately non-destructive: we never use `-B` or `-f` (those silently wipe local commits or modifications). If the working tree is dirty, the commit step still runs; if the checkout fails, the commit is skipped with a warning rather than forced.
 <check if="{{git_enabled}}">
-  1. `git checkout -B {{base_branch}} origin/{{base_branch}} 2>&1` (or just `{{base_branch}}` when `{{has_origin}}` is false).
-  2. `git add _bmad-output/planning-artifacts _bmad-output/implementation-artifacts/sprint-status.yaml _bmad-output/implementation-artifacts/decision-log.yaml _bmad-output/stories _bmad-output/implementation-artifacts/retrospectives 2>/dev/null || true` (each path best-effort; never halt).
-  3. If `git diff --cached --quiet` exits non-zero: `git commit -m "docs: sprint artifacts — planning + stories + retrospective"` then (if `{{has_origin}}` is true) `git push origin {{base_branch}}` (warn on failure, do not halt).
+  1. `git switch {{base_branch}} 2>&1 || git checkout {{base_branch}} 2>&1` (plain switch; if `{{base_branch}}` doesn't exist locally, `git checkout --track origin/{{base_branch}}` once to create it tracking origin). Never use `-B` or `-f` — they discard work.
+  2. If `{{has_origin}}` is true: `git pull --ff-only origin {{base_branch}} 2>&1` (fast-forward only; if the pull would require a merge, log a warning and continue — do NOT `reset --hard`).
+  3. `git add _bmad-output/planning-artifacts _bmad-output/implementation-artifacts/sprint-status.yaml _bmad-output/implementation-artifacts/decision-log.yaml _bmad-output/implementation-artifacts/git-status.yaml _bmad-output/stories _bmad-output/implementation-artifacts/retrospectives 2>/dev/null || true` (each path best-effort; never halt on missing paths).
+  4. If `git diff --cached --quiet` exits non-zero: `git commit -m "docs: sprint artifacts — planning + stories + retrospective"` then (if `{{has_origin}}` is true) `git push origin {{base_branch}}` (warn on failure, do not halt).
 </check>
 </action>
 
-<action>**[CRITICAL 5/6] Mark sprint-complete state**: update `{state_file}`: `current_bmad_step = "sprint-complete"`, `current_story = null`, `next_skill = null`, `stories_remaining = []`, `session_stories_done = {{session_stories_done}}`. This signals the test harness and any next /sprint-autopilot-on invocation that the sprint is genuinely done.</action>
+<action>**[CRITICAL 5/7] Mark sprint-complete state**: update `{state_file}`: `current_bmad_step = "sprint-complete"`, `current_story = null`, `next_skill = null`, `stories_remaining = []`, `session_stories_done = {{session_stories_done}}`. This signals the test harness and any next /sprint-autopilot-on invocation that the sprint is genuinely done.</action>
 
-<action>**[CRITICAL 6/6] Verify** — `{status_file}` shows every story status=done and every epic status=done. If any are not done: log a warning but do NOT revert the above actions. The worktrees are gone; the lock is released; the artifacts are committed; the state is marked complete; task checkboxes are marked. Manual recovery only.</action>
+<action>**[CRITICAL 6/7] Verify** — run:
+`node {{project_root}}/_Sprintpilot/scripts/list-remaining-stories.js --status-file "{status_file}" --format envelope`
+Parse stdout as JSON. If `.state` is `sprint-complete` AND `.remaining` is empty, the sprint is verified complete. If `.state` is anything else (e.g. `sprint-in-progress` with leftover stories), log a warning — but do NOT revert the above actions. The worktrees are gone; the lock is released; the artifacts are committed; the state is marked complete; task checkboxes are marked. Manual recovery only.
+</action>
+
+<!-- Final terminal-state marker. Kept inside the CRITICAL block because
+     the previous "Delete state_file" action at the tail of step 10 was
+     being skipped by context-rot in long sessions (observed in e2e runs:
+     "autopilot-state.yaml still exists" warning), leaving a stale state
+     file that confused the next /sprint-autopilot-on boot. CRITICAL 5/7
+     already wrote sprint-complete as a belt-and-suspenders in case this
+     delete crashes mid-run; step 1 also short-circuits on a leftover
+     sprint-complete state so accidental re-invocation doesn't loop. -->
+<action>**[CRITICAL 7/7] Delete state_file** — `node -e "require('node:fs').rmSync('{state_file}', { force: true })"` (idempotent; never halt on failure). Removes `autopilot-state.yaml` so the next invocation starts cleanly. CRITICAL 5/7 already wrote `current_bmad_step = sprint-complete` to the same file as a crash-safe marker, so if this delete fails mid-run the next session still sees the terminal state.</action>
 
 <action>Run full test suite — report `N/N passed`</action>
 
@@ -1210,20 +1278,21 @@ Run: `node {{project_root}}/_Sprintpilot/scripts/lock.js release` — ignore fai
 <action>**Generate documentation** — invoke `bmad-document-project`. If unavailable or it fails, write a minimal README using `{{stack}}`: project name + description (from brief/PRD); install/run/test lines for each non-null `{{stack.*_cmd}}` (omit lines where null); architecture overview if `architecture.md` exists.</action>
 
 <check if="{{git_enabled}}">
-  <action>**Commit README + docs to main** (sprint artifacts already committed in CRITICAL 2 above — this picks up README.md / docs/ that were generated later by bmad-document-project):
-  1. `git checkout -B {{base_branch}} origin/{{base_branch}} 2>&1` (or just `{{base_branch}}` without origin in local-only mode).
-  2. `git add README.md docs/ 2>/dev/null || true` (best-effort).
-  3. If `git diff --cached --quiet` exits non-zero: `git commit -m "docs: project documentation"` then (if `{{has_origin}}`) `git push origin {{base_branch}}` (warn on push failure, do not halt).
+  <action>**Commit README + docs to main** (sprint artifacts already committed in CRITICAL 4/7 above — this picks up README.md / docs/ that were generated later by bmad-document-project). Non-destructive checkout — never `-B` or `-f`:
+  1. `git switch {{base_branch}} 2>&1 || git checkout {{base_branch}} 2>&1`.
+  2. If `{{has_origin}}` is true: `git pull --ff-only origin {{base_branch}} 2>&1` (warn on non-ff; do NOT reset).
+  3. `git add README.md docs/ 2>/dev/null || true` (best-effort).
+  4. If `git diff --cached --quiet` exits non-zero: `git commit -m "docs: project documentation"` then (if `{{has_origin}}`) `git push origin {{base_branch}}` (warn on push failure, do not halt).
   </action>
 </check>
 
 <action>**Collect report data** from `{status_file}` (stories grouped by epic with titles, totals, final test count; PR/MR URLs, patch/dismissed counts per story if git_enabled) and `{decision_log_file}` (medium/high-impact decisions; counts of `review-accept`, `review-triage`, code-review rounds; per-story patches-applied / findings-dismissed).</action>
 
 <check if="{{git_enabled}}">
-  <!-- Worktree cleanup already ran as CRITICAL 2/6 above. Intentionally
+  <!-- Worktree cleanup already ran as CRITICAL 2/7 above. Intentionally
        no duplicate here — relying on early cleanup to avoid orphans
        when the LLM short-circuits late actions. -->
-  <action>(No-op: worktree cleanup already executed in CRITICAL 2/6.)</action>
+  <action>(No-op: worktree cleanup already executed in CRITICAL 2/7.)</action>
   <!-- PR 10: restore main-repo gc.auto to its prior value. -->
   <action>**Restore main-repo gc.auto**:
   if `{{original_gc_auto_main}}` is "unset": `git config --local --unset gc.auto` (ignore failure — may already be unset).
@@ -1232,7 +1301,7 @@ Run: `node {{project_root}}/_Sprintpilot/scripts/lock.js release` — ignore fai
   <action>Belt-and-suspenders: `node {{project_root}}/_Sprintpilot/scripts/lock.js release` (already released earlier in step 10; this is idempotent and catches any race where the early release failed).</action>
 </check>
 
-<action>Delete `{state_file}` — sprint complete</action>
+<!-- State file deletion moved to CRITICAL 7/7 above for reliability. -->
 <action>Mark master task "Sprintpilot — Full Sprint Execution" → `completed`</action>
 
 <action>Read template `{{project_root}}/_Sprintpilot/templates/sprint-report.txt`, fill mustache placeholders with the collected data, and print the result verbatim as the final message.</action>
