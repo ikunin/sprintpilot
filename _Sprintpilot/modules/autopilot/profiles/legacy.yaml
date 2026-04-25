@@ -19,6 +19,8 @@ autopilot:
   coalesce_state_writes: false
   conditional_boot_work: false
   cache_shared_reads: false
+  # Legacy is byte-for-byte v1.0.5; no v2 LLM calls.
+  auto_infer_dependencies: false
 
 git:
   granularity: story

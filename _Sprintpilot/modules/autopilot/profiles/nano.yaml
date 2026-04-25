@@ -16,6 +16,9 @@ autopilot:
   # mode as the full flow. 5 stories per session keeps step 10's CRITICAL
   # actions reliably in-context without paying for excessive session boots.
   session_story_limit: 5
+  # Nano runs at epic granularity with parallelism off — auto-inferring a
+  # story DAG would just burn one LLM call per sprint and never get used.
+  auto_infer_dependencies: false
   retrospective_mode: skip
   # Nano safety net — if a story fails under quick-dev, escalate to the
   # small profile for the remainder of the session (scope: session only,

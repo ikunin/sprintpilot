@@ -18,6 +18,9 @@ autopilot:
   coalesce_state_writes: true      # M3, PR 6 — batch non-critical writes, flush at story boundary
   conditional_boot_work: true      # M4, PR 7 — skip health-check + branch reconciliation on a clean repo
   cache_shared_reads: true         # M5, PR 8 — memoize sprint-status / git-status / decision-log reads per loop iteration
+  # PR-A lands the knob disabled. PR-B flips this to true once the workflow
+  # integration (LLM-driven inference) is wired and validated end-to-end.
+  auto_infer_dependencies: false   # 2.0.2 — auto-populate dependencies.yaml via LLM after bmad-sprint-planning
 
 git:
   granularity: story               # story | epic

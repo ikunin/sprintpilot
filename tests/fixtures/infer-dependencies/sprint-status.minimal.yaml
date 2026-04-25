@@ -1,0 +1,16 @@
+sprint:
+  name: "fixture-epic-1"
+
+epics:
+  1:
+    status: in-progress
+
+development_status:
+  1-1-data-model:
+    status: ready-for-dev
+  1-2-user-profile:
+    status: backlog
+  1-3-avatar-upload:
+    status: backlog
+  1-4-bio-edit:
+    status: backlog
