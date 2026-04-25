@@ -7,6 +7,7 @@
     "test:scripts": "vitest run scripts/",
     "test:e2e:greenfield": "vitest run e2e/greenfield.test.ts",
     "test:e2e:brownfield": "vitest run e2e/brownfield.test.ts",
+    "test:e2e:sudoku": "vitest run e2e/sudoku.test.ts",
     "test:e2e": "vitest run e2e/",
     "test:fast": "vitest run unit/ scripts/",
     "test": "vitest run unit/ scripts/ e2e/"
