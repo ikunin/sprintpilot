@@ -30,6 +30,10 @@ import {
 } from './harness/assertions.js';
 import { runClaude } from './harness/claude-runner.js';
 import { costTracker } from './harness/cost-tracker.js';
+import {
+  getLatestStoryBranch as getLatestStoryBranchShared,
+  getWorktreePath as getWorktreePathShared,
+} from './harness/git-utils.js';
 import { createTempProject, placeFixture, type TempProject } from './harness/temp-project.js';
 
 const FIXTURES_DIR = join(import.meta.dirname, 'fixtures/greenfield');
@@ -193,54 +197,12 @@ function isGameComplete(dir: string): boolean {
 }
 
 /** Get the latest story branch by commit date (for PR-based flow where main may not have code yet) */
-function getLatestStoryBranch(dir: string): string | null {
-  try {
-    // Two narrow patterns — `story/*` for local branches and
-    // `remotes/origin/story/*` (via `-a`) for the remote side. The previous
-    // `*story/*` fnmatch was loose enough to match `feature/story-legacy`
-    // or any branch containing `story/`, so we pin the prefix instead.
-    const branches = execSync(
-      `git -C "${dir}" branch -a --sort=-committerdate --list 'story/*' 'origin/story/*' 'remotes/origin/story/*'`,
-      { encoding: 'utf-8', timeout: 10_000 },
-    ).trim();
-    if (!branches) return null;
-    const parsed = branches
-      .split('\n')
-      .map((b) => b.replace(/^\s*[*+]?\s*/, '').trim())
-      .filter(Boolean)
-      // Belt-and-suspenders: require the branch name to actually START with
-      // `story/` after stripping the optional `remotes/origin/` prefix.
-      .filter((b) => {
-        const bare = b.replace(/^remotes\/origin\//, '').replace(/^origin\//, '');
-        return bare.startsWith('story/');
-      });
-    const remote = parsed.find((b) => b.startsWith('remotes/origin/story/'));
-    if (remote) return remote.replace('remotes/origin/', 'origin/');
-    return parsed[0] || null;
-  } catch {
-    return null;
-  }
-}
-
-/** Get the worktree path for a story branch (if it exists) */
-function getWorktreePath(dir: string, branch: string): string | null {
-  try {
-    const list = execSync(`git -C "${dir}" worktree list --porcelain`, {
-      encoding: 'utf-8',
-      timeout: 10_000,
-    });
-    const blocks = list.split('\n\n');
-    for (const block of blocks) {
-      if (block.includes(`branch refs/heads/${branch}`)) {
-        const match = block.match(/^worktree (.+)$/m);
-        return match ? match[1] : null;
-      }
-    }
-  } catch {
-    /* */
-  }
-  return null;
-}
+// Shared helpers — see tests/e2e/harness/git-utils.ts for rationale.
+// The shared getLatestStoryBranch reads sprint-status.yaml to filter
+// branches to the CURRENT sprint's story keys, preventing leftover
+// branches from prior runs on a shared remote from being picked up.
+const getLatestStoryBranch = (dir: string) => getLatestStoryBranchShared(dir);
+const getWorktreePath = (dir: string, branch: string) => getWorktreePathShared(dir, branch);
 
 /** Get test count from vitest output */
 function getTestCount(dir: string): { files: number; tests: number; error?: string } {

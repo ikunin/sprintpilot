@@ -55,6 +55,10 @@ import {
 } from './harness/assertions.js';
 import { runClaude } from './harness/claude-runner.js';
 import { costTracker } from './harness/cost-tracker.js';
+import {
+  getLatestStoryBranch as getLatestStoryBranchShared,
+  getWorktreePath as getWorktreePathShared,
+} from './harness/git-utils.js';
 import { createTempProject, placeFixture, type TempProject } from './harness/temp-project.js';
 
 const FIXTURES_DIR = join(import.meta.dirname, 'fixtures/sudoku');
@@ -81,56 +85,12 @@ let devServer: ChildProcess | null = null;
 let devServerUrl: string | null = null;
 let devServerLogPath: string | null = null;
 
-function gitSafe(args: string[], dir: string): string {
-  try {
-    return execFileSync('git', ['-C', dir, ...args], {
-      encoding: 'utf-8',
-      timeout: 30_000,
-    }).trim();
-  } catch {
-    return '';
-  }
-}
-
-function getLatestStoryBranch(dir: string): string | null {
-  const out = gitSafe(
-    [
-      'branch',
-      '-a',
-      '--sort=-committerdate',
-      '--list',
-      'story/*',
-      'origin/story/*',
-      'remotes/origin/story/*',
-    ],
-    dir,
-  );
-  if (!out) return null;
-  const parsed = out
-    .split('\n')
-    .map((b) => b.replace(/^\s*[*+]?\s*/, '').trim())
-    .filter(Boolean)
-    .filter((b) => {
-      const bare = b.replace(/^remotes\/origin\//, '').replace(/^origin\//, '');
-      return bare.startsWith('story/');
-    });
-  const remote = parsed.find((b) => b.startsWith('remotes/origin/story/'));
-  if (remote) return remote.replace('remotes/origin/', 'origin/');
-  return parsed[0] || null;
-}
-
-function getWorktreePath(dir: string, branch: string): string | null {
-  const list = gitSafe(['worktree', 'list', '--porcelain'], dir);
-  if (!list) return null;
-  const blocks = list.split('\n\n');
-  for (const block of blocks) {
-    if (block.includes(`branch refs/heads/${branch}`)) {
-      const match = block.match(/^worktree (.+)$/m);
-      return match ? match[1] : null;
-    }
-  }
-  return null;
-}
+// Shared with greenfield via tests/e2e/harness/git-utils.ts. The shared
+// version filters branch matches against the current sprint's story keys
+// (parsed from sprint-status.yaml) — a leftover branch from a prior run on
+// a shared remote will NOT be picked even if it has a newer committerdate.
+const getLatestStoryBranch = (dir: string) => getLatestStoryBranchShared(dir);
+const getWorktreePath = (dir: string, branch: string) => getWorktreePathShared(dir, branch);
 
 /** Walk timing shards for evidence of overlapping implementation phases. */
 const PARALLEL_RELEVANT_PHASES = new Set([
