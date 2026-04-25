@@ -33,6 +33,7 @@ Edit `_Sprintpilot/modules/autopilot/config.yaml`:
 |---------|---------|--------|---------|
 | `autopilot.session_story_limit` | `3` (nano: `5`) | integer ≥ 0 | Stories fully implemented per autopilot run before checkpoint. `0` = unlimited. Retuned in 2.0.1 after context-rot exposure on longer sessions; nano is cheaper per story so fits a higher cap. |
 | `autopilot.retrospective_mode` | `auto` | `auto` / `stop` / `skip` | How epic-end retrospectives are handled (see below). |
+| `autopilot.auto_infer_dependencies` | `true` (nano + legacy: `false`) | bool | 2.0.2 — autopilot session infers inter-story DAG once after `bmad-sprint-planning` and writes `_Sprintpilot/sprints/dependencies.yaml`. Hand-authored sidecars (no `# AUTO-INFERRED` marker) are detected and respected. See "Dependency Inference" below. |
 
 `retrospective_mode` options:
 - **`auto`** *(default)* — autopilot writes a deterministic retrospective artifact from `sprint-status.yaml` + `decision-log.yaml`, then continues. Single pass, no external skill call, safe under every CLI.
@@ -40,6 +41,12 @@ Edit `_Sprintpilot/modules/autopilot/config.yaml`:
 - **`skip`** — no retrospective artifact is written. **Not recommended** — you lose the epic-level learning record.
 
 Both settings are prompted during `sprintpilot install` (interactive mode) with existing values as defaults, so reinstalls preserve your choices.
+
+### Dependency Inference
+
+After `bmad-sprint-planning` completes, the autopilot session reads `epics.md`, `architecture.md`, and `sprint-status.yaml` and emits a JSON dependency envelope. `_Sprintpilot/scripts/infer-dependencies.js` validates it (schema, unknown keys, self-deps, cross-epic edges, missing rationales, cycles) and writes `_Sprintpilot/sprints/dependencies.yaml` with an `# AUTO-INFERRED` marker header. The script never calls an LLM — the autopilot session is the inference caller.
+
+This unblocks parallel story dispatch (`parallel_stories: true` + `dispatch-layer.js`) without requiring users to discover and hand-author the sidecar. Hand-authored files (no marker) are respected silently. Failure modes (invalid JSON, validation errors) log and continue — `resolve-dag.js` falls back to its safe linear `ordering` strategy on dispatch.
 
 ### Mandatory fresh-context finalize
 

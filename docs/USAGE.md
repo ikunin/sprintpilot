@@ -103,6 +103,31 @@ This trades one short extra session (~60-100 turns, usually under $2) for reliab
 
 If step 10 is interrupted after writing `current_bmad_step = sprint-complete` but before deleting the state file, the next `/sprint-autopilot-on` detects it in step 1 and cleans up with an "already complete" message rather than looping.
 
+### Dependency Inference
+
+After `bmad-sprint-planning` completes, the autopilot infers inter-story dependencies via one LLM call per epic and writes the result to `_Sprintpilot/sprints/dependencies.yaml`. This unlocks parallel story dispatch (`parallel_stories: true`) without requiring you to hand-author the sidecar.
+
+The generated file starts with:
+
+```yaml
+# AUTO-INFERRED — regenerate via infer-dependencies.js
+# DO NOT hand-edit `stories:` directly — it is regenerated on the next
+# planning cycle. To pin a relationship, add to `overrides:` instead.
+# Hash: <12-char content hash>
+```
+
+Each story entry includes a `rationale` field — a single sentence the LLM produced citing the AC, file path, or architecture line that justifies the edge. **Review these before parallel dispatch begins** — over-serialization (LLM emits a spurious dep) silently slows the sprint without breaking anything; the rationale is your safety net.
+
+**Opting out:**
+- Per-profile: set `autopilot.auto_infer_dependencies: false` in `_Sprintpilot/modules/autopilot/config.yaml` (default `true` on small/medium/large; `false` on nano and legacy).
+- Per-sprint: hand-author `_Sprintpilot/sprints/dependencies.yaml` before `bmad-sprint-planning` runs. The autopilot detects the missing `# AUTO-INFERRED` marker and respects your file (one-line skip notice in the log).
+
+**Pinning relationships the LLM gets wrong:**
+Edit the `overrides:` block — `force_independent: [keys]` to drop inbound edges; `force_sequential: [keys]` to chain. The auto-regeneration only touches the `stories:` block; `overrides:` and `epics:` are preserved verbatim across cycles.
+
+**Failure modes:**
+If the LLM emits invalid JSON or the script rejects it (cycle, unknown key, cross-epic edge), the error envelope is logged and the autopilot continues. `resolve-dag.js` falls back to its safe linear `ordering` strategy on the next dispatch — parallelism is disabled for that sprint, but nothing breaks.
+
 ### Submodules
 
 If your project uses git submodules (`.gitmodules` present), the autopilot automatically initializes them when creating worktrees. Initialization times out after 30 seconds (configurable via `worktree.submodule_timeout` in config). If timeout occurs (e.g., auth required), the autopilot warns and continues without submodules.

@@ -1,5 +1,42 @@
 # Changelog
 
+## [2.0.2] - 2026-04-25
+
+**Automatic story-DAG inference.** The autopilot now infers inter-story dependencies once after `bmad-sprint-planning` completes and writes `_Sprintpilot/sprints/dependencies.yaml` automatically. The hand-authored-sidecar workflow that nobody discovered is replaced with a one-call inference at the natural insertion point. Parallel dispatch (`parallel_stories: true` + `dispatch-layer.js`) finally engages out of the box on small/medium/large profiles without manual setup.
+
+### Added
+- `_Sprintpilot/scripts/infer-dependencies.js` — three subcommands:
+  - `scaffold-prompt --epic <id>` emits the literal LLM prompt with file paths interpolated.
+  - `dry-run --epic <id>` validates an LLM JSON envelope from stdin and reports `{valid, errors, merged_doc, diff}` without writing.
+  - `write --epic <id> [--force]` validates + writes the sidecar with an `# AUTO-INFERRED` marker. Exit 2 if a hand-authored file (no marker) exists and `--force` is not set; the user always wins.
+- LLM JSON envelope contract: `{"version":1,"epic":"<id>","dependencies":{...},"rationale":{...}}`. Stories with no inbound deps are absent from `dependencies` (distinguishes "no deps" from "LLM forgot"). Rationale is required for every declared edge so reviewers can spot hallucinations.
+- Validation accumulates errors (no short-circuit): schema, unknown keys (against `sprint-status.yaml` for the requested epic), self-deps, cross-epic edges, missing rationales, cycles via `topoLayers` reuse.
+- Idempotency: sorted story keys, sorted dep arrays, no timestamp. 12-char sha256 content hash over structural fields — rationale-only edits don't change the hash.
+- Auto-marker detection preserves user customization: existing files without the `# AUTO-INFERRED` header are treated as hand-authored and never overwritten.
+- `autopilot.auto_infer_dependencies` config knob:
+  - `_base.yaml` (medium, small): `true` — default ON
+  - `large.yaml` (inherits): `true`
+  - `nano.yaml`: `false` — no parallelism use case
+  - `legacy.yaml`: `false` — v1.0.5 byte-for-byte rollback
+
+### Changed
+- `_Sprintpilot/skills/sprint-autopilot-on/workflow.md` — new inference block after the `bmad-sprint-planning` completion handler. Loops over distinct epic IDs in `stories_remaining`; for each, runs `infer-dependencies.js scaffold-prompt`, executes the inference inline (LLM reads four files, emits JSON), pipes the result into `infer-dependencies.js write`. Failure paths log and continue — `resolve-dag.js` falls back to the linear `ordering` strategy on dispatch. Autopilot never halts on inference failure.
+
+### Architecture
+- The "Sprintpilot scripts NEVER call LLMs" rule is preserved: inference happens in a workflow.md action that the autopilot session executes inline; the script ingests structured JSON and validates. The `files` strategy stub in `resolve-dag.js:362` (which named "a future `sprintpilot-infer-dependencies` skill" as the resolution) is now realized — though as a workflow action plus deterministic script rather than a separate subagent skill.
+
+### Tests
+- `tests/unit/infer-dependencies.test.ts` — 30 cases covering schema, unknown keys, self-deps, cross-epic edges, missing rationales, cycles, idempotency, hash stability, marker detection, overrides preservation, and a CLI round-trip that pipes the output through `resolve-dag.js layers` and asserts a multi-layer DAG.
+- `tests/fixtures/infer-dependencies/` — 4-story sample sprint with epics.md + architecture.md + expected JSON envelope.
+
+### Cost
+- ~1 LLM call per epic per sprint (most sprints are single-epic). Inputs ~4k–13k tokens; output ~500 tokens. Negligible relative to total autopilot session cost.
+
+### Migration
+- Existing hand-authored `dependencies.yaml`: untouched (no marker → respected silently with a one-line log).
+- Existing `resolve-dag.js scaffold` output: also treated as hand-authored (its header doesn't match the auto-marker — by design; scaffold output represents user commitment to the linear chain).
+- Disable: set `autopilot.auto_infer_dependencies: false`. Optionally `rm _Sprintpilot/sprints/dependencies.yaml` to fully revert to linear `ordering`.
+
 ## [2.0.1] - 2026-04-24
 
 **Determinism + context-rot mitigation.** Replaces brittle LLM-prose steps with script-backed deterministic calls and forces a fresh-context session for step 10 finalization so CRITICAL cleanup actions (task checkboxes, worktree cleanup, lock release, artifact commit) run reliably. Validated end-to-end against the greenfield e2e (7/7 tests, $8.94, 3 sessions — previously required 9 fix-up iterations to stabilize).

@@ -340,6 +340,7 @@ All parameters live in Sprintpilot-owned YAMLs. Defaults shown per profile.
 | `conditional_boot_work` (M4) | Skip health-check when no worktrees present | on | on | on | off | off |
 | `cache_shared_reads` (M5) | Read sprint-status/decision-log once per loop iter | on | on | on | on | off |
 | `phase_timings` (M0) | Emit per-phase duration logs | on | on | on | on | off |
+| `auto_infer_dependencies` (2.0.2) | LLM-infer story DAG after planning, write dependencies.yaml | off | on | on | on | off |
 
 **Session budget** is `session_story_limit` only (R8). Token estimation was researched and removed — it would require LLM observability Sprintpilot doesn't have (host agent owns all model interaction; no tool-agnostic API). Story count per profile is the entire mechanism. Users tune by changing the numeric limit.
 

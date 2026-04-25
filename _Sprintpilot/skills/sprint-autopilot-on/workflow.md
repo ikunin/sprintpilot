@@ -806,6 +806,30 @@ Parse stdout as a single JSON object: `{"remaining":[...],"state":"..."}`.
   Parse stdout as `{"remaining":[...],"state":"..."}` → `{{stories_remaining}}` = `.remaining`. Update `{state_file}` with the new value.</action>
 </check>
 
+<!-- 2.0.2: auto-infer inter-story dependencies via the autopilot's active
+     LLM session. Replaces the hand-authored dependencies.yaml step that
+     users never discovered. Gated on autopilot.auto_infer_dependencies
+     (default true on small/medium/large; false on nano and legacy).
+     The script never calls an LLM — it ingests our JSON output via stdin,
+     validates, and writes the sidecar with an AUTO-INFERRED marker.
+     Hand-authored sidecars (no marker) are detected and respected. -->
+<check if="{{completed_skill}} was bmad-sprint-planning">
+  <action>Resolve `{{auto_infer_dependencies}}` from `autopilot.auto_infer_dependencies` (default false) via:
+  `node {{project_root}}/_Sprintpilot/scripts/resolve-profile.js get autopilot.auto_infer_dependencies --project-root "{{project_root}}"`</action>
+  <check if="{{auto_infer_dependencies}} is true">
+    <action>Set `{{distinct_epic_ids}}` = sorted unique leading-numeric segments of every key in `{{stories_remaining}}` (e.g. `1-1-foo` → `1`). Skip the loop if empty (pre-planning edge case).</action>
+    <foreach var="{{epic_id}}" in="{{distinct_epic_ids}}">
+      <action>Generate the inference prompt: run `node {{project_root}}/_Sprintpilot/scripts/infer-dependencies.js scaffold-prompt --epic "{{epic_id}}" --project-root "{{project_root}}"` and capture stdout as `{{infer_prompt}}`.</action>
+      <action>**Execute the inference inline.** The prompt instructs you to read four files (sprint-status.yaml, epics.md, architecture.md, dependencies.yaml-if-present) and emit ONE JSON object with shape `{"version":1,"epic":"{{epic_id}}","dependencies":{...},"rationale":{...}}`. Read those files NOW. Reason about which stories share modules, files, or describe themselves as building on each other (the prompt's RULES section enumerates the legitimate triggers). Emit the JSON envelope. No prose, no markdown fences. Set `{{infer_json}}` to the envelope.</action>
+      <action>Pipe `{{infer_json}}` into `node {{project_root}}/_Sprintpilot/scripts/infer-dependencies.js write --epic "{{epic_id}}" --project-root "{{project_root}}"`. Parse stdout JSON.
+      - On exit 0 (`wrote: true`) → log: `"Inferred {{response.edges_inferred}} dependency edges for epic {{epic_id}} (hash {{response.hash}}; user_overrides_preserved: {{response.user_overrides_preserved}})"`.
+      - On exit 2 (`wrote: false`, `reason: existing-hand-authored`) → log: `"Existing dependencies.yaml is hand-authored — skipping LLM inference for epic {{epic_id}}; user-authored sidecar wins"`. Do NOT halt.
+      - On exit 1 (validation error) → log the error envelope verbatim, then log: `"LLM dependency inference rejected for epic {{epic_id}} — falling back to linear ordering. Re-run /sprint-autopilot-on to retry, or hand-author the sidecar."`. Do NOT halt the autopilot — `resolve-dag.js` will fall back to the `ordering` strategy on dispatch.
+      </action>
+    </foreach>
+  </check>
+</check>
+
 <check if="{{completed_skill}} was bmad-sprint-planning AND {{git_enabled}}">
   <action>If `{{has_origin}}` is true, run `git fetch origin` (log a warning on failure and continue — do not abort).
   If `{{has_origin}}` is false, skip the fetch.</action>
