@@ -10,17 +10,33 @@ You do NOT hardcode the workflow sequence. After each completed skill, read its 
 
 ### Shell portability
 
-The executing shell may be bash, zsh, PowerShell, or cmd — translate bash idioms as needed:
+The executing shell may be bash, zsh, Git Bash (Claude Code's default on Windows), PowerShell, or cmd. The workflow itself uses dedicated Node helpers for the operations that were most fragile across shells — the few remaining shell idioms below are the ones that work uniformly under bash, zsh, Git Bash, PowerShell, and cmd:
 
-| Bash | PowerShell |
+| Idiom | Where used | Portable across |
+|---|---|---|
+| `2>&1` (merge stderr → stdout) | `git ... 2>&1` | bash, zsh, Git Bash, PowerShell, cmd |
+| `\|\|` (run-on-failure chaining) | `git switch X \|\| git checkout X` | bash, zsh, Git Bash, PowerShell ≥7, cmd |
+
+Idioms that were **previously inlined and have been replaced with Node helpers** (do NOT regress them):
+
+| Old idiom | Replaced by |
 |---|---|
-| `A && B` | `A; if ($LASTEXITCODE -eq 0) { B }` |
-| `A \|\| true` | `A; $LASTEXITCODE = 0` |
-| `2>/dev/null` | `2>$null` |
-| `rm -rf <dir>` | `Remove-Item -Recurse -Force <dir>` |
-| `if [ -f X ]; then ... fi` | `if (Test-Path -PathType Leaf X) { ... }` |
+| `git config --get K 2>/dev/null \|\| echo unset` | `git-portable.js config-get K --default unset` |
+| `git worktree list --porcelain \| grep -c '^worktree '` | `git-portable.js count-worktrees` |
+| `VAR=$(git ... rev-parse --git-common-dir)` | `git-portable.js common-dir` (output captured into `{{git_common}}`) |
+| `git add A B C 2>/dev/null \|\| true` | `git-portable.js safe-add A B C` |
 
-For cross-platform file ops prefer the Node helpers under `_Sprintpilot/scripts/`, or inline: `node -e "require('fs').rmSync('<path>', {recursive: true, force: true})"`. When a step chains commands with `&&` and you cannot express it in one line, run them separately and STOP on any failure.
+If you find yourself writing a new pipe (`\|`), POSIX redirect (`2>/dev/null`), shell substitution (`$(...)`), shell variable assignment (`VAR=value`), or POSIX-only tool (`grep`, `sed`, `awk`, `xargs`, `find -exec`), reach for a Node helper instead — either an existing script under `_Sprintpilot/scripts/`, a new helper added to `git-portable.js`, or an inline `node -e "..."` snippet (which is portable across every host).
+
+Common cross-platform inline snippets:
+
+| Need | Inline Node snippet |
+|---|---|
+| Recursive remove | `node -e "require('fs').rmSync('<path>', {recursive: true, force: true})"` |
+| File-exists check (exit 0/1) | `node -e "process.exit(require('fs').existsSync('<path>')?0:1)"` |
+| Read JSON, extract field | `node -e "console.log(JSON.parse(require('fs').readFileSync('<file>','utf8')).<field>)"` |
+
+When a step chains commands with `&&` and the chain cannot be expressed via a Node helper, run them separately and STOP on any failure.
 
 ---
 
@@ -228,7 +244,7 @@ When the flag is `false`, the direct-write instructions below are authoritative.
   <!-- PR 10: disable gc.auto on the main repo so git's auto-GC doesn't
        race with concurrent worktree operations during the sprint. Save
        the prior value so we can restore it at sprint complete (step 10). -->
-  <action>**Save + disable main-repo gc.auto**: set `{{original_gc_auto_main}}` = output of `git config --get gc.auto 2>/dev/null || echo unset`, then `git config --local gc.auto 0`.</action>
+  <action>**Save + disable main-repo gc.auto**: set `{{original_gc_auto_main}}` = output of `node {{project_root}}/_Sprintpilot/scripts/git-portable.js config-get gc.auto --default unset --project-root "{{project_root}}"`, then `git -C {{project_root}} config --local gc.auto 0`.</action>
 
   <action>**Lock file** — run: `node {{project_root}}/_Sprintpilot/scripts/lock.js acquire`
   Output will be one of:
@@ -254,8 +270,8 @@ When the flag is `false`, the direct-write instructions below are authoritative.
   <action>Read `autopilot.conditional_boot_work` from the resolver:
   `node {{project_root}}/_Sprintpilot/scripts/resolve-profile.js get autopilot.conditional_boot_work` → `{{conditional_boot_work}}`. Default to `false` on failure.
   </action>
-  <action>Count worktrees (every supported git install ships `git worktree list --porcelain`):
-  `git worktree list --porcelain 2>/dev/null | grep -c '^worktree '` → `{{worktree_count}}`. Fail-open to 2 (force full path) if the command fails.
+  <action>Count worktrees (cross-platform; replaces a `... | grep -c` pipe that needed POSIX shell):
+  `node {{project_root}}/_Sprintpilot/scripts/git-portable.js count-worktrees --project-root "{{project_root}}"` → `{{worktree_count}}`. The script fails open to 2 internally if git itself errors, matching the previous "fail-open to force full path" semantic.
   </action>
   <action>Count in-progress stories: read `{status_file}` and count stories whose status is NOT in {`done`, `backlog`}. Set `{{in_progress_count}}`. Fail-open to 1 (force full path) if the file is unreadable.</action>
 
@@ -675,14 +691,15 @@ Parse stdout as a single JSON object: `{"remaining":[...],"state":"..."}`.
 
   <check if="{{worktree_enabled}} is true AND worktree add succeeded">
     <action>`cd {{project_root}}/.worktrees/{{current_story}}`. All subsequent commands run from here. Set `{{worktree_path}}` = this path.</action>
-    <action>**Disable gc.auto on this worktree** (PR 10): save original value `{{original_gc_auto_worktree}}` = output of `git -C {{project_root}}/.worktrees/{{current_story}} config --get gc.auto` (or "unset"), then `git -C {{project_root}}/.worktrees/{{current_story}} config --local gc.auto 0`.</action>
+    <action>**Disable gc.auto on this worktree** (PR 10): save original value `{{original_gc_auto_worktree}}` = output of `node {{project_root}}/_Sprintpilot/scripts/git-portable.js config-get gc.auto --default unset --project-root "{{project_root}}/.worktrees/{{current_story}}"`, then `git -C {{project_root}}/.worktrees/{{current_story}} config --local gc.auto 0`.</action>
     <action>Run: `node {{project_root}}/_Sprintpilot/scripts/log-timing.js start --story "{{current_story}}" --phase "worktree.submodule-init" --project-root "{{project_root}}"` — ignore failures.</action>
     <action>**Init submodules** if `.gitmodules` exists (file-exists check via `node -e "process.exit(require('fs').existsSync('.gitmodules')?0:1)"`). PR 10 fast-path:
-    Resolve the main repo's common git dir: `GIT_COMMON=$(git -C {{project_root}} rev-parse --git-common-dir)`.
+    Resolve the main repo's common git dir into a captured variable `{{git_common}}` (cross-platform; replaces a `$(...)` shell substitution):
+    `node {{project_root}}/_Sprintpilot/scripts/git-portable.js common-dir --project-root "{{project_root}}"`. Trim trailing whitespace; the script exits 1 if git can't resolve the dir — log a warning and skip the submodule fast-path, falling through to the degraded-mode branch below.
     For each submodule path in `.gitmodules`:
       1. `node {{project_root}}/_Sprintpilot/scripts/submodule-lock.js acquire --submodule "<path>" --project-root "{{project_root}}"` — serializes concurrent submodule updates across worktrees.
       2. With git ≥ 2.18 (confirmed at boot by check-prereqs): wrap the update with retry to survive ref-lock contention:
-         `node {{project_root}}/_Sprintpilot/scripts/with-retry.js -- git -C {{project_root}}/.worktrees/{{current_story}} submodule update --init --recursive --reference "$GIT_COMMON" --jobs=4 -- <path>`
+         `node {{project_root}}/_Sprintpilot/scripts/with-retry.js -- git -C {{project_root}}/.worktrees/{{current_story}} submodule update --init --recursive --reference "{{git_common}}" --jobs=4 -- <path>`
          With older git (degraded mode flagged by check-prereqs): fall back to `git -C ... submodule update --init --recursive -- <path>`.
       3. `node {{project_root}}/_Sprintpilot/scripts/submodule-lock.js release --submodule "<path>" --project-root "{{project_root}}"` (best-effort, ignore failures).
     If the loop fails or hangs: warn "Submodule init failed (may need auth). Continuing." and proceed.
@@ -1239,7 +1256,9 @@ Run: `node {{project_root}}/_Sprintpilot/scripts/lock.js release` — ignore fai
 <check if="{{git_enabled}}">
   1. `git switch {{base_branch}} 2>&1 || git checkout {{base_branch}} 2>&1` (plain switch; if `{{base_branch}}` doesn't exist locally, `git checkout --track origin/{{base_branch}}` once to create it tracking origin). Never use `-B` or `-f` — they discard work.
   2. If `{{has_origin}}` is true: `git pull --ff-only origin {{base_branch}} 2>&1` (fast-forward only; if the pull would require a merge, log a warning and continue — do NOT `reset --hard`).
-  3. `git add _bmad-output/planning-artifacts _bmad-output/implementation-artifacts/sprint-status.yaml _bmad-output/implementation-artifacts/decision-log.yaml _bmad-output/implementation-artifacts/git-status.yaml _bmad-output/stories _bmad-output/implementation-artifacts/retrospectives 2>/dev/null || true` (each path best-effort; never halt on missing paths).
+  3. Stage artifacts via the cross-platform helper (replaces `git add … 2>/dev/null || true`):
+  `node {{project_root}}/_Sprintpilot/scripts/git-portable.js safe-add _bmad-output/planning-artifacts _bmad-output/implementation-artifacts/sprint-status.yaml _bmad-output/implementation-artifacts/decision-log.yaml _bmad-output/implementation-artifacts/git-status.yaml _bmad-output/stories _bmad-output/implementation-artifacts/retrospectives --project-root "{{project_root}}"`
+  The script filters paths to those that actually exist on disk before invoking git, so missing paths are skipped silently with no shell error suppression needed.
   4. If `git diff --cached --quiet` exits non-zero: `git commit -m "docs: sprint artifacts — planning + stories + retrospective"` then (if `{{has_origin}}` is true) `git push origin {{base_branch}}` (warn on failure, do not halt).
 </check>
 </action>
@@ -1266,7 +1285,7 @@ Parse stdout as JSON. If `.state` is `sprint-complete` AND `.remaining` is empty
 <!-- PR 6 SPRINT-COMPLETE FLUSH + ARCHIVE (no-op if coalescing is off). -->
 <check if="{{coalesce_state_writes}} is true">
   <action>Run: `node {{project_root}}/_Sprintpilot/scripts/state-shard.js flush --story sprint --project-root "{{project_root}}"` — ignore failures.</action>
-  <action>Run: `node {{project_root}}/_Sprintpilot/scripts/merge-shards.js --archive --layer "sprint-complete-$(date -u +%Y%m%dT%H%M%SZ)" --project-root "{{project_root}}"` — ignore failures. --archive moves merged shards to .archive/layer-... so next sprint starts clean.</action>
+  <action>Run: `node {{project_root}}/_Sprintpilot/scripts/merge-shards.js --archive --project-root "{{project_root}}"` — ignore failures. --archive moves merged shards to .archive/layer-&lt;timestamp&gt;/ (the script generates the ISO timestamp itself; no shell `$(...)` substitution needed) so the next sprint starts clean.</action>
 </check>
 
 <!-- Final phase-timing hotspot report (no-op if autopilot.phase_timings is false). -->
@@ -1305,7 +1324,9 @@ Parse stdout as JSON. If `.state` is `sprint-complete` AND `.remaining` is empty
   <action>**Commit README + docs to main** (sprint artifacts already committed in CRITICAL 4/7 above — this picks up README.md / docs/ that were generated later by bmad-document-project). Non-destructive checkout — never `-B` or `-f`:
   1. `git switch {{base_branch}} 2>&1 || git checkout {{base_branch}} 2>&1`.
   2. If `{{has_origin}}` is true: `git pull --ff-only origin {{base_branch}} 2>&1` (warn on non-ff; do NOT reset).
-  3. `git add README.md docs/ 2>/dev/null || true` (best-effort).
+  3. Stage docs via the cross-platform helper:
+  `node {{project_root}}/_Sprintpilot/scripts/git-portable.js safe-add README.md docs/ --project-root "{{project_root}}"`
+  (paths are filtered to those that exist; missing paths are skipped).
   4. If `git diff --cached --quiet` exits non-zero: `git commit -m "docs: project documentation"` then (if `{{has_origin}}`) `git push origin {{base_branch}}` (warn on push failure, do not halt).
   </action>
 </check>

@@ -1,5 +1,51 @@
 # Changelog
 
+## [2.0.3] - 2026-04-25
+
+**Full Windows / Linux / macOS compatibility.** Removes the last cross-platform foot-guns from the workflow and ships a `git-portable.js` helper that replaces POSIX-shell idioms previously inlined as workflow actions.
+
+### Why
+Previously, several workflow.md actions used POSIX-shell-only constructs that only worked under bash, zsh, or Git Bash:
+- `git config --get gc.auto 2>/dev/null || echo unset` (lines 231, 678)
+- `git worktree list --porcelain | grep -c '^worktree '` (line 258)
+- `GIT_COMMON=$(git ... rev-parse --git-common-dir)` (line 681)
+- `git add A B C 2>/dev/null || true` (lines 1242, 1308)
+- `--layer "sprint-complete-$(date -u +%Y%m%dT%H%M%SZ)"` (line 1288)
+
+Under PowerShell or cmd.exe, every one of those would throw a syntax error or silently do the wrong thing. They worked under Git Bash on Windows (the Claude Code default), but failed for any host that ran the autopilot under a native Windows shell.
+
+### Added
+- **`_Sprintpilot/scripts/git-portable.js`** with four subcommands:
+  - `count-worktrees` — counts `worktree ` entries in `git worktree list --porcelain`. Fails open to 2 (matches the workflow's previous fail-open semantic) when git itself errors.
+  - `config-get <key> [--default <value>] [--scope local|global|system]` — wraps `git config --get` with a default-value fallback. Replaces `git config --get K 2>/dev/null || echo X`.
+  - `common-dir` — wraps `git rev-parse --git-common-dir`, returns absolute path. Replaces `VAR=$(git ... rev-parse --git-common-dir)`.
+  - `safe-add <path>...` — filters paths to those that exist on disk before invoking `git add`. Replaces `git add A B C 2>/dev/null || true`. Emits a `{added, skipped}` JSON summary.
+- 18 unit cases in `tests/unit/git-portable.test.ts` covering each subcommand against a real temp git repo + a non-repo failure path.
+
+### Changed
+- **`_Sprintpilot/skills/sprint-autopilot-on/workflow.md`** — five POSIX-shell call sites switched to `git-portable.js`. The `--layer` arg of the sprint-complete `merge-shards.js` call is now omitted; the script already auto-generates a timestamp internally, so the `$(date -u ...)` shell substitution is gone.
+- The "Shell portability" preamble (lines 11–37) updated:
+  - Documents the four idioms that have been replaced (so future contributors don't regress them).
+  - Lists the few remaining shell idioms (`2>&1`, `||`) and confirms each is portable across bash, zsh, Git Bash, PowerShell, and cmd.
+  - Adds inline Node snippets for common needs (rm, file-exists, JSON read) that work on every host.
+
+### Verified portable (no fix needed)
+A two-pass audit confirmed cross-platform safety for:
+- Every script under `_Sprintpilot/scripts/` (all use `spawnSync(..., args[])` with no shell, `path.join` everywhere, `windowsHide: true`).
+- The runtime layer `_Sprintpilot/lib/runtime/` (args, git, http, log, secrets, spawn, text, yaml-lite).
+- The installer (`bin/sprintpilot.js`, `lib/commands/install.js`, `lib/commands/uninstall.js`, `lib/commands/check-update.js`).
+- `agent-adapter.js` (Windows path landed in 2.0.2 fix; verified again).
+- `mark-done-stories-tasks.js` and `infer-dependencies.js` (directory fsync guarded on Windows in 2.0.2).
+- `inject-tasks-section.js` (fence-aware in 2.0.2).
+
+### Deferred
+- `sudoku.test.ts` dev-server `spawn(..., {detached: true})` semantics differ on Windows; the test is POSIX-only by design.
+- The `infer-dependencies` workflow piping JSON via stdin still depends on the host shell's quoting rules — a follow-up could add `--input <file>` to avoid shell escaping entirely. Not blocking on the supported-host matrix today.
+
+### Tests
+- 529 / 529 unit tests pass (was 511; +18 new for git-portable).
+- All 29 e2e cases parse cleanly.
+
 ## [2.0.2] - 2026-04-25
 
 **Automatic story-DAG inference.** The autopilot now infers inter-story dependencies once after `bmad-sprint-planning` completes and writes `_Sprintpilot/sprints/dependencies.yaml` automatically. The hand-authored-sidecar workflow that nobody discovered is replaced with a one-call inference at the natural insertion point. Parallel dispatch (`parallel_stories: true` + `dispatch-layer.js`) finally engages out of the box on small/medium/large profiles without manual setup.
