@@ -30,6 +30,54 @@ describe('inspectTasksSection', () => {
     const body = `# Story\n\n## Tasks\n\n- [ ] a\n`;
     expect(inspectTasksSection(body)).toEqual({ found: true, hasCheckbox: true });
   });
+
+  it('IGNORES `## Tasks` heading inside a fenced code block (no false positive)', () => {
+    const body = [
+      '# Story',
+      '',
+      '## Acceptance Criteria',
+      '',
+      '1. Foo',
+      '',
+      '## Dev Notes',
+      '',
+      'Example template skeleton:',
+      '```md',
+      '## Tasks / Subtasks',
+      '- [ ] sample',
+      '```',
+      '',
+    ].join('\n');
+    // No real ## Tasks section exists; the only one is inside a fence.
+    expect(inspectTasksSection(body)).toEqual({ found: false, hasCheckbox: false });
+  });
+
+  it('IGNORES `- [ ]` inside a fenced code block within Tasks section', () => {
+    // Real Tasks section but only fenced examples — should NOT count as having checkboxes.
+    const body = [
+      '## Tasks',
+      '',
+      'See template for examples:',
+      '```md',
+      '- [ ] template task',
+      '```',
+      '',
+    ].join('\n');
+    expect(inspectTasksSection(body)).toEqual({ found: true, hasCheckbox: false });
+  });
+
+  it('handles tilde-fenced code blocks too', () => {
+    const body = [
+      '## Acceptance Criteria',
+      '',
+      '~~~md',
+      '## Tasks',
+      '- [ ] inside-fence',
+      '~~~',
+    ].join('\n');
+    expect(inspectTasksSection(body)).toEqual({ found: false, hasCheckbox: false });
+  });
+
   it('detects a `## Subtasks` section (alternate name)', () => {
     const body = `# Story\n\n## Subtasks\n\n- [ ] a\n`;
     expect(inspectTasksSection(body)).toEqual({ found: true, hasCheckbox: true });

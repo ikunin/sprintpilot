@@ -406,15 +406,20 @@ function atomicWrite(file, body) {
     fs.closeSync(fd);
   }
   fs.renameSync(tmp, file);
-  try {
-    const dfd = fs.openSync(dir, 'r');
+  // Skip directory fsync on Windows: fs.openSync(<dir>, 'r') throws there
+  // and we have no portable Windows equivalent. NTFS rename is atomic;
+  // it's just not flushed to disk on power loss the way POSIX fsync would.
+  if (process.platform !== 'win32') {
     try {
-      fs.fsyncSync(dfd);
-    } finally {
-      fs.closeSync(dfd);
+      const dfd = fs.openSync(dir, 'r');
+      try {
+        fs.fsyncSync(dfd);
+      } finally {
+        fs.closeSync(dfd);
+      }
+    } catch {
+      /* directory fsync unsupported on some filesystems */
     }
-  } catch {
-    /* directory fsync unsupported on some filesystems */
   }
 }
 

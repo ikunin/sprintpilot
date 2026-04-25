@@ -48,15 +48,37 @@ function help() {
 // Locate `## Tasks` or `## Subtasks` (case-insensitive, any depth >= 2)
 // and check whether the section contains at least one `- [ ]` checkbox.
 // Returns { found: boolean, hasCheckbox: boolean }.
+//
+// Fence-aware: lines inside ``` or ~~~ fenced blocks are treated as
+// content (not headers, not checkboxes). Without this, an example code
+// block elsewhere in the file containing `## Tasks` or `- [ ]` would
+// give a false positive — same fix mark-done-stories-tasks.js makes.
 function inspectTasksSection(body) {
   const lines = body.split('\n');
   const headerRe = /^(#{2,})\s+(tasks|subtasks)(\s*\/\s*(tasks|subtasks))?\s*$/i;
+  const fenceRe = /^\s*(`{3,}|~{3,})/;
   let inSection = false;
   let headerLevel = 0;
   let found = false;
   let hasCheckbox = false;
+  let inFence = false;
+  let fenceChar = null;
 
   for (const line of lines) {
+    const fence = line.match(fenceRe);
+    if (fence) {
+      const ch = fence[1][0];
+      if (!inFence) {
+        inFence = true;
+        fenceChar = ch;
+      } else if (fenceChar === ch) {
+        inFence = false;
+        fenceChar = null;
+      }
+      continue;
+    }
+    if (inFence) continue;
+
     const h = line.match(/^(#{1,6})\s+.*$/);
     if (h) {
       if (inSection && h[1].length <= headerLevel) {
@@ -92,8 +114,11 @@ function extractAcceptanceCriteria(body, sectionName) {
     `^(#{2,})\\s+${sectionName.replace(/[.*+?^${}()|[\\\]]/g, '\\$&')}\\s*$`,
     'i',
   );
+  const fenceRe = /^\s*(`{3,}|~{3,})/;
   let inSection = false;
   let sectionHeaderLevel = 0;
+  let inFence = false;
+  let fenceChar = null;
   const entries = [];
 
   const acEntryRes = [
@@ -103,10 +128,23 @@ function extractAcceptanceCriteria(body, sectionName) {
   ];
 
   for (const line of lines) {
+    const fence = line.match(fenceRe);
+    if (fence) {
+      const ch = fence[1][0];
+      if (!inFence) {
+        inFence = true;
+        fenceChar = ch;
+      } else if (fenceChar === ch) {
+        inFence = false;
+        fenceChar = null;
+      }
+      continue;
+    }
+    if (inFence) continue; // example code can include AC-like lines verbatim
+
     const h = line.match(/^(#{1,6})\s+.*$/);
     if (h) {
       if (inSection && h[1].length <= sectionHeaderLevel) {
-        // closing header — exit the AC section
         inSection = false;
         break;
       }
@@ -118,11 +156,10 @@ function extractAcceptanceCriteria(body, sectionName) {
       }
     }
     if (!inSection) continue;
-    if (/^\s*$/.test(line)) continue; // blank
+    if (/^\s*$/.test(line)) continue;
     for (const re of acEntryRes) {
       const m = line.match(re);
       if (m && m[1]) {
-        // Collapse whitespace and trim.
         const text = m[1].replace(/\s+/g, ' ').trim();
         if (text) entries.push(text);
         break;

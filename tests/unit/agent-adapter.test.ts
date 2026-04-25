@@ -12,6 +12,8 @@ const {
   detect,
   detectFromEnv,
   detectFromFilesystem,
+  parsePsOutput,
+  parseTasklistOutput,
 } = adapterMod as {
   HOSTS: Record<string, { supports_parallel: boolean }>;
   detect: (opts: {
@@ -20,6 +22,8 @@ const {
   }) => { host: string; supports_parallel: boolean; detection_reason: string; confidence: string };
   detectFromEnv: (env: Record<string, string | undefined>) => { host: string; confidence: string } | null;
   detectFromFilesystem: (root: string) => { host: string; confidence: string; detection_reason: string } | null;
+  parsePsOutput: (raw: string) => string | null;
+  parseTasklistOutput: (raw: string) => string | null;
 };
 
 const REPO_ROOT = join(__dirname, '..', '..');
@@ -128,5 +132,52 @@ describe('CLI integration', () => {
     expect(parsed).toHaveProperty('host');
     expect(parsed).toHaveProperty('confidence');
     expect(parsed).toHaveProperty('supports_parallel');
+  });
+});
+
+// ──────────────────────────────────────────────────────────────────
+// Cross-platform parent-process-name parsers
+// Tested as pure functions so the Windows path is verified on macOS/Linux
+// CI without needing a real Windows host.
+// ──────────────────────────────────────────────────────────────────
+
+describe('parsePsOutput (POSIX)', () => {
+  it('returns the basename for a typical ps line', () => {
+    expect(parsePsOutput('claude\n')).toBe('claude');
+  });
+  it('strips path prefix', () => {
+    expect(parsePsOutput('/usr/local/bin/claude\n')).toBe('claude');
+  });
+  it('drops trailing argv after the basename', () => {
+    expect(parsePsOutput('/usr/local/bin/claude --dangerously-skip-permissions\n')).toBe('claude');
+  });
+  it('returns null on empty input', () => {
+    expect(parsePsOutput('')).toBeNull();
+    expect(parsePsOutput('   \n')).toBeNull();
+  });
+});
+
+describe('parseTasklistOutput (Windows)', () => {
+  it('extracts the image name from a CSV row and strips .exe', () => {
+    const row = '"claude.exe","12345","Console","1","123,456 K"';
+    expect(parseTasklistOutput(row)).toBe('claude');
+  });
+  it('matches even when quoted columns contain commas (numeric format)', () => {
+    const row = '"node.exe","99999","Console","1","1,234,567 K"';
+    expect(parseTasklistOutput(row)).toBe('node');
+  });
+  it('returns null when tasklist reports no matching task', () => {
+    expect(parseTasklistOutput('INFO: No tasks are running which match the specified criteria.')).toBeNull();
+  });
+  it('returns null on empty input', () => {
+    expect(parseTasklistOutput('')).toBeNull();
+    expect(parseTasklistOutput('   \n')).toBeNull();
+  });
+  it('handles unquoted/garbage input gracefully', () => {
+    expect(parseTasklistOutput('not a csv line at all')).toBeNull();
+  });
+  it('preserves non-.exe extensions (cmd binaries can have other suffixes)', () => {
+    // tasklist normally uses .exe but defend against future image-name shapes.
+    expect(parseTasklistOutput('"gemini","42","Console","1","1 K"')).toBe('gemini');
   });
 });

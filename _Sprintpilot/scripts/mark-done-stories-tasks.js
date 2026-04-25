@@ -145,16 +145,22 @@ function atomicWrite(file, body) {
     fs.closeSync(fd);
   }
   fs.renameSync(tmp, file);
-  // Best-effort directory fsync so the rename itself is durable.
-  try {
-    const dfd = fs.openSync(dir, 'r');
+  // Best-effort directory fsync so the rename itself is durable. Skipped on
+  // Windows where fs.openSync(<dir>, 'r') throws EISDIR/EPERM — there's no
+  // documented way to fsync a directory handle. The rename itself is still
+  // atomic on NTFS, just not flushed to disk on power loss the way fsync
+  // would guarantee on POSIX.
+  if (process.platform !== 'win32') {
     try {
-      fs.fsyncSync(dfd);
-    } finally {
-      fs.closeSync(dfd);
+      const dfd = fs.openSync(dir, 'r');
+      try {
+        fs.fsyncSync(dfd);
+      } finally {
+        fs.closeSync(dfd);
+      }
+    } catch {
+      /* directory fsync unsupported on some filesystems — ignore */
     }
-  } catch {
-    /* directory fsync unsupported on some filesystems — ignore */
   }
 }
 

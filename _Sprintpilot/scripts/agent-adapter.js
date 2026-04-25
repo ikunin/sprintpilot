@@ -87,19 +87,53 @@ function detectFromEnv(env) {
   return null;
 }
 
+// Parsers extracted as pure functions so the platform branches stay
+// unit-testable on any OS. Each takes the raw stdout from the platform
+// command and returns the basename or null. Negative test cases
+// (empty input, "INFO: No tasks…", malformed lines) covered by tests.
+
+/** Parse `ps -p <pid> -o comm=` output (POSIX). */
+function parsePsOutput(raw) {
+  if (!raw) return null;
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  return path.basename(trimmed.split(/\s+/)[0]);
+}
+
+/**
+ * Parse `tasklist /FO CSV /NH` output (Windows). Strips `.exe` so the
+ * basename matches the POSIX path (so PARENT_DETECTORS only needs the
+ * non-extension name once).
+ *   Sample row: "claude.exe","12345","Console","1","123,456 K"
+ */
+function parseTasklistOutput(raw) {
+  if (!raw) return null;
+  const trimmed = raw.trim();
+  if (!trimmed || /^INFO:/i.test(trimmed)) return null; // "INFO: No tasks…"
+  const m = trimmed.match(/^"([^"]+)"/);
+  if (!m) return null;
+  return path.basename(m[1]).replace(/\.exe$/i, '');
+}
+
 function parentProcessName() {
   try {
     const pid = process.ppid;
-    // macOS and Linux both support `ps -p <pid> -o comm=`.
+    if (process.platform === 'win32') {
+      const res = spawnSync(
+        'tasklist',
+        ['/FI', `PID eq ${pid}`, '/FO', 'CSV', '/NH'],
+        { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] },
+      );
+      if (res.status !== 0) return null;
+      return parseTasklistOutput(res.stdout || '');
+    }
+    // POSIX: macOS and Linux both support `ps -p <pid> -o comm=`.
     const res = spawnSync('ps', ['-p', String(pid), '-o', 'comm='], {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore'],
     });
     if (res.status !== 0) return null;
-    const raw = (res.stdout || '').trim();
-    if (!raw) return null;
-    // Strip path prefix and drop any argv trailing the basename.
-    return path.basename(raw.split(/\s+/)[0]);
+    return parsePsOutput(res.stdout || '');
   } catch {
     return null;
   }
@@ -204,6 +238,8 @@ module.exports = {
   detectFromParent,
   detectFromFilesystem,
   detect,
+  parsePsOutput,
+  parseTasklistOutput,
 };
 
 if (require.main === module) {
