@@ -597,6 +597,61 @@ Parse stdout as a single JSON object: `{"remaining":[...],"state":"..."}`.
 
 <step n="3" goal="Prepare and execute the recommended skill">
 
+<!-- ──────────────────────────────────────────────────────────────────
+     PR 11 PARALLEL DISPATCH (gates):
+       - autopilot.parallel_stories: true (resolved at boot into
+         {{parallel_stories}})
+       - host_supports_parallel: true with high confidence (PR 11
+         agent-adapter.js — only Claude Code today)
+       - implementation_flow != quick (nano runs sequentially per epic)
+       - {{next_skill}} starts a fresh per-story flow (bmad-create-story
+         OR bmad-dev-story OR bmad-quick-dev) — never mid-story
+       - The current epic's DAG layer has width >= 2 (computed from
+         _Sprintpilot/sprints/dependencies.yaml via resolve-dag.js)
+
+     When all gates pass, the autopilot dispatches every story in the
+     current layer concurrently via the host's Agent tool — instead of
+     picking one story and running the full per-story flow sequentially.
+     This is the integration point that finally exercises the dispatcher
+     infrastructure built in PR 9 (resolve-dag) + PR 11 (dispatch-layer).
+     Without this block, parallel_stories=true had no behavioral effect.
+     ────────────────────────────────────────────────────────────────── -->
+<check if="{{parallel_stories}} is true AND {{host_supports_parallel}} is true AND {{implementation_flow}} is NOT quick AND ({{next_skill}} is bmad-create-story OR {{next_skill}} is bmad-dev-story OR {{next_skill}} is bmad-quick-dev)">
+  <action>**Compute current DAG layer.** Set `{{epic_id}}` = leading numeric segment of the FIRST undone story in `{status_file}`. Run:
+  `node {{project_root}}/_Sprintpilot/scripts/resolve-dag.js layers --epic "{{epic_id}}" --project-root "{{project_root}}"`
+  Parse stdout as a JSON array of arrays (each sub-array is one layer of story keys). Find the FIRST layer that contains at least one story whose status in `{status_file}` is NOT `done`. Filter that layer down to only the undone stories — set `{{active_layer}}` to the resulting list.</action>
+  <check if="{{active_layer}} length is 1">
+    <action>Single-story layer — no parallel benefit. Continue with normal sequential dispatch below (the standard step-3 flow picks the single story).</action>
+  </check>
+  <check if="{{active_layer}} length is 2 or more">
+    <action>**Parallel dispatch:** run:
+    `node {{project_root}}/_Sprintpilot/scripts/dispatch-layer.js --layer "{{active_layer | join(',')}}" --max-parallel "{{max_parallel_stories}}" --project-root "{{project_root}}" --branch-prefix "{{branch_prefix}}" --base-branch "{{base_branch}}"`
+    Parse stdout — captures the per-story worktree paths (`stories[*].worktree`) and the `effective_parallel` count.</action>
+    <action>Run: `node {{project_root}}/_Sprintpilot/scripts/log-timing.js mark --story sprint --phase "dispatch.layer-{{epic_id}}" --project-root "{{project_root}}"` — ignore failures.</action>
+    <action>**Spawn N concurrent sub-agents — IMPORTANT: send a SINGLE message containing N parallel Agent tool calls (one per story).** Do NOT serialize. Each sub-agent runs the FULL per-story flow for its assigned story (bmad-create-story → bmad-check-implementation-readiness → bmad-dev-story → bmad-code-review → patches → mark done) inside its own worktree. The Agent tool calls run concurrently and the message reply contains all sub-agent results.
+
+    For each story key `K` in `{{active_layer}}`, build one Agent call with `subagent_type=general-purpose` and a self-contained prompt of the form:
+    ```
+    You are running a single story for the Sprintpilot autopilot.
+    - Project root: {{project_root}}
+    - Story key:    K
+    - Worktree:     {{project_root}}/.worktrees/K (cd into it for all work)
+    - Skill flow (full):  bmad-create-story → bmad-check-implementation-readiness → bmad-dev-story → bmad-code-review → apply patch findings → re-run tests → set status=done in {status_file}
+    - Skill flow (quick): bmad-quick-dev (single skill; nano profile)
+    Use {{implementation_flow}} = `{{implementation_flow}}` to pick which flow.
+    Track timing via `node {{project_root}}/_Sprintpilot/scripts/log-timing.js mark --story K --phase <phase>` after each skill returns.
+    Return a one-line JSON summary on completion: {"story":"K", "status":"done"|"failed", "tests":"<N/M>", "notes":"<short>"}
+    ```
+
+    Wait for ALL N sub-agents to return. Collect results; abort the autopilot ONLY if a sub-agent reports a TRUE BLOCKER per the AUTOPILOT RULES.</action>
+    <action>**Merge per-story shards** after the layer completes:
+    `node {{project_root}}/_Sprintpilot/scripts/merge-shards.js --archive --project-root "{{project_root}}"` — collapses the per-story state shards into the authoritative project YAMLs and archives the layer's shards under `.archive/layer-<timestamp>/` so the next layer starts clean.</action>
+    <action>Run: `node {{project_root}}/_Sprintpilot/scripts/log-timing.js mark --story sprint --phase "_end" --project-root "{{project_root}}"` — closes the open `dispatch.layer-{{epic_id}}` mark.</action>
+    <action>Update `{state_file}` with the new STATE_FIELDS (each completed story's status is reflected via the merge above; advance `session_stories_done` by `{{active_layer}}.length`). Then `goto step=2` to re-evaluate the loop.</action>
+    <goto step="2">Re-evaluate after parallel layer dispatch</goto>
+  </check>
+</check>
+
 <!-- PR 4 NANO ROUTING: when the active profile's implementation_flow is
      'quick', route bmad-dev-story through bmad-quick-dev instead. Quick-dev
      runs Implement → Review → Classify → Commit internally (BMad
@@ -724,9 +779,13 @@ Parse stdout as a single JSON object: `{"remaining":[...],"state":"..."}`.
      sprint-level skills (bmad-help, bmad-sprint-planning, etc).
      The script is a silent no-op when autopilot.phase_timings is false. -->
 <action>Set `{{timing_story}}` = `{{current_story}}` if non-empty, else `sprint`.</action>
-<action>Run: `node {{project_root}}/_Sprintpilot/scripts/log-timing.js start --story "{{timing_story}}" --phase "skill.{{next_skill}}" --project-root "{{project_root}}"` — ignore failures.</action>
+<!-- Single-call timing via `mark`. The previous start/INVOKE/end triplet
+     was reliably broken in long sessions (LLM skipped the `end` call
+     ~50% of the time), so most skills had no duration recorded. `mark`
+     auto-computes the duration of the PREVIOUS phase from a small marker
+     file — one call per transition, no open-phase failure mode. -->
+<action>Run: `node {{project_root}}/_Sprintpilot/scripts/log-timing.js mark --story "{{timing_story}}" --phase "skill.{{next_skill}}" --project-root "{{project_root}}"` — ignore failures.</action>
 <action>INVOKE `{{next_skill}}` skill using the Skill tool</action>
-<action>Run: `node {{project_root}}/_Sprintpilot/scripts/log-timing.js end --story "{{timing_story}}" --phase "skill.{{next_skill}}" --project-root "{{project_root}}"` — ignore failures.</action>
 <action>Mark task "{{next_skill}}" as `completed`</action>
 
 <goto step="4">Handle completion</goto>
@@ -953,12 +1012,12 @@ For any finding that is DISMISSED (contradicts AC or is a false positive):
 <action>Mark "[story] Apply patches" → `completed`</action>
 
 <!-- Re-run code review to sync sprint-status.yaml — patches resolved all findings, so code-review will now set story to done -->
-<action>Run: `node {{project_root}}/_Sprintpilot/scripts/log-timing.js start --story "{{current_story}}" --phase "skill.bmad-code-review.rereview" --project-root "{{project_root}}"` — ignore failures.</action>
+<!-- Single-call timing (mark) — see step-3 comment for rationale. -->
+<action>Run: `node {{project_root}}/_Sprintpilot/scripts/log-timing.js mark --story "{{current_story}}" --phase "skill.bmad-code-review.rereview" --project-root "{{project_root}}"` — ignore failures.</action>
 <action>Re-invoke `bmad-code-review` using the Skill tool.
 The review layers already ran — this pass will see zero unresolved findings and set the story status to `done` in sprint-status.yaml (code-review owns that transition per step-04-present.md:92).
 Instruct: "Re-verify code review for story {{current_story}} — all patch findings have been applied. Update story status accordingly."
 </action>
-<action>Run: `node {{project_root}}/_Sprintpilot/scripts/log-timing.js end --story "{{current_story}}" --phase "skill.bmad-code-review.rereview" --project-root "{{project_root}}"` — ignore failures.</action>
 <action>Mark task "code-review-verify" → `completed`</action>
 
 <goto step="7">Mark story done</goto>
@@ -1279,6 +1338,11 @@ Parse stdout as JSON. If `.state` is `sprint-complete` AND `.remaining` is empty
      delete crashes mid-run; step 1 also short-circuits on a leftover
      sprint-complete state so accidental re-invocation doesn't loop. -->
 <action>**[CRITICAL 7/7] Delete state_file** — `node -e "require('node:fs').rmSync('{state_file}', { force: true })"` (idempotent; never halt on failure). Removes `autopilot-state.yaml` so the next invocation starts cleanly. CRITICAL 5/7 already wrote `current_bmad_step = sprint-complete` to the same file as a crash-safe marker, so if this delete fails mid-run the next session still sees the terminal state.</action>
+
+<!-- Close the last open `mark` phase so its duration gets recorded.
+     Without this, the very last skill's duration would be lost (no
+     subsequent mark fires after sprint-complete). -->
+<action>Run: `node {{project_root}}/_Sprintpilot/scripts/log-timing.js mark --story sprint --phase _end --project-root "{{project_root}}"` — ignore failures.</action>
 
 <action>Run full test suite — report `N/N passed`</action>
 

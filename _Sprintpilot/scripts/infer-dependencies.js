@@ -48,6 +48,16 @@ const { parseArgs } = require('../lib/runtime/args');
 const log = require('../lib/runtime/log');
 
 const dagMod = require('./resolve-dag.js');
+const timing = require('./log-timing.js');
+
+function emitTimingEvent(projectRoot, phase, meta) {
+  try {
+    if (!timing.isEnabled(projectRoot)) return;
+    timing.appendLine(projectRoot, 'sprint', timing.buildEntry('once', 'sprint', phase, meta));
+  } catch {
+    /* ignore — timing is best-effort */
+  }
+}
 const {
   readStoriesFromStatus,
   parseEpicFromKey,
@@ -510,11 +520,21 @@ async function runWrite(projectRoot, epic, { force }) {
 
   const diff = diffCounts(existing.doc, merged);
   const overridesPreserved = (existing.doc?.overrides?.length ?? 0) > 0;
+  const edgesInferred = Object.values(envelope.dependencies).reduce((n, arr) => n + arr.length, 0);
+
+  emitTimingEvent(projectRoot, 'planning.infer-dependencies', {
+    epic: String(epic),
+    edges_inferred: edgesInferred,
+    edges_added: diff.added,
+    edges_removed: diff.removed,
+    hash,
+  });
+
   process.stdout.write(
     JSON.stringify({
       wrote: true,
       file,
-      edges_inferred: Object.values(envelope.dependencies).reduce((n, arr) => n + arr.length, 0),
+      edges_inferred: edgesInferred,
       edges_added: diff.added,
       edges_removed: diff.removed,
       user_overrides_preserved: overridesPreserved,

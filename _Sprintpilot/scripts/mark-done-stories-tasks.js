@@ -35,6 +35,20 @@ const path = require('node:path');
 const { parseArgs } = require('../lib/runtime/args');
 const log = require('../lib/runtime/log');
 const { parseStatuses, isDone } = require('./list-remaining-stories.js');
+const timing = require('./log-timing.js');
+
+// Best-effort auto-emit: surfaces a timing event so that callers don't
+// have to wrap every CRITICAL invocation in start/end pairs the LLM
+// might skip. Silent no-op if phase_timings is disabled or anything
+// throws — never affects the script's primary outcome.
+function emitTimingEvent(projectRoot, phase, meta) {
+  try {
+    if (!timing.isEnabled(projectRoot)) return;
+    timing.appendLine(projectRoot, 'sprint', timing.buildEntry('once', 'sprint', phase, meta));
+  } catch {
+    /* ignore */
+  }
+}
 
 function help() {
   log.out(
@@ -220,6 +234,11 @@ function main() {
     }
   }
 
+  emitTimingEvent(projectRoot, 'cleanup.mark-done-tasks', {
+    done_stories: summary.done_stories,
+    marked: summary.marked.length,
+    missing_files: summary.missing_files.length,
+  });
   process.stdout.write(`${JSON.stringify(summary, null, 2)}\n`);
 }
 

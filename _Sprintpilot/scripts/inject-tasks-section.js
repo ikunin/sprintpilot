@@ -31,6 +31,27 @@ const path = require('node:path');
 const { parseArgs } = require('../lib/runtime/args');
 const log = require('../lib/runtime/log');
 const { atomicWrite } = require('./mark-done-stories-tasks.js');
+const timing = require('./log-timing.js');
+
+// Derive a STORY_RE-compatible story key from a story-file path. BMad
+// emits files like `story-1-1-foo.md` or `1-1-foo.md`; either form
+// reduces to the key `1-1-foo`. Returns null if no key is recoverable.
+function storyKeyFromFile(storyFile) {
+  const base = path.basename(storyFile).replace(/\.md$/i, '');
+  const stripped = base.replace(/^story-/i, '').toLowerCase();
+  if (/^[a-z0-9][a-z0-9-]*$/.test(stripped)) return stripped;
+  return null;
+}
+
+function emitTimingEvent(projectRoot, story, phase, meta) {
+  try {
+    if (!story) return;
+    if (!timing.isEnabled(projectRoot)) return;
+    timing.appendLine(projectRoot, story, timing.buildEntry('once', story, phase, meta));
+  } catch {
+    /* ignore — timing is best-effort */
+  }
+}
 
 function help() {
   log.out(
@@ -199,10 +220,13 @@ function main() {
     process.exit(1);
   }
   const acSectionName = opts['ac-section'] || 'Acceptance Criteria';
+  const projectRoot = opts['project-root'] || process.cwd();
+  const storyKey = storyKeyFromFile(storyFile);
 
   const body = fs.readFileSync(storyFile, 'utf8');
   const info = inspectTasksSection(body);
   if (info.found && info.hasCheckbox) {
+    emitTimingEvent(projectRoot, storyKey, 'story.inject-tasks', { action: 'skip' });
     process.stdout.write(
       `${JSON.stringify({ action: 'skip', reason: 'tasks-section-present' })}\n`,
     );
@@ -233,9 +257,11 @@ function main() {
   }
 
   atomicWrite(path.resolve(storyFile), newBody);
+  const action = info.found ? 'checkboxes-added' : 'section-appended';
+  emitTimingEvent(projectRoot, storyKey, 'story.inject-tasks', { action, entries: entries.length });
   process.stdout.write(
     `${JSON.stringify({
-      action: info.found ? 'checkboxes-added' : 'section-appended',
+      action,
       entries: entries.length,
     })}\n`,
   );
@@ -245,6 +271,7 @@ module.exports = {
   inspectTasksSection,
   extractAcceptanceCriteria,
   buildTasksSection,
+  storyKeyFromFile,
 };
 
 if (require.main === module) {

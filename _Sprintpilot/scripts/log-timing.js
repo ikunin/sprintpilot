@@ -9,6 +9,13 @@
 //   start   Emit {event:"start", story, phase, ts:<iso8601>}
 //   end     Emit {event:"end",   story, phase, ts:<iso8601>}
 //   once    Emit a single-event marker (for things like health-check-run)
+//   mark    Single-call replacement for start/end pairs. Reads a tiny
+//           marker file (.timings/.mark.json), computes the duration
+//           since the previous mark, emits one duration record for the
+//           PREVIOUS phase, and writes a new marker for the current
+//           phase. Designed for LLM-driven workflows where the agent
+//           may forget to call `end` after a long skill — `mark` only
+//           needs to be called ONCE per phase transition.
 //
 // Output path:
 //   <project-root>/_bmad-output/implementation-artifacts/.timings/<story>.jsonl
@@ -35,7 +42,8 @@ const STORY_RE = /^[a-z0-9][a-z0-9-]*$/;
 const PHASE_RE = /^[a-z][a-z0-9-.]*$/;
 const META_MAX_BYTES = 2048;
 const LINE_MAX_BYTES = 4096; // POSIX PIPE_BUF floor — single write() is atomic
-const VALID_ACTIONS = ['start', 'end', 'once'];
+const VALID_ACTIONS = ['start', 'end', 'once', 'mark'];
+const MARKER_FILE = '.mark.json';
 
 function help() {
   log.out(
@@ -179,6 +187,99 @@ function buildEntry(action, story, phase, meta) {
   return entry;
 }
 
+// ---------------------------------------------------------------
+// `mark` — single-call timing
+// ---------------------------------------------------------------
+
+function markerPath(projectRoot) {
+  return path.join(timingsDir(projectRoot), MARKER_FILE);
+}
+
+function readMarker(projectRoot) {
+  const file = markerPath(projectRoot);
+  if (!fs.existsSync(file)) return null;
+  try {
+    const raw = fs.readFileSync(file, 'utf8');
+    const parsed = JSON.parse(raw);
+    if (
+      parsed &&
+      typeof parsed === 'object' &&
+      typeof parsed.story === 'string' &&
+      typeof parsed.phase === 'string' &&
+      typeof parsed.ts === 'string'
+    ) {
+      return parsed;
+    }
+  } catch {
+    /* corrupt marker — treat as absent */
+  }
+  return null;
+}
+
+function writeMarker(projectRoot, marker) {
+  const dir = timingsDir(projectRoot);
+  fs.mkdirSync(dir, { recursive: true });
+  const file = markerPath(projectRoot);
+  // Atomic-ish: write tmp + rename. Marker is small, single-line JSON.
+  const tmp = `${file}.tmp.${process.pid}`;
+  fs.writeFileSync(tmp, JSON.stringify(marker));
+  fs.renameSync(tmp, file);
+}
+
+function clearMarker(projectRoot) {
+  const file = markerPath(projectRoot);
+  try {
+    fs.unlinkSync(file);
+  } catch {
+    /* ignore */
+  }
+}
+
+/**
+ * mark: single-call timing API.
+ *
+ * Emits a duration record for the PREVIOUS phase (if any) covering the
+ * interval since the previous mark, then writes a new marker for the
+ * current phase. The very first mark in a session emits no duration
+ * record — there's no "previous phase" yet.
+ *
+ * Use phase = "_end" to close the last open phase without starting a new
+ * one (e.g. at sprint-complete time).
+ *
+ * Returns { duration_ms, prev_phase } so callers can log/inspect.
+ */
+function markPhase(projectRoot, story, phase, meta) {
+  const now = new Date();
+  const prev = readMarker(projectRoot);
+  let durationMs = null;
+  let prevPhase = null;
+  if (prev) {
+    const prevTs = Date.parse(prev.ts);
+    if (!Number.isNaN(prevTs)) {
+      durationMs = now.getTime() - prevTs;
+      prevPhase = prev.phase;
+      const durationEntry = {
+        event: 'duration',
+        story: prev.story,
+        phase: prev.phase,
+        started: prev.ts,
+        ended: now.toISOString(),
+        duration_ms: durationMs,
+      };
+      if (prev.meta !== undefined) durationEntry.meta = prev.meta;
+      appendLine(projectRoot, prev.story, durationEntry);
+    }
+  }
+  if (phase === '_end') {
+    clearMarker(projectRoot);
+  } else {
+    const marker = { story, phase, ts: now.toISOString() };
+    if (meta !== undefined) marker.meta = meta;
+    writeMarker(projectRoot, marker);
+  }
+  return { duration_ms: durationMs, prev_phase: prevPhase };
+}
+
 function main() {
   const { opts, positional } = parseArgs(process.argv.slice(2));
   if (opts.help || positional.length === 0) {
@@ -196,7 +297,13 @@ function main() {
     log.error(story.error);
     process.exit(1);
   }
-  const phase = validatePhase(opts.phase);
+  // `mark _end` is a sentinel that closes the last open phase without
+  // starting a new one. Skip the regex check for it; everything else
+  // must match PHASE_RE.
+  const phase =
+    action.value === 'mark' && opts.phase === '_end'
+      ? { ok: true, value: '_end' }
+      : validatePhase(opts.phase);
   if (!phase.ok) {
     log.error(phase.error);
     process.exit(1);
@@ -211,6 +318,13 @@ function main() {
   if (!isEnabled(projectRoot)) return;
 
   try {
+    if (action.value === 'mark') {
+      const r = markPhase(projectRoot, story.value, phase.value, meta.value);
+      // Emit a brief JSON line so callers can log the duration if useful.
+      // Stdout is intentionally separate from the per-story shard.
+      process.stdout.write(`${JSON.stringify({ marked: phase.value, prev_phase: r.prev_phase, duration_ms: r.duration_ms })}\n`);
+      return;
+    }
     appendLine(projectRoot, story.value, buildEntry(action.value, story.value, phase.value, meta.value));
   } catch (e) {
     log.error(`timing write failed: ${e.message}`);
@@ -223,12 +337,18 @@ module.exports = {
   PHASE_RE,
   META_MAX_BYTES,
   LINE_MAX_BYTES,
+  MARKER_FILE,
   VALID_ACTIONS,
   validateStory,
   validatePhase,
   validateAction,
   validateMeta,
   timingsDir,
+  markerPath,
+  readMarker,
+  writeMarker,
+  clearMarker,
+  markPhase,
   readPhaseTimingSetting,
   isEnabled,
   appendLine,
