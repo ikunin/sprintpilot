@@ -142,13 +142,32 @@ function pairEvents(events) {
       // stale marker poisons aggregates the way the v2.0.4 raw clamp
       // did before the split. duration_ms must be a finite non-negative
       // number; defensive against hand-edited shards.
-      const skew = ev.clock_skew === true;
-      const over = ev.over_threshold === true;
+      //
+      // Truthy comparison (not `=== true`) so a hand-edited shard with
+      // `clock_skew: 1` or any other truthy value is still recognized
+      // as an anomaly — symmetric with the defensive number check
+      // below.
+      //
+      // Mutually exclusive tally: per markPhase's contract, one record
+      // can only carry ONE flag (rawDelta is either negative OR exceeds
+      // the ceiling, never both). If a hand-edited shard carries both,
+      // we count clock_skew first since "the clock did something
+      // weird" subsumes "duration looked too long".
+      const skew = Boolean(ev.clock_skew);
+      const over = Boolean(ev.over_threshold);
       if (skew) recordAnomaly(ev.phase, 'clock_skew');
-      if (over) recordAnomaly(ev.phase, 'over_threshold');
+      else if (over) recordAnomaly(ev.phase, 'over_threshold');
       if (skew || over) continue;
       const d = ev.duration_ms;
       if (typeof d !== 'number' || !Number.isFinite(d) || d < 0) continue;
+      // Wall-clock attribution: a duration record's `_ms` is the time
+      // the phase ENDED (when markPhase emitted the record). To make
+      // per-story `wall_ms` meaningful for mark-only stories, expand
+      // `s.first` backward by the recorded duration so `first` reflects
+      // the actual phase start. Without this, a story with a single
+      // mark record has `wall_ms = 0`.
+      const phaseStart = ev._ms - d;
+      if (s.first === null || phaseStart < s.first) s.first = phaseStart;
       recordDuration(s, ev.phase, d);
     }
   }
@@ -334,7 +353,9 @@ function renderMarkdown(report) {
       lines.push(`- \`${phase}\` ×${count}`);
     }
   }
-  const mdAnomalyEntries = Object.entries(report.anomalies || {});
+  const mdAnomalyEntries = Object.entries(report.anomalies || {}).filter(
+    ([, c]) => c.clock_skew > 0 || c.over_threshold > 0,
+  );
   if (mdAnomalyEntries.length > 0) {
     lines.push('');
     lines.push('## Anomalies');

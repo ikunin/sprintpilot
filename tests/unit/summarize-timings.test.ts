@@ -162,6 +162,60 @@ describe('pairEvents', () => {
     expect(p.phaseAgg.p).toEqual([100]);
     expect(p.anomalies.p).toBeUndefined();
   });
+
+  it('expands wall-clock backward for mark-API duration records (s.first uses ev._ms - duration_ms)', () => {
+    // A story with only mark-API records should report a meaningful
+    // wall_ms. Pre-fix: s.first = ev._ms (the emit time = phase end),
+    // so wall_ms collapsed to (last_emit - first_emit), missing phase 1.
+    // Now: ingesting a duration record expands s.first backward by
+    // the duration so it reflects the actual phase start.
+    const events = [
+      // single duration record, phase ran 1s before being emitted at t=2000
+      { event: 'duration', story: 's-mark-only', phase: 'p', duration_ms: 1000, _ms: 2000 },
+    ];
+    const p = pairEvents(events);
+    // first = 2000 - 1000 = 1000; last = 2000; wall = 1000
+    expect(p.stories['s-mark-only'].first).toBe(1000);
+    expect(p.stories['s-mark-only'].last).toBe(2000);
+  });
+
+  it('hand-edited dual-flag record tallies clock_skew once (mutually exclusive — clock_skew wins)', () => {
+    // The mark API NEVER emits both flags on one record (rawDelta can
+    // be negative XOR over-ceiling, never both). But a hand-edited
+    // shard could carry both — pairEvents must not double-tally the
+    // same record across the two anomaly counters. clock_skew wins
+    // ("the clock did something weird" subsumes "duration looked too
+    // long").
+    const events = [
+      {
+        event: 'duration',
+        story: 's',
+        phase: 'p',
+        duration_ms: 0,
+        clock_skew: true,
+        over_threshold: true,
+        _ms: 1000,
+      },
+    ];
+    const p = pairEvents(events);
+    expect(p.anomalies.p).toEqual({ clock_skew: 1, over_threshold: 0 });
+  });
+
+  it('accepts truthy non-boolean flag values from hand-edited shards (defense-in-depth)', () => {
+    // YAML round-trips and copy-paste can turn `clock_skew: true` into
+    // `1`, "true", or other truthy values. Those should still be
+    // recognized as anomalies — symmetric with the rest of the
+    // defensive validation. `=== true` strict comparison would silently
+    // let the malformed record poison p50/p95/max.
+    const events = [
+      { event: 'duration', story: 's', phase: 'p', duration_ms: 9_999_999, clock_skew: 1, _ms: 1000 },
+      { event: 'duration', story: 's', phase: 'p', duration_ms: 9_999_999, over_threshold: 'yes', _ms: 2000 },
+      { event: 'duration', story: 's', phase: 'p', duration_ms: 100, _ms: 3000 }, // valid baseline
+    ];
+    const p = pairEvents(events);
+    expect(p.phaseAgg.p).toEqual([100]); // anomalies excluded
+    expect(p.anomalies.p).toEqual({ clock_skew: 1, over_threshold: 1 });
+  });
 });
 
 describe('aggregate', () => {
