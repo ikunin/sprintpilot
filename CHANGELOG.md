@@ -1,5 +1,30 @@
 # Changelog
 
+## [2.0.5] - 2026-04-26
+
+**Per-story timing markers — fixes the parallel-dispatch race in 2.0.4.** A multi-agent code review of 2.0.4 found that the `mark` API used a single global marker file (`.timings/.mark.json`) shared across all stories. Under parallel dispatch — exactly the use case 2.0.4 was meant to enable — N concurrent sub-agents marking different stories against the same project root would race on that one file: one rename clobbered the other and durations were attributed to the wrong (story, phase). Plus `mark --story sprint --phase _end` ignored `--story` and cleared whichever marker was last written, even if it belonged to a different story.
+
+### Fixed
+- **Per-story marker files** — `.timings/.mark.<story>.json` instead of one global `.mark.json`. `markerPath`, `readMarker`, `writeMarker`, `clearMarker`, and `markPhase` all take an explicit story argument now. Concurrent same-process marks for different stories no longer corrupt each other.
+- **`_end` is now story-scoped** — `mark --story X --phase _end` only clears X's marker; other stories' markers are untouched. The parent's `dispatch.layer-<id>` close in workflow.md (line 649) now reliably closes the parent's own mark, not a sub-agent's last skill mark.
+- **Interrupt-safety** — `markPhase` now writes the new marker BEFORE appending the duration record. An interrupt between the two yields a missed record (acceptable) instead of a stale marker that double-counts on the next call.
+- **Wall-clock skew clamp** — durations are clamped at 0 with a `clock_skew: true` flag stamped in the entry. Aggregators (avg, p95) no longer get poisoned by NTP backsteps or DST transitions.
+- **Distinguish ENOENT from JSON parse failure** in `readMarker` — corrupt-but-present markers now log a stderr warning instead of silently masquerading as "first mark of session".
+- **Tmp filename collision guard** — `${file}.tmp.${pid}.${rand}` instead of just `${pid}` to survive PID reuse and concurrent same-process writes (rare but real under parallel test runs). Tmp files are cleaned on rename failure.
+- **`workflow.md` sub-agent prompt** — parallel-dispatch sub-agents now pass `--project-root {{project_root}}` to `log-timing.js mark` so timing data lands in the parent's `.timings/` instead of being orphaned in the cleaned-up worktree's `_bmad-output/`. With per-story markers the previous race motivation for the omission is gone.
+
+### Doc Accuracy
+- **`docs/CONFIGURATION.md`** — fixed two doc/code mismatches in `ma.*` defaults that the audit caught: `baseline_story_duration_sec` documented as `600`, actual code is `180` (across `_base.yaml`, `ma/config.yaml`); `effective_parallel_floor` documented as `2`, actual code is `1` (everywhere). Code is now the source of truth.
+
+### Tests
+- **+2 new test cases** covering the per-story semantics: independent markers across two stories interleaved in the same process; concurrent `Promise.all`-driven marks for different stories closing without corruption.
+- **+1 clock-skew test** — plants a future-dated marker, asserts duration clamps to 0 and stamps `clock_skew: true`.
+- **Updated cross-story test** — the old "second story's first mark closes the first story's open phase" semantic is gone. New test asserts each story's marker is independent (the correct semantic for parallel safety).
+- 31 / 31 log-timing tests pass; 683 / 683 fast suite passes.
+
+### Why this matters
+2.0.4 shipped two features in one commit: timing instrumentation that actually populates, and parallel dispatch that actually engages. The two collided because the timing API wasn't parallel-safe. 2.0.5 closes that gap so the headline 2.0.4 claim ("parallel dispatch should now engage automatically on Claude Code") works without silently corrupting the timing data the same release added.
+
 ## [2.0.4] - 2026-04-26
 
 **Timing instrumentation that actually populates + parallel dispatch that actually engages.** Closes the two M0 / PR 11 gaps surfaced by the post-2.0.0 review: phase timings were barely populated (LLM skipped start/end bracket calls in long sessions), and the parallel-dispatch wiring from PR 11 existed but was never invoked from `workflow.md` step 3 — even with width-2+ DAG layers, stories ran sequentially.
