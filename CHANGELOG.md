@@ -1,5 +1,30 @@
 # Changelog
 
+## [2.0.4] - 2026-04-26
+
+**Timing instrumentation that actually populates + parallel dispatch that actually engages.** Closes the two M0 / PR 11 gaps surfaced by the post-2.0.0 review: phase timings were barely populated (LLM skipped start/end bracket calls in long sessions), and the parallel-dispatch wiring from PR 11 existed but was never invoked from `workflow.md` step 3 — even with width-2+ DAG layers, stories ran sequentially.
+
+### Added
+- **`log-timing.js mark` action** — single-call replacement for start/end pairs. Reads a small marker file, computes the duration of the previous phase from its timestamp, emits a `duration` record, writes a new marker for the current phase. The LLM only needs to call `mark` once per phase transition; missed bracket calls become impossible because there are no brackets. The `_end` sentinel closes the last open phase without starting a new one (called from step 10 to capture the final skill's duration).
+- **Auto-emit timing from three deterministic scripts** — timing now accumulates without LLM cooperation on critical paths:
+  - `mark-done-stories-tasks.js` → phase `cleanup.mark-done-tasks`
+  - `infer-dependencies.js write` → phase `planning.infer-dependencies`
+  - `inject-tasks-section.js` → phase `story.inject-tasks` (per-story key derived from the story file name)
+- **DAG-aware dispatch gate at step 3 of `workflow.md`** — gated on `parallel_stories=true` AND `host_supports_parallel=true` AND `implementation_flow != quick` AND `next_skill ∈ {bmad-create-story, bmad-dev-story, bmad-quick-dev}`. When all gates pass:
+  1. `resolve-dag.js layers --epic <id>` → parse JSON layers.
+  2. Find the first layer containing any non-done story → `active_layer`.
+  3. If `active_layer.length >= 2`: run `dispatch-layer.js` to pre-create worktrees + write `.layer-plan.json`, spawn N concurrent Agent tool calls in a single message (one per story), and on return run `merge-shards.js --archive` to collapse per-story state shards.
+  4. `goto step=2` to re-evaluate the next layer.
+
+### Changed
+- `workflow.md` skill INVOKE call sites converted from start/INVOKE/end triplet to `mark`/INVOKE: `skill.{{next_skill}}` (line 782) and `skill.bmad-code-review.rereview` (line 1015). New `mark phase=_end` added after step 10 CRITICAL 7/7 to close the final skill duration.
+
+### Tests
+- 535 / 535 unit tests pass (was 529; +6 for the `mark` action covering first-mark, second-mark duration, `_end` sentinel, cross-story attribution, CLI envelope, and the no-op path when `phase_timings` is disabled).
+
+### Why this matters
+With the auto-inferred DAG from 2.0.2 producing width-2+ layers on most non-trivial sprints, parallel dispatch should now engage automatically on Claude Code without manual setup. The sudoku reference run that observed parallelism = 0 despite a 3-story-wide layer 1 was the smoking gun for both gaps.
+
 ## [2.0.3] - 2026-04-25
 
 **Full Windows / Linux / macOS compatibility.** Removes the last cross-platform foot-guns from the workflow and ships a `git-portable.js` helper that replaces POSIX-shell idioms previously inlined as workflow actions.
