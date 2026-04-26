@@ -377,28 +377,55 @@ describe('markPhase', () => {
     expect(() => readFileSync(barFile, 'utf8')).toThrow();
   });
 
-  it('parallel-marker race: concurrent same-process marks for different stories do not corrupt either', async () => {
+  it('parallel-marker race: two REAL OS processes marking different stories do not corrupt either', async () => {
     tmpRoot = seedProjectRoot({ phaseTimings: true });
-    // Open both stories. Then close them concurrently via Promise.all.
-    // With a single global marker (pre-2.0.5) one rename would clobber
-    // the other and one duration record would be lost. With per-story
-    // markers both records are emitted.
+    // Open both stories first via the in-process API so each has a marker.
     markPhase(tmpRoot, '1-1-foo', 'skill.bmad-dev-story');
     markPhase(tmpRoot, '1-2-bar', 'skill.bmad-dev-story');
-    await Promise.all([
-      Promise.resolve().then(() => markPhase(tmpRoot, '1-1-foo', 'skill.bmad-code-review')),
-      Promise.resolve().then(() => markPhase(tmpRoot, '1-2-bar', 'skill.bmad-code-review')),
+
+    // Now close them via TWO real child processes started in parallel.
+    // This is the only way to demonstrate race-resolution (Promise.all of
+    // synchronous markPhase calls just queues microtasks — Node serializes
+    // the sync work and there's no interleaving). Two OS processes contend
+    // for the shared timings dir; with per-story markers each owns its own
+    // file and neither clobbers the other.
+    const spawn = (story: string, phase: string) =>
+      new Promise<{ stdout: string; status: number }>((resolve, reject) => {
+        const p = spawnSync(process.execPath, [
+          SCRIPT,
+          'mark',
+          '--story',
+          story,
+          '--phase',
+          phase,
+          '--project-root',
+          tmpRoot,
+        ]);
+        if (p.error) reject(p.error);
+        else resolve({ stdout: p.stdout?.toString() ?? '', status: p.status ?? -1 });
+      });
+    // Start them as concurrently as Node's spawnSync allows — Promise.all
+    // resolves both child processes in parallel from Node's perspective.
+    const [foo, bar] = await Promise.all([
+      spawn('1-1-foo', 'skill.bmad-code-review'),
+      spawn('1-2-bar', 'skill.bmad-code-review'),
     ]);
+    expect(foo.status).toBe(0);
+    expect(bar.status).toBe(0);
+
     const fooLines = readFileSync(join(timingsDir(tmpRoot), '1-1-foo.jsonl'), 'utf8').trim().split('\n');
     const barLines = readFileSync(join(timingsDir(tmpRoot), '1-2-bar.jsonl'), 'utf8').trim().split('\n');
     expect(fooLines.length).toBe(1);
     expect(barLines.length).toBe(1);
-    const foo = JSON.parse(fooLines[0]);
-    const bar = JSON.parse(barLines[0]);
-    expect(foo.story).toBe('1-1-foo');
-    expect(foo.phase).toBe('skill.bmad-dev-story');
-    expect(bar.story).toBe('1-2-bar');
-    expect(bar.phase).toBe('skill.bmad-dev-story');
+    const fooEntry = JSON.parse(fooLines[0]);
+    const barEntry = JSON.parse(barLines[0]);
+    expect(fooEntry.story).toBe('1-1-foo');
+    expect(fooEntry.phase).toBe('skill.bmad-dev-story');
+    expect(barEntry.story).toBe('1-2-bar');
+    expect(barEntry.phase).toBe('skill.bmad-dev-story');
+    // Each story's marker was advanced to the new phase.
+    expect(readMarker(tmpRoot, '1-1-foo')?.phase).toBe('skill.bmad-code-review');
+    expect(readMarker(tmpRoot, '1-2-bar')?.phase).toBe('skill.bmad-code-review');
   });
 
   it('clamps negative durations on wall-clock backstep and stamps clock_skew=true', () => {
@@ -409,7 +436,7 @@ describe('markPhase', () => {
     const dir = timingsDir(tmpRoot);
     mkdirSync(dir, { recursive: true });
     writeFileSync(
-      join(dir, '.mark.sprint.json'),
+      markerPath(tmpRoot, 'sprint'),
       JSON.stringify({ story: 'sprint', phase: 'skill.bmad-help', ts: futureTs }),
     );
     const r = markPhase(tmpRoot, 'sprint', 'skill.bmad-create-story');
@@ -418,6 +445,69 @@ describe('markPhase', () => {
     const entry = JSON.parse(lines[0]);
     expect(entry.duration_ms).toBe(0);
     expect(entry.clock_skew).toBe(true);
+  });
+
+  it('clamps unrealistic positive durations (clock skip forward) and stamps clock_skew=true', () => {
+    tmpRoot = seedProjectRoot({ phaseTimings: true });
+    // Plant a marker with a timestamp 48h in the past — wall-clock skipped
+    // forward (container clock correction, NTP step). Pre-2.0.6 this would
+    // record a duration of ~48h as a real value; the upper bound now flags
+    // it as clock skew and clamps to 0.
+    const farPastTs = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
+    const dir = timingsDir(tmpRoot);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      markerPath(tmpRoot, 'sprint'),
+      JSON.stringify({ story: 'sprint', phase: 'skill.bmad-help', ts: farPastTs }),
+    );
+    const r = markPhase(tmpRoot, 'sprint', 'skill.bmad-create-story');
+    expect(r.duration_ms).toBe(0);
+    const entry = JSON.parse(readFileSync(join(dir, 'sprint.jsonl'), 'utf8').trim().split('\n')[0]);
+    expect(entry.duration_ms).toBe(0);
+    expect(entry.clock_skew).toBe(true);
+  });
+
+  it('readMarker rejects a marker with a path-traversing story field (defense-in-depth)', () => {
+    tmpRoot = seedProjectRoot({ phaseTimings: true });
+    const dir = timingsDir(tmpRoot);
+    mkdirSync(dir, { recursive: true });
+    // Hand-edit the marker file to carry a story that violates STORY_RE.
+    // This could happen via filesystem corruption or a malicious actor with
+    // local write access. readMarker must refuse, otherwise the next mark
+    // would appendLine() to a path outside .timings/.
+    writeFileSync(
+      markerPath(tmpRoot, 'sprint'),
+      JSON.stringify({
+        story: '../../etc/passwd-x',
+        phase: 'skill.bmad-help',
+        ts: new Date().toISOString(),
+      }),
+    );
+    const r = markPhase(tmpRoot, 'sprint', 'skill.bmad-create-story');
+    // The corrupt marker is treated as absent → first-mark semantics.
+    expect(r.duration_ms).toBeNull();
+    expect(r.prev_phase).toBeNull();
+    // No duration record was emitted (first-mark) — sprint.jsonl absent.
+    expect(() => readFileSync(join(dir, 'sprint.jsonl'), 'utf8')).toThrow();
+    // The new marker was written under the legitimate per-story path.
+    expect(readMarker(tmpRoot, 'sprint')?.phase).toBe('skill.bmad-create-story');
+  });
+
+  it('readMarker rejects a marker with a phase that violates PHASE_RE', () => {
+    tmpRoot = seedProjectRoot({ phaseTimings: true });
+    const dir = timingsDir(tmpRoot);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      markerPath(tmpRoot, 'sprint'),
+      JSON.stringify({
+        story: 'sprint',
+        phase: 'INVALID UPPERCASE',
+        ts: new Date().toISOString(),
+      }),
+    );
+    const r = markPhase(tmpRoot, 'sprint', 'skill.bmad-create-story');
+    expect(r.duration_ms).toBeNull();
+    expect(r.prev_phase).toBeNull();
   });
 
   it('CLI mark emits {marked, prev_phase, duration_ms} JSON to stdout', () => {

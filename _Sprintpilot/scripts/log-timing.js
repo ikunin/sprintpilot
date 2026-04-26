@@ -9,13 +9,16 @@
 //   start   Emit {event:"start", story, phase, ts:<iso8601>}
 //   end     Emit {event:"end",   story, phase, ts:<iso8601>}
 //   once    Emit a single-event marker (for things like health-check-run)
-//   mark    Single-call replacement for start/end pairs. Reads a tiny
-//           marker file (.timings/.mark.json), computes the duration
-//           since the previous mark, emits one duration record for the
-//           PREVIOUS phase, and writes a new marker for the current
-//           phase. Designed for LLM-driven workflows where the agent
-//           may forget to call `end` after a long skill — `mark` only
-//           needs to be called ONCE per phase transition.
+//   mark    Single-call replacement for start/end pairs. Reads a per-story
+//           marker file (.timings/.mark.<story>.json), computes the duration
+//           since the previous mark for the same story key, emits one
+//           duration record for the PREVIOUS phase, and writes a new
+//           marker for the current phase. Designed for LLM-driven
+//           workflows where the agent may forget to call `end` after a
+//           long skill — `mark` only needs to be called ONCE per phase
+//           transition. Per-story markers (added in 2.0.5) make
+//           concurrent sub-agents marking different stories race-free
+//           against the same project root.
 //
 // Output path:
 //   <project-root>/_bmad-output/implementation-artifacts/.timings/<story>.jsonl
@@ -43,14 +46,18 @@ const PHASE_RE = /^[a-z][a-z0-9-.]*$/;
 const META_MAX_BYTES = 2048;
 const LINE_MAX_BYTES = 4096; // POSIX PIPE_BUF floor — single write() is atomic
 const VALID_ACTIONS = ['start', 'end', 'once', 'mark'];
-// MARKER_FILE: per-story marker file template. The actual file is
-// `.mark.<story>.json` so concurrent writers for different stories never
-// race on the same path. Pre-2.0.5 used a single global `.mark.json`
-// which corrupted timing data when sub-agents in the same project root
-// marked phases concurrently (e.g. parallel story dispatch). Kept as
-// `.mark.json` only as a back-compat constant; runtime always uses the
-// per-story path via `markerPath(root, story)`.
-const MARKER_FILE = '.mark.json';
+// Marker filenames are `.mark.<story>.json` — built by `markerPath()`.
+// Pre-2.0.5 used a single global `.mark.json`, which corrupted timing
+// data under parallel dispatch (concurrent sub-agents racing on one
+// rename target). The constant is gone; runtime always uses per-story
+// paths.
+//
+// Sanity ceiling for a single duration record. A wall-clock skip
+// forward of more than this many ms is treated as clock skew rather
+// than a real duration — clamped to 0 with `clock_skew: true` stamped.
+// 24h chosen because no realistic skill phase is longer than that, and
+// it's well above any plausible CI timeout.
+const MAX_PLAUSIBLE_DURATION_MS = 24 * 60 * 60 * 1000;
 
 function help() {
   log.out(
@@ -215,21 +222,37 @@ function readMarker(projectRoot, story) {
     log.error(`timing marker read failed (${file}): ${e.message}`);
     return null;
   }
+  let parsed;
   try {
-    const parsed = JSON.parse(raw);
-    if (
-      parsed &&
-      typeof parsed === 'object' &&
-      typeof parsed.story === 'string' &&
-      typeof parsed.phase === 'string' &&
-      typeof parsed.ts === 'string'
-    ) {
-      return parsed;
-    }
+    parsed = JSON.parse(raw);
   } catch (e) {
     log.error(`timing marker corrupt (${file}): ${e.message} — treating as absent`);
+    return null;
   }
-  return null;
+  if (
+    !parsed ||
+    typeof parsed !== 'object' ||
+    typeof parsed.story !== 'string' ||
+    typeof parsed.phase !== 'string' ||
+    typeof parsed.ts !== 'string'
+  ) {
+    return null;
+  }
+  // Re-validate `story` and `phase` against their regexes. CLI input is
+  // already validated, but a corrupted/hand-edited marker could carry a
+  // path-traversing story (e.g. "../../etc") — `parsed.story` flows into
+  // `appendLine(projectRoot, prev.story, ...)` which path.joins to
+  // `<timingsDir>/<story>.jsonl`. Defense-in-depth: refuse any value that
+  // doesn't match STORY_RE / PHASE_RE.
+  if (!STORY_RE.test(parsed.story)) {
+    log.error(`timing marker (${file}) has invalid story '${parsed.story}'; treating as absent`);
+    return null;
+  }
+  if (parsed.phase !== '_end' && !PHASE_RE.test(parsed.phase)) {
+    log.error(`timing marker (${file}) has invalid phase '${parsed.phase}'; treating as absent`);
+    return null;
+  }
+  return parsed;
 }
 
 function writeMarker(projectRoot, story, marker) {
@@ -291,9 +314,10 @@ function clearMarker(projectRoot, story) {
  * duration record but the next mark will read the new marker (not the
  * stale prev) and won't double-count.
  *
- * Wall-clock skew: durations are clamped at 0 with a `clock_skew: true`
- * flag in the entry so aggregators don't get poisoned by NTP backsteps
- * or DST transitions.
+ * Wall-clock skew: durations are clamped to [0, MAX_PLAUSIBLE_DURATION_MS]
+ * with a `clock_skew: true` flag in the entry so aggregators don't get
+ * poisoned by NTP backsteps, DST transitions, or container clock skips
+ * forward of unrealistic magnitudes (e.g. "this skill ran for 7 hours").
  *
  * Returns { duration_ms, prev_phase } so callers can log/inspect.
  */
@@ -312,7 +336,8 @@ function markPhase(projectRoot, story, phase, meta) {
     const prevTs = Date.parse(prev.ts);
     if (!Number.isNaN(prevTs)) {
       const rawDelta = now.getTime() - prevTs;
-      durationMs = Math.max(0, rawDelta);
+      const clamped = rawDelta < 0 || rawDelta > MAX_PLAUSIBLE_DURATION_MS;
+      durationMs = clamped ? 0 : rawDelta;
       prevPhase = prev.phase;
       durationEntry = {
         event: 'duration',
@@ -322,7 +347,7 @@ function markPhase(projectRoot, story, phase, meta) {
         ended: now.toISOString(),
         duration_ms: durationMs,
       };
-      if (rawDelta < 0) durationEntry.clock_skew = true;
+      if (clamped) durationEntry.clock_skew = true;
       if (prev.meta !== undefined) durationEntry.meta = prev.meta;
     }
   }
@@ -402,7 +427,7 @@ module.exports = {
   PHASE_RE,
   META_MAX_BYTES,
   LINE_MAX_BYTES,
-  MARKER_FILE,
+  MAX_PLAUSIBLE_DURATION_MS,
   VALID_ACTIONS,
   validateStory,
   validatePhase,
