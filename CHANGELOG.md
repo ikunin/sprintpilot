@@ -1,5 +1,20 @@
 # Changelog
 
+## [2.0.6] - 2026-04-26
+
+**Round-2 review polish.** A second multi-agent review of the v2.0.5 fix surfaced five low-to-medium items, all addressed here. The biggest find: the v2.0.5 "concurrent same-process" test wrapped synchronous `markPhase` calls in `Promise.resolve().then()` — Node serializes that, so the test would have passed even with the v2.0.4 single-marker bug. Replaced with a real two-OS-process race via `spawnSync`.
+
+### Fixed
+- **Real concurrency test** — the regression test for the parallel-dispatch race now spawns TWO real Node child processes (`spawnSync` + `Promise.all`) marking different stories against the same project root. Two OS processes contending on the shared `.timings/` dir actually demonstrate per-story file isolation; the old `Promise.resolve().then(...)` wrapper proved nothing about race-resolution.
+- **`readMarker` validates `story` and `phase` fields** against `STORY_RE` / `PHASE_RE` before returning. CLI input was already validated, but a corrupted or hand-edited marker file carrying `story: "../../etc"` would have flowed into `appendLine(projectRoot, prev.story, ...)` and `path.join`-ed outside the timings dir. Defense-in-depth — the on-disk format is now treated as untrusted.
+- **Upper-bound clock-skew clamp** — durations greater than `MAX_PLAUSIBLE_DURATION_MS` (24h) are clamped to 0 with `clock_skew: true` stamped, same as the negative-delta case. Pre-2.0.6 a wall-clock skip forward (container clock correction, NTP step, manual change) recorded a real-but-bogus huge duration that polluted p95/max metrics.
+- **Stale top-of-file docstring** — `log-timing.js:13` still described the marker as `.timings/.mark.json`. Now correctly says `.timings/.mark.<story>.json`.
+- **Dead `MARKER_FILE` constant removed** — the v2.0.5 back-compat constant `'.mark.json'` had no callers but was still exported, misleading anyone reading the module surface. Replaced with `MAX_PLAUSIBLE_DURATION_MS` (the new clock-skew bound) in the export.
+
+### Tests
+- **+3 new test cases** for the items above: the real two-process concurrency race; an upper-bound clock-skew test that plants a 48h-past marker; two path-traversal-via-marker rejection tests (one for invalid `story`, one for invalid `phase`). 34/34 log-timing pass.
+- **686/686 fast suite passes** (was 683).
+
 ## [2.0.5] - 2026-04-26
 
 **Per-story timing markers — fixes the parallel-dispatch race in 2.0.4.** A multi-agent code review of 2.0.4 found that the `mark` API used a single global marker file (`.timings/.mark.json`) shared across all stories. Under parallel dispatch — exactly the use case 2.0.4 was meant to enable — N concurrent sub-agents marking different stories against the same project root would race on that one file: one rename clobbered the other and durations were attributed to the wrong (story, phase). Plus `mark --story sprint --phase _end` ignored `--story` and cleared whichever marker was last written, even if it belonged to a different story.
