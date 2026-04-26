@@ -63,8 +63,16 @@ describe('parseEpicFromKey', () => {
   it('extracts the leading numeric segment', () => {
     expect(parseEpicFromKey('1-2-foo')).toBe('1');
     expect(parseEpicFromKey('10-3-foo')).toBe('10');
-    expect(parseEpicFromKey('non-numeric')).toBeNull();
     expect(parseEpicFromKey('')).toBeNull();
+  });
+
+  it('accepts non-numeric leading segments (alpha epic IDs)', () => {
+    // Pre-2.0.8 returned null for any non-numeric prefix, silently
+    // dropping stories like `auth-1-login` from `--epic` filtering and
+    // letting infer-dependencies' cross-epic edge guards bypass.
+    expect(parseEpicFromKey('auth-1-login')).toBe('auth');
+    expect(parseEpicFromKey('infra-bootstrap')).toBe('infra');
+    expect(parseEpicFromKey('non-numeric')).toBe('non');
   });
 });
 
@@ -158,14 +166,22 @@ describe('edgesFromOrdering', () => {
 });
 
 describe('applyForceIndependent', () => {
-  it('removes inbound and outbound edges for listed keys', () => {
+  it('removes ONLY inbound edges for listed keys (not outbound)', () => {
+    // The contract: `force_independent: [b]` means "let b run any time,
+    // regardless of its declared deps". Stories that depend on b must
+    // STILL wait for b. Pre-2.0.8 this stripped both directions, so c
+    // (depends_on: [b]) became a free root and dispatched in parallel
+    // with b — a silent merge-conflict scenario.
     const edges: Array<[string, string]> = [
-      ['a', 'b'],
-      ['b', 'c'],
-      ['c', 'd'],
+      ['a', 'b'], // inbound to b — drop
+      ['b', 'c'], // outbound from b — keep (c still depends on b)
+      ['c', 'd'], // unrelated — keep
     ];
     const filtered = applyForceIndependent(edges, { overrides: [{ force_independent: ['b'] }] });
-    expect(filtered).toEqual([['c', 'd']]);
+    expect(filtered).toEqual([
+      ['b', 'c'],
+      ['c', 'd'],
+    ]);
   });
   it('no-ops when no overrides are declared', () => {
     const edges: Array<[string, string]> = [['a', 'b']];
@@ -200,16 +216,18 @@ describe('topoLayers', () => {
 });
 
 describe('buildEdges', () => {
-  it('explicit > ordering: explicit wins, force_independent trims ordering too', () => {
+  it('explicit > ordering: explicit wins; force_independent strips inbound edges only', () => {
     const nodes = ['a', 'b', 'c', 'd'];
     const doc = { overrides: [{ force_independent: ['b', 'c'] }] };
-    // ordering alone would be a→b→c→d; explicit contributes nothing;
-    // force_independent strips edges touching b + c, leaving c→d... wait, c
-    // is in the independent set, so edge c→d drops. Only d remains linked
-    // to nothing.
+    // ordering alone produces a→b→c→d. force_independent: [b, c] drops
+    // INBOUND edges to b and c — i.e. a→b and b→c. The c→d edge stays
+    // because it's outbound from c (stories that depend on c must still
+    // wait for c). Pre-2.0.8 stripped both directions.
     const edges = buildEdges(['explicit', 'ordering'], nodes, doc);
-    expect(edges.filter(([a, b]) => a === 'b' || b === 'b').length).toBe(0);
-    expect(edges.filter(([a, b]) => a === 'c' || b === 'c').length).toBe(0);
+    // Inbound edges to b and c are gone:
+    expect(edges.filter(([, b]) => b === 'b' || b === 'c').length).toBe(0);
+    // Outbound c→d survives:
+    expect(edges).toContainEqual(['c', 'd']);
   });
 });
 
@@ -240,6 +258,75 @@ describe('buildDag — full pipeline', () => {
     );
     const dag = buildDag({ projectRoot: tmpRoot, epic: '2', strategies: ['explicit', 'ordering'] });
     expect(dag.nodes).toEqual(['2-1-b', '2-2-c']);
+  });
+
+  it('epic filter works with non-numeric (alpha) epic IDs', () => {
+    // Pre-2.0.8: parseEpicFromKey returned null for non-numeric prefixes,
+    // so --epic auth would silently match nothing. Now alpha epic IDs
+    // work end-to-end.
+    seed(
+      tmpRoot,
+      'development_status:\n  auth-1-login: ready-for-dev\n  auth-2-logout: backlog\n  infra-1-bootstrap: backlog\n',
+    );
+    const dag = buildDag({ projectRoot: tmpRoot, epic: 'auth', strategies: ['explicit', 'ordering'] });
+    expect(dag.nodes).toEqual(['auth-1-login', 'auth-2-logout']);
+  });
+
+  it('reads stories from a sprint-status file with 4-space indentation', () => {
+    // Pre-2.0.8: a 4-space-indented file silently produced zero stories
+    // because the regex hardcoded a 2-space match. Now the first key's
+    // indent is auto-detected per block.
+    seed(
+      tmpRoot,
+      'development_status:\n    1-1-a: ready-for-dev\n    1-2-b: backlog\n',
+    );
+    const dag = buildDag({ projectRoot: tmpRoot, epic: '1', strategies: ['explicit', 'ordering'] });
+    expect(dag.nodes).toEqual(['1-1-a', '1-2-b']);
+  });
+
+  it('reads stories from a tab-indented sprint-status file', () => {
+    seed(
+      tmpRoot,
+      'development_status:\n\t1-1-a: ready-for-dev\n\t1-2-b: backlog\n',
+    );
+    const dag = buildDag({ projectRoot: tmpRoot, epic: '1', strategies: ['explicit', 'ordering'] });
+    expect(dag.nodes).toEqual(['1-1-a', '1-2-b']);
+  });
+
+  it('still excludes nested per-story fields at deeper indents', () => {
+    // Block-form sprint-status: nested fields should NOT be picked up
+    // as story keys.
+    seed(
+      tmpRoot,
+      [
+        'development_status:',
+        '  1-1-a:',
+        '    status: ready-for-dev',
+        '    pr_url: https://example.com/pr/1',
+        '  1-2-b:',
+        '    status: backlog',
+        '',
+      ].join('\n'),
+    );
+    const dag = buildDag({ projectRoot: tmpRoot, epic: '1', strategies: ['explicit', 'ordering'] });
+    expect(dag.nodes).toEqual(['1-1-a', '1-2-b']);
+  });
+
+  it('force_sequential dedupes a key listed multiple times (does not produce a self-cycle)', () => {
+    // Pre-2.0.8: `force_sequential: ['a', 'b', 'a']` produced edges
+    // `a→b, b→a` — instant cycle. Kahn's later rejected it with an
+    // opaque "cycle detected" error. Now duplicates are filtered with a
+    // warning so the user sees a clear message.
+    seed(
+      tmpRoot,
+      'development_status:\n  1-1-a: backlog\n  1-2-b: backlog\n',
+      'version: 1\noverrides:\n  - epic: 1\n    force_sequential:\n      - 1-1-a\n      - 1-2-b\n      - 1-1-a\n',
+    );
+    const dag = buildDag({ projectRoot: tmpRoot, epic: '1', strategies: ['explicit', 'ordering'] });
+    // No cycle — the dedupe drops the second 1-1-a, leaving edges
+    // a→b only. Layers: [[a], [b]].
+    expect(dag.cycle).toEqual([]);
+    expect(dag.layers).toEqual([['1-1-a'], ['1-2-b']]);
   });
 });
 

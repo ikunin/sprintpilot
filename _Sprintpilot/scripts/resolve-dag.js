@@ -64,7 +64,18 @@ function dependenciesPath(projectRoot) {
 }
 
 function parseEpicFromKey(storyKey) {
-  const m = String(storyKey).match(/^(\d+)(?:-|$)/);
+  // Epic id = first hyphen-delimited segment of the story key. BMad's
+  // canonical convention is `<epic-num>-<story-num>-<slug>` (e.g.
+  // `1-2-user-auth` → epic "1"), but nothing prevents a project from
+  // using non-numeric epic identifiers (`auth-1-login`, `infra-bootstrap`).
+  // Pre-2.0.8 this function rejected any non-numeric prefix and returned
+  // null, which silently dropped stories from `--epic` filtering AND let
+  // `infer-dependencies.js` cross-epic edge guards bypass for keys with
+  // no numeric prefix. We now accept any non-empty alphanumeric leading
+  // segment.
+  const s = String(storyKey);
+  if (!s) return null;
+  const m = s.match(/^([A-Za-z0-9]+)(?:-|$)/);
   return m ? m[1] : null;
 }
 
@@ -72,27 +83,42 @@ function readStoriesFromStatus(projectRoot, epicFilter) {
   const file = sprintStatusPath(projectRoot);
   if (!fs.existsSync(file)) return { ordered: [], byKey: {} };
   const raw = fs.readFileSync(file, 'utf8');
-  // Pull out story keys by scanning for two-space-indented `<key>:` lines
-  // under `development_status:` (BMad's canonical shape) and under `stories:`
+  // Pull out story keys by scanning indented `<key>:` lines under
+  // `development_status:` (BMad's canonical shape) and under `stories:`
   // (alternate shape some projects use). We intentionally don't parse the
   // whole YAML — sprint-status is BMad-owned and its schema varies.
+  //
+  // Pre-2.0.8 this hardcoded a 2-space indent. A 4-space or tab-indented
+  // file silently produced zero stories → empty layer → dispatch never
+  // engaged, no warning. Now we detect the FIRST key's indent inside
+  // each stories block and accept only that level (so nested per-story
+  // fields at deeper indents are still correctly excluded).
   const ordered = [];
   const byKey = {};
   const lines = raw.split(/\r?\n/);
   let inStoriesBlock = false;
+  let storyIndent = null;
   for (const rawLine of lines) {
     const trimmed = rawLine.trimEnd();
     if (/^(development_status|stories):\s*$/.test(trimmed)) {
       inStoriesBlock = true;
+      storyIndent = null; // re-detect for each block
       continue;
     }
     // Bail out of the stories block on a top-level key.
-    if (inStoriesBlock && /^\S/.test(trimmed)) inStoriesBlock = false;
+    if (inStoriesBlock && /^\S/.test(trimmed)) {
+      inStoriesBlock = false;
+      storyIndent = null;
+    }
     if (!inStoriesBlock) continue;
-    const m = trimmed.match(/^  ([A-Za-z0-9][A-Za-z0-9-]*):\s*(\S+)?/);
+    const m = trimmed.match(/^([\t ]+)([A-Za-z0-9][A-Za-z0-9-]*):\s*(\S+)?/);
     if (!m) continue;
-    const key = m[1];
-    const status = m[2] ? m[2].replace(/^["']|["']$/g, '') : null;
+    const indent = m[1];
+    const key = m[2];
+    const statusRaw = m[3];
+    if (storyIndent === null) storyIndent = indent;
+    else if (indent !== storyIndent) continue; // nested field at deeper indent
+    const status = statusRaw ? statusRaw.replace(/^["']|["']$/g, '') : null;
     if (epicFilter !== null && parseEpicFromKey(key) !== epicFilter) continue;
     if (!(key in byKey)) {
       ordered.push(key);
@@ -317,7 +343,21 @@ function edgesFromExplicit(depsDoc, nodes) {
     for (const ov of depsDoc.overrides) {
       if (!ov) continue;
       if (Array.isArray(ov.force_sequential)) {
-        const seq = ov.force_sequential.filter((k) => nodeSet.has(k));
+        // Filter to known nodes AND dedupe — a duplicate listing like
+        // `[a, b, a]` would otherwise produce edges `a→b, b→a` (instant
+        // self-cycle) that Kahn's would later reject with an opaque
+        // "cycle detected" error. Reject the typo at the source instead.
+        const seen = new Set();
+        const seq = [];
+        for (const k of ov.force_sequential) {
+          if (!nodeSet.has(k)) continue;
+          if (seen.has(k)) {
+            log.warn(`force_sequential lists '${k}' more than once; ignoring duplicate`);
+            continue;
+          }
+          seen.add(k);
+          seq.push(k);
+        }
         for (let i = 1; i < seq.length; i++) out.push([seq[i - 1], seq[i]]);
       }
     }
@@ -340,7 +380,13 @@ function applyForceIndependent(edges, depsDoc) {
     }
   }
   if (indep.size === 0) return edges;
-  return edges.filter(([a, b]) => !(indep.has(a) || indep.has(b)));
+  // Drop INBOUND edges only — `force_independent: [b]` means "let b run
+  // any time, regardless of its declared deps", not "let everything that
+  // depends on b also run any time". Pre-2.0.8 this stripped both
+  // directions, so a story c with `depends_on: [b]` would lose its edge
+  // and become a free root, then dispatch in the same layer as b — the
+  // exact merge-conflict scenario the override was supposed to control.
+  return edges.filter(([_a, b]) => !indep.has(b));
 }
 
 function buildEdges(strategies, nodes, depsDoc) {
