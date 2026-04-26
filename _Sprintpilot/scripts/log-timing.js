@@ -43,6 +43,13 @@ const PHASE_RE = /^[a-z][a-z0-9-.]*$/;
 const META_MAX_BYTES = 2048;
 const LINE_MAX_BYTES = 4096; // POSIX PIPE_BUF floor — single write() is atomic
 const VALID_ACTIONS = ['start', 'end', 'once', 'mark'];
+// MARKER_FILE: per-story marker file template. The actual file is
+// `.mark.<story>.json` so concurrent writers for different stories never
+// race on the same path. Pre-2.0.5 used a single global `.mark.json`
+// which corrupted timing data when sub-agents in the same project root
+// marked phases concurrently (e.g. parallel story dispatch). Kept as
+// `.mark.json` only as a back-compat constant; runtime always uses the
+// per-story path via `markerPath(root, story)`.
 const MARKER_FILE = '.mark.json';
 
 function help() {
@@ -191,15 +198,24 @@ function buildEntry(action, story, phase, meta) {
 // `mark` — single-call timing
 // ---------------------------------------------------------------
 
-function markerPath(projectRoot) {
-  return path.join(timingsDir(projectRoot), MARKER_FILE);
+function markerPath(projectRoot, story) {
+  if (!story) throw new Error('markerPath requires a story key');
+  return path.join(timingsDir(projectRoot), `.mark.${story}.json`);
 }
 
-function readMarker(projectRoot) {
-  const file = markerPath(projectRoot);
-  if (!fs.existsSync(file)) return null;
+function readMarker(projectRoot, story) {
+  const file = markerPath(projectRoot, story);
+  let raw;
   try {
-    const raw = fs.readFileSync(file, 'utf8');
+    raw = fs.readFileSync(file, 'utf8');
+  } catch (e) {
+    if (e.code === 'ENOENT') return null;
+    // EACCES / EISDIR / other I/O — surface to stderr so silent corruption
+    // doesn't masquerade as "first mark of session".
+    log.error(`timing marker read failed (${file}): ${e.message}`);
+    return null;
+  }
+  try {
     const parsed = JSON.parse(raw);
     if (
       parsed &&
@@ -210,24 +226,37 @@ function readMarker(projectRoot) {
     ) {
       return parsed;
     }
-  } catch {
-    /* corrupt marker — treat as absent */
+  } catch (e) {
+    log.error(`timing marker corrupt (${file}): ${e.message} — treating as absent`);
   }
   return null;
 }
 
-function writeMarker(projectRoot, marker) {
+function writeMarker(projectRoot, story, marker) {
   const dir = timingsDir(projectRoot);
   fs.mkdirSync(dir, { recursive: true });
-  const file = markerPath(projectRoot);
+  const file = markerPath(projectRoot, story);
   // Atomic-ish: write tmp + rename. Marker is small, single-line JSON.
-  const tmp = `${file}.tmp.${process.pid}`;
-  fs.writeFileSync(tmp, JSON.stringify(marker));
-  fs.renameSync(tmp, file);
+  // Tmp filename includes story + pid + random suffix to avoid collisions
+  // between concurrent same-process writers (rare in normal use, common in
+  // parallel test runs) and PID-reuse.
+  const tmp = `${file}.tmp.${process.pid}.${Math.random().toString(36).slice(2, 10)}`;
+  try {
+    fs.writeFileSync(tmp, JSON.stringify(marker));
+    fs.renameSync(tmp, file);
+  } catch (e) {
+    // Clean up tmp on rename failure so we don't leak orphan files.
+    try {
+      fs.unlinkSync(tmp);
+    } catch {
+      /* ignore — tmp may not exist */
+    }
+    throw e;
+  }
 }
 
-function clearMarker(projectRoot) {
-  const file = markerPath(projectRoot);
+function clearMarker(projectRoot, story) {
+  const file = markerPath(projectRoot, story);
   try {
     fs.unlinkSync(file);
   } catch {
@@ -238,27 +267,54 @@ function clearMarker(projectRoot) {
 /**
  * mark: single-call timing API.
  *
- * Emits a duration record for the PREVIOUS phase (if any) covering the
- * interval since the previous mark, then writes a new marker for the
- * current phase. The very first mark in a session emits no duration
- * record — there's no "previous phase" yet.
+ * Emits a duration record for THIS story's PREVIOUS phase (if any),
+ * covering the interval since the previous mark for the same story key,
+ * then writes a new marker for the current phase. The very first mark
+ * for a given story emits no duration record — there's no "previous
+ * phase" yet for that story.
  *
- * Use phase = "_end" to close the last open phase without starting a new
- * one (e.g. at sprint-complete time).
+ * Pre-2.0.5 used a single global marker file shared across stories,
+ * which under parallel dispatch (sub-agents marking different stories
+ * concurrently against the same project root) raced on a single file —
+ * one rename clobbered the other and durations were attributed to the
+ * wrong (story, phase). Per-story markers eliminate the race entirely:
+ * each story has its own marker file `.mark.<story>.json`.
+ *
+ * Use phase = "_end" to close THIS story's last open phase without
+ * starting a new one (e.g. at sprint-complete time, or per-story
+ * cleanup). `_end` only touches the marker for the named story; other
+ * stories' markers are untouched.
+ *
+ * Order of operations is interrupt-safe: the new marker is written
+ * BEFORE the duration record is appended. If the process is killed
+ * between the marker rename and the duration append, we lose one
+ * duration record but the next mark will read the new marker (not the
+ * stale prev) and won't double-count.
+ *
+ * Wall-clock skew: durations are clamped at 0 with a `clock_skew: true`
+ * flag in the entry so aggregators don't get poisoned by NTP backsteps
+ * or DST transitions.
  *
  * Returns { duration_ms, prev_phase } so callers can log/inspect.
  */
 function markPhase(projectRoot, story, phase, meta) {
   const now = new Date();
-  const prev = readMarker(projectRoot);
+  const prev = readMarker(projectRoot, story);
+
+  // Build the duration entry from prev (if any) before mutating marker
+  // state. We append AFTER writing the new marker, so an interrupt
+  // between the two yields one missed record (acceptable) rather than a
+  // stale marker that would double-count on the next call.
+  let durationEntry = null;
   let durationMs = null;
   let prevPhase = null;
   if (prev) {
     const prevTs = Date.parse(prev.ts);
     if (!Number.isNaN(prevTs)) {
-      durationMs = now.getTime() - prevTs;
+      const rawDelta = now.getTime() - prevTs;
+      durationMs = Math.max(0, rawDelta);
       prevPhase = prev.phase;
-      const durationEntry = {
+      durationEntry = {
         event: 'duration',
         story: prev.story,
         phase: prev.phase,
@@ -266,17 +322,26 @@ function markPhase(projectRoot, story, phase, meta) {
         ended: now.toISOString(),
         duration_ms: durationMs,
       };
+      if (rawDelta < 0) durationEntry.clock_skew = true;
       if (prev.meta !== undefined) durationEntry.meta = prev.meta;
-      appendLine(projectRoot, prev.story, durationEntry);
     }
   }
+
+  // 1. Commit the marker state transition first.
   if (phase === '_end') {
-    clearMarker(projectRoot);
+    clearMarker(projectRoot, story);
   } else {
     const marker = { story, phase, ts: now.toISOString() };
     if (meta !== undefined) marker.meta = meta;
-    writeMarker(projectRoot, marker);
+    writeMarker(projectRoot, story, marker);
   }
+
+  // 2. Append the duration record after the marker is committed. If
+  //    this throws, the marker is already correct for the next mark.
+  if (durationEntry !== null) {
+    appendLine(projectRoot, prev.story, durationEntry);
+  }
+
   return { duration_ms: durationMs, prev_phase: prevPhase };
 }
 

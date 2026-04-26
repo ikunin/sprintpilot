@@ -205,9 +205,9 @@ GitHub and GitLab require their CLIs (`gh`, `glab`). No API fallback is availabl
 | `ma.experimental_parallel_on_gemini` | `false` | Opt-in parallel dispatch under Gemini CLI. Worktree-scoped subagents are still upstream (`gemini-cli#22967`) — at-your-own-risk. |
 | `ma.parallel_epics` | `false` | EXPERIMENTAL — cross-epic parallelism with merge-conflict preflight. Off on every profile by default. |
 | `ma.min_epic_duration_for_parallel_sec` | `300` | Don't bother spinning up parallel infrastructure if the epic is shorter than this. |
-| `ma.baseline_story_duration_sec` | `600` | Used to estimate epic duration for the gate above. |
+| `ma.baseline_story_duration_sec` | `180` | Used to estimate epic duration for the gate above. |
 | `ma.max_consecutive_conflicts` | `2` | After this many consecutive merge conflicts mid-session, parallel dispatch flips a session-scoped disable flag. |
-| `ma.effective_parallel_floor` | `2` | Don't engage parallel dispatch unless at least this many stories run in parallel. |
+| `ma.effective_parallel_floor` | `1` | Don't engage parallel dispatch unless at least this many stories run in parallel. The workflow.md gate independently short-circuits on `active_layer.length < 2`, so this floor is a defensive backstop. |
 
 ## Secrets Allowlist (`.secrets-allowlist`)
 

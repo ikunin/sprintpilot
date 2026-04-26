@@ -639,7 +639,7 @@ Parse stdout as a single JSON object: `{"remaining":[...],"state":"..."}`.
     - Skill flow (full):  bmad-create-story → bmad-check-implementation-readiness → bmad-dev-story → bmad-code-review → apply patch findings → re-run tests → set status=done in {status_file}
     - Skill flow (quick): bmad-quick-dev (single skill; nano profile)
     Use {{implementation_flow}} = `{{implementation_flow}}` to pick which flow.
-    Track timing via `node {{project_root}}/_Sprintpilot/scripts/log-timing.js mark --story K --phase <phase>` after each skill returns.
+    Track timing via `node {{project_root}}/_Sprintpilot/scripts/log-timing.js mark --story K --phase <phase> --project-root {{project_root}}` after each skill returns. The explicit `--project-root` is REQUIRED — without it the script falls back to cwd (the worktree), which orphans timing data. With per-story markers (2.0.5+) concurrent sub-agents writing to the same project root no longer race.
     Return a one-line JSON summary on completion: {"story":"K", "status":"done"|"failed", "tests":"<N/M>", "notes":"<short>"}
     ```
 

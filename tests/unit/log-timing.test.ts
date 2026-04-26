@@ -52,9 +52,9 @@ const {
     phase: string,
     meta?: unknown,
   ) => { duration_ms: number | null; prev_phase: string | null };
-  readMarker: (root: string) => { story: string; phase: string; ts: string } | null;
-  markerPath: (root: string) => string;
-  clearMarker: (root: string) => void;
+  readMarker: (root: string, story: string) => { story: string; phase: string; ts: string } | null;
+  markerPath: (root: string, story: string) => string;
+  clearMarker: (root: string, story: string) => void;
 };
 
 const REPO_ROOT = join(__dirname, '..', '..');
@@ -310,8 +310,8 @@ describe('markPhase', () => {
     const r = markPhase(tmpRoot, 'sprint', 'skill.bmad-help');
     expect(r.duration_ms).toBeNull();
     expect(r.prev_phase).toBeNull();
-    // Marker file written.
-    const marker = readMarker(tmpRoot);
+    // Per-story marker written.
+    const marker = readMarker(tmpRoot, 'sprint');
     expect(marker?.phase).toBe('skill.bmad-help');
     expect(marker?.story).toBe('sprint');
     // No duration line in any per-story shard yet.
@@ -335,32 +335,89 @@ describe('markPhase', () => {
     expect(obj.phase).toBe('skill.bmad-help');
     expect(obj.duration_ms).toBeGreaterThanOrEqual(10);
     // Marker now holds the new phase.
-    expect(readMarker(tmpRoot)?.phase).toBe('skill.bmad-create-story');
+    expect(readMarker(tmpRoot, 'sprint')?.phase).toBe('skill.bmad-create-story');
   });
 
-  it('mark with phase="_end" closes the last phase without starting a new one', async () => {
+  it('mark with phase="_end" closes THIS story\'s last phase only', async () => {
     tmpRoot = seedProjectRoot({ phaseTimings: true });
     markPhase(tmpRoot, 'sprint', 'skill.bmad-help');
+    markPhase(tmpRoot, '1-1-foo', 'skill.bmad-dev-story');
     await new Promise((r) => setTimeout(r, 5));
     markPhase(tmpRoot, 'sprint', '_end' as unknown as string);
-    expect(readMarker(tmpRoot)).toBeNull();
+    // sprint marker is gone, but 1-1-foo's marker is untouched.
+    expect(readMarker(tmpRoot, 'sprint')).toBeNull();
+    expect(readMarker(tmpRoot, '1-1-foo')?.phase).toBe('skill.bmad-dev-story');
     const file = join(timingsDir(tmpRoot), 'sprint.jsonl');
     const lines = readFileSync(file, 'utf8').trim().split('\n');
     expect(lines.length).toBe(1);
     expect(JSON.parse(lines[0]).phase).toBe('skill.bmad-help');
   });
 
-  it('handles cross-story marks (each duration attributes to the previous story)', async () => {
+  it('per-story markers are independent — different stories do not collide', async () => {
     tmpRoot = seedProjectRoot({ phaseTimings: true });
-    markPhase(tmpRoot, '1-1-foo', 'skill.bmad-dev-story');
+    // Two stories interleave their marks against the same project root.
+    // Pre-2.0.5 a single global marker would have made the second story's
+    // first mark close the FIRST story's phase. With per-story markers
+    // each story chains independently.
+    markPhase(tmpRoot, '1-1-foo', 'skill.bmad-create-story');
     await new Promise((r) => setTimeout(r, 5));
+    markPhase(tmpRoot, '1-2-bar', 'skill.bmad-create-story');
+    await new Promise((r) => setTimeout(r, 5));
+    markPhase(tmpRoot, '1-1-foo', 'skill.bmad-dev-story');
+    // 1-1-foo's duration record exists and attributes to 1-1-foo's
+    // skill.bmad-create-story (not 1-2-bar).
+    const fooFile = join(timingsDir(tmpRoot), '1-1-foo.jsonl');
+    const fooObj = JSON.parse(readFileSync(fooFile, 'utf8').trim());
+    expect(fooObj.story).toBe('1-1-foo');
+    expect(fooObj.phase).toBe('skill.bmad-create-story');
+    // 1-2-bar's marker is still open at skill.bmad-create-story (no end yet).
+    expect(readMarker(tmpRoot, '1-2-bar')?.phase).toBe('skill.bmad-create-story');
+    // 1-2-bar's shard has no duration record yet.
+    const barFile = join(timingsDir(tmpRoot), '1-2-bar.jsonl');
+    expect(() => readFileSync(barFile, 'utf8')).toThrow();
+  });
+
+  it('parallel-marker race: concurrent same-process marks for different stories do not corrupt either', async () => {
+    tmpRoot = seedProjectRoot({ phaseTimings: true });
+    // Open both stories. Then close them concurrently via Promise.all.
+    // With a single global marker (pre-2.0.5) one rename would clobber
+    // the other and one duration record would be lost. With per-story
+    // markers both records are emitted.
+    markPhase(tmpRoot, '1-1-foo', 'skill.bmad-dev-story');
     markPhase(tmpRoot, '1-2-bar', 'skill.bmad-dev-story');
-    // The duration record for skill.bmad-dev-story attributes to 1-1-foo
-    // (the previous mark's story), not the new one.
-    const file = join(timingsDir(tmpRoot), '1-1-foo.jsonl');
-    const obj = JSON.parse(readFileSync(file, 'utf8').trim());
-    expect(obj.story).toBe('1-1-foo');
-    expect(obj.phase).toBe('skill.bmad-dev-story');
+    await Promise.all([
+      Promise.resolve().then(() => markPhase(tmpRoot, '1-1-foo', 'skill.bmad-code-review')),
+      Promise.resolve().then(() => markPhase(tmpRoot, '1-2-bar', 'skill.bmad-code-review')),
+    ]);
+    const fooLines = readFileSync(join(timingsDir(tmpRoot), '1-1-foo.jsonl'), 'utf8').trim().split('\n');
+    const barLines = readFileSync(join(timingsDir(tmpRoot), '1-2-bar.jsonl'), 'utf8').trim().split('\n');
+    expect(fooLines.length).toBe(1);
+    expect(barLines.length).toBe(1);
+    const foo = JSON.parse(fooLines[0]);
+    const bar = JSON.parse(barLines[0]);
+    expect(foo.story).toBe('1-1-foo');
+    expect(foo.phase).toBe('skill.bmad-dev-story');
+    expect(bar.story).toBe('1-2-bar');
+    expect(bar.phase).toBe('skill.bmad-dev-story');
+  });
+
+  it('clamps negative durations on wall-clock backstep and stamps clock_skew=true', () => {
+    tmpRoot = seedProjectRoot({ phaseTimings: true });
+    // Manually plant a marker with a future timestamp to simulate clock
+    // backstep between marks (NTP correction, DST, manual clock change).
+    const futureTs = new Date(Date.now() + 60_000).toISOString();
+    const dir = timingsDir(tmpRoot);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, '.mark.sprint.json'),
+      JSON.stringify({ story: 'sprint', phase: 'skill.bmad-help', ts: futureTs }),
+    );
+    const r = markPhase(tmpRoot, 'sprint', 'skill.bmad-create-story');
+    expect(r.duration_ms).toBe(0);
+    const lines = readFileSync(join(dir, 'sprint.jsonl'), 'utf8').trim().split('\n');
+    const entry = JSON.parse(lines[0]);
+    expect(entry.duration_ms).toBe(0);
+    expect(entry.clock_skew).toBe(true);
   });
 
   it('CLI mark emits {marked, prev_phase, duration_ms} JSON to stdout', () => {
@@ -406,6 +463,6 @@ describe('markPhase', () => {
       tmpRoot,
     ]).toString();
     expect(out).toBe(''); // nothing emitted
-    expect(readMarker(tmpRoot)).toBeNull();
+    expect(readMarker(tmpRoot, 'sprint')).toBeNull();
   });
 });
