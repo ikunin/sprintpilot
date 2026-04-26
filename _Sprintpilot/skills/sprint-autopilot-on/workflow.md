@@ -84,6 +84,15 @@ Many BMAD skills present interactive menus or ask for confirmation. In autopilot
 
 For everything else: decide, document briefly, continue.
 
+### Conventions referenced throughout this file (hoisted to avoid per-site repetition)
+
+- **`log-timing.js` is fire-and-forget**: every `node …/log-timing.js …` invocation must never halt the autopilot on failure (treat exit codes as advisory).
+- **`resolve-profile.js get` falls back to documented default**: every `resolve-profile.js get <key>` call falls back to the documented default on non-zero exit; never halt.
+- **SYNC_STATUS_RULE**: `sync-status.js` does full block replacement. When updating an existing story entry in `{git_status_file}`, re-read its existing fields and pass ALL of them alongside the new values (branch, commit, patch_commits, push_status, pr_url, lint_result, worktree, platform, base_branch, worktree_cleaned). For a brand-new entry, pass at minimum `--branch` and the targeted status field.
+- **`{{has_origin}}` is false**: when this flag is false, skip every `git fetch origin` and `git push origin` call below; substitute `origin/{{base_branch}}` → `{{base_branch}}` for read operations. Do NOT repeat this qualifier per site.
+- **FINALIZE_HANDOFF macro** (sprint-finalize-pending checkpoint): write `current_bmad_step = "sprint-finalize-pending"`, `current_story = null`, `next_skill = null`, `stories_remaining = []` to `{state_file}`; release the autopilot lock idempotently (`lock.js release`); report sprint-complete-with-handoff to user; HALT this session. The next `/sprint-autopilot-on` invocation enters via step 1, sees the pending state, and runs step 10 with a clean window.
+- **FLUSH_SHARDS macro** (when `{{coalesce_state_writes}}` is true): run `state-shard.js flush --story sprint --project-root "{{project_root}}"`, then `merge-shards.js --project-root "{{project_root}}"`. Both ignore failures.
+
 ---
 
 ## DECISION LOGGING
@@ -136,16 +145,15 @@ Resolve:
 
 **`{state_file}` schema** (referenced as `STATE_FIELDS` below): `last_updated`, `current_story`, `current_bmad_step`, `completed_skill`, `next_skill`, `session_stories_done`, `stories_remaining`, `git_enabled`, `platform`, `in_worktree`, `pr_base`. Always update `last_updated` on every write.
 
-**PR 6 state-write policy (`autopilot.coalesce_state_writes`):**
+**State-write policy (`autopilot.coalesce_state_writes`):**
 
 When the resolved profile sets `autopilot.coalesce_state_writes: true` (nano/small/medium/large by default; `legacy` false), state writes route through `state-shard.js` using a `sprint`-keyed shard as the authoritative state for sprint-level fields, and per-story shards for story-scoped fields. Policy:
 
 - **Critical keys** (`current_story`, `current_bmad_step`, `in_worktree`, `patch_commits`) always go to shard via `state-shard.js batch`, which auto-flushes and writes straight through because the script recognizes them as crash-recovery keys.
 - **Non-critical fields** (test counts, file lists, next_skill, session_stories_done, stories_remaining, etc.) go to `state-shard.js batch`, accumulating in the pending buffer. Flushed at each story boundary (step 7) and session checkpoint (step 9).
 - **Merged authoritative state** (`autopilot-state.yaml`) is rebuilt via `merge-shards.js` at story boundary + session checkpoint + sprint complete.
-- **Rollback** (`coalesce_state_writes: false`): every `Update {state_file}` action writes directly to `autopilot-state.yaml` via the existing STATE_FIELDS shape — no shard indirection. This is the v1.0.5 path byte-for-byte.
 
-When the flag is `false`, the direct-write instructions below are authoritative. When `true`, substitute each `Update {state_file} with STATE_FIELDS: <changes>` with a `state-shard.js batch --story sprint --json <changes>` call, followed by a `merge-shards.js --project-root "{{project_root}}"` at the story boundary / checkpoint. The merged `autopilot-state.yaml` remains the single source of truth for resume-after-crash.
+When `coalesce_state_writes: false`, all state writes go directly to `autopilot-state.yaml` (legacy v1.0.5 path). When `true`, substitute each `Update {state_file} with STATE_FIELDS: <changes>` with a `state-shard.js batch --story sprint --json <changes>` call, followed by a `merge-shards.js --project-root "{{project_root}}"` at the story boundary / checkpoint.
 
 ### Git integration bootstrap
 
@@ -178,13 +186,13 @@ When the flag is `false`, the direct-write instructions below are authoritative.
   </action>
   <action>**Resolve profile-driven flow** — run:
   `node {{project_root}}/_Sprintpilot/scripts/resolve-profile.js get autopilot.implementation_flow`
-  Output: `full` or `quick`. Set `{{implementation_flow}}` = output. Default to `full` if the call fails.
+  Output: `full` or `quick`. Set `{{implementation_flow}}` = output (default `full`).
   Run: `node {{project_root}}/_Sprintpilot/scripts/resolve-profile.js get autopilot.session_story_limit` → override `{{session_story_limit}}` if the resolver produces a different value than config.yaml (profile overrides config silence). Same pattern for `autopilot.retrospective_mode`.
   </action>
   <action>**Resolve coalesce flag** — run:
-  `node {{project_root}}/_Sprintpilot/scripts/resolve-profile.js get autopilot.coalesce_state_writes` → `{{coalesce_state_writes}}`. Default `false` on failure.
+  `node {{project_root}}/_Sprintpilot/scripts/resolve-profile.js get autopilot.coalesce_state_writes` → `{{coalesce_state_writes}}` (default `false`).
   </action>
-  <!-- PR 11: detect the running host and resolve parallel-dispatch config. -->
+  <!-- Detect the running host and resolve parallel-dispatch config. -->
   <action>**Detect host agent** — run:
   `node {{project_root}}/_Sprintpilot/scripts/agent-adapter.js detect --project-root "{{project_root}}"`
   Parse the JSON output: set `{{host_agent}}` = host, `{{host_supports_parallel}}` = supports_parallel, `{{host_confidence}}` = confidence.
@@ -222,7 +230,7 @@ When the flag is `false`, the direct-write instructions below are authoritative.
     <action>HALT: "No git repository found. Initialize one first:
     ```
     git init
-    git add -A
+    git add README.md .gitignore
     git commit -m 'initial commit'
     git remote add origin <your-repo-url>
     ```
@@ -241,9 +249,9 @@ When the flag is `false`, the direct-write instructions below are authoritative.
     <action>Set `{{platform}}` = "git_only"</action>
   </check>
 
-  <!-- PR 10: disable gc.auto on the main repo so git's auto-GC doesn't
-       race with concurrent worktree operations during the sprint. Save
-       the prior value so we can restore it at sprint complete (step 10). -->
+  <!-- Disable gc.auto on the main repo so git's auto-GC doesn't race with
+       concurrent worktree operations during the sprint. Save the prior
+       value so we can restore it at sprint complete (step 10). -->
   <action>**Save + disable main-repo gc.auto**: set `{{original_gc_auto_main}}` = output of `node {{project_root}}/_Sprintpilot/scripts/git-portable.js config-get gc.auto --default unset --project-root "{{project_root}}"`, then `git -C {{project_root}} config --local gc.auto 0`.</action>
 
   <action>**Lock file** — run: `node {{project_root}}/_Sprintpilot/scripts/lock.js acquire`
@@ -263,12 +271,12 @@ When the flag is `false`, the direct-write instructions below are authoritative.
   Log: "Platform detected: {{platform}}"
   </action>
 
-  <!-- PR 7 CONDITIONAL BOOT WORK: a clean repo — main worktree only, zero
-       in-progress stories — can skip the slow health-check + branch
+  <!-- Conditional boot work: a clean repo (main worktree only, zero
+       in-progress stories) can skip the slow health-check + branch
        reconciliation below. Gate honored by non-legacy, non-large profiles
        (large keeps full reconciliation for compliance/uptime reasons). -->
   <action>Read `autopilot.conditional_boot_work` from the resolver:
-  `node {{project_root}}/_Sprintpilot/scripts/resolve-profile.js get autopilot.conditional_boot_work` → `{{conditional_boot_work}}`. Default to `false` on failure.
+  `node {{project_root}}/_Sprintpilot/scripts/resolve-profile.js get autopilot.conditional_boot_work` → `{{conditional_boot_work}}` (default `false`).
   </action>
   <action>Count worktrees (cross-platform; replaces a `... | grep -c` pipe that needed POSIX shell):
   `node {{project_root}}/_Sprintpilot/scripts/git-portable.js count-worktrees --project-root "{{project_root}}"` → `{{worktree_count}}`. The script fails open to 2 internally if git itself errors, matching the previous "fail-open to force full path" semantic.
@@ -276,8 +284,8 @@ When the flag is `false`, the direct-write instructions below are authoritative.
   <action>Count in-progress stories: read `{status_file}` and count stories whose status is NOT in {`done`, `backlog`}. Set `{{in_progress_count}}`. Fail-open to 1 (force full path) if the file is unreadable.</action>
 
   <check if="{{conditional_boot_work}} is true AND {{worktree_count}} is 1 AND {{in_progress_count}} is 0">
-    <action>Log: "Boot fast-path (PR 7): clean repo — skipping health-check + branch reconciliation"</action>
-    <action>Run: `node {{project_root}}/_Sprintpilot/scripts/log-timing.js once --story "sprint" --phase "boot.fast-path" --meta "{\"reason\":\"clean-repo\"}" --project-root "{{project_root}}"` — ignore failures.</action>
+    <action>Log: "Boot fast-path: clean repo — skipping health-check + branch reconciliation"</action>
+    <action>Run: `node {{project_root}}/_Sprintpilot/scripts/log-timing.js once --story "sprint" --phase "boot.fast-path" --meta "{\"reason\":\"clean-repo\"}" --project-root "{{project_root}}"`.</action>
     <action>Set `{{git_enabled}}` = true, `{{platform}}` = detected value</action>
   </check>
 
@@ -322,12 +330,12 @@ When the flag is `false`, the direct-write instructions below are authoritative.
           - If merge succeeds:
             - Re-read `{status_file}` from HEAD (may now include story artifacts after merge)
             - Update `{git_status_file}` via sync-status.js: set `--merge-status "recovered"` for this story.
-              **IMPORTANT:** sync-status.js does full block replacement. If the story already has an entry in `{git_status_file}`, re-read its existing fields and pass ALL of them alongside `--merge-status`. If no entry exists yet, pass at minimum `--branch` and `--push-status "pushed"`.
+              See SYNC_STATUS_RULE at top.
         - If `{{platform}}` is NOT git_only (github, gitlab, bitbucket, gitea) AND `{{create_pr}}` is true:
           - Check if PR/MR already exists for this branch (platform-specific check via create-pr.sh or CLI)
           - If no PR: create one via `node {{project_root}}/_Sprintpilot/scripts/create-pr.js --platform {{platform}} ...`
           - Log: "PR created/found for <story-key>"
-          - Update `{git_status_file}` via sync-status.js: set `--merge-status "pr_pending"` for this story (same full-field requirement as above)
+          - Update `{git_status_file}` via sync-status.js: set `--merge-status "pr_pending"` (see SYNC_STATUS_RULE).
     - If status IS "done" AND branch still exists AND `{{cleanup_on_merge}}` is true:
       - Log: "Stale remote branch: <branch> — story already done, cleaning up"
       - Delete remote branch (ignore failure — the branch may already be gone): `git push origin --delete <branch>`
@@ -335,7 +343,7 @@ When the flag is `false`, the direct-write instructions below are authoritative.
 
   <action>Set `{{git_enabled}}` = true, `{{platform}}` = detected value</action>
 
-  </check><!-- end PR 7 conditional boot work (non-fast-path branch) -->
+  </check><!-- end conditional-boot-work non-fast-path branch -->
 </check>
 
 ---
@@ -350,7 +358,7 @@ When the flag is `false`, the direct-write instructions below are authoritative.
   <action>Read `{state_file}` fully</action>
   <action>Extract saved state:
     - `{{current_story}}` — story in progress when last session ended
-    - `{{current_bmad_step}}` — BMAD step that was active (2–7), or the reserved value `sprint-finalize-pending` meaning "the prior session detected sprint-complete and checkpointed; this session's only job is step 10"
+    - `{{current_bmad_step}}` — BMAD step that was active (2–7), or one of the reserved values: `executing` (a skill is mid-run), `sprint-finalize-pending` (prior session checkpointed; this session's only job is step 10), `sprint-complete` (terminal marker written by step-10 CRITICAL 5/7).
     - `{{completed_skill}}` — last skill that ran
     - `{{next_skill}}` — next skill recommended at save time
     - `{{session_stories_done}}` = 0 (reset counter for new session)
@@ -388,20 +396,16 @@ When the flag is `false`, the direct-write instructions below are authoritative.
     - Update `{state_file}` with reconciled values
   </action>
 
-  <!-- Already-completed short-circuit. If the prior session wrote
-       sprint-complete (CRITICAL 5/7) but crashed before the state file
-       delete (CRITICAL 7/7), this invocation would otherwise loop into
-       the finalize handoff forever. Detect it and exit cleanly. -->
+  <!-- Already-completed short-circuit: prior session wrote sprint-complete
+       (CRITICAL 5/7) but crashed before delete (CRITICAL 7/7). Exit cleanly. -->
   <check if="{{current_bmad_step}} is sprint-complete">
     <action>Delete `{state_file}` — clean up the stale terminal marker.</action>
     <action>Report: "Sprint already complete. Nothing to do — run `bmad-sprint-planning` to plan the next sprint, then re-run `/sprint-autopilot-on`." Then STOP.</action>
   </check>
 
-  <!-- Fresh-context finalize path. If the prior session exited with
-       current_bmad_step = "sprint-finalize-pending", this invocation's
-       ONLY job is to run step 10 with a clean window. Verify the
-       sprint is still genuinely complete before jumping; if a user
-       added new work in between, fall through to the normal loop. -->
+  <!-- Fresh-context finalize path. See AUTOPILOT RULES (context-rot mitigation).
+       Verify sprint is still complete before jumping; if new work appeared,
+       fall through to the normal loop. -->
   <check if="{{current_bmad_step}} is sprint-finalize-pending">
     <action>Run: `node {{project_root}}/_Sprintpilot/scripts/list-remaining-stories.js --status-file "{status_file}" --format envelope` — parse stdout JSON.</action>
     <check if="parsed .state is sprint-complete">
@@ -473,11 +477,11 @@ When the flag is `false`, the direct-write instructions below are authoritative.
 
 <step n="2" goal="Main execution loop — route to correct handler">
 
-<!-- PR 12 CROSS-EPIC PARALLELISM (experimental, off by default on every
-     profile including `large`). All safety rails must pass:
+<!-- CROSS-EPIC PARALLELISM (experimental, off by default on every profile
+     including `large`). All safety rails must pass:
        1. ma.parallel_epics is true.
        2. Host confidence is HIGH AND supports_parallel is true (same as
-          intra-epic gate in PR 11).
+          the intra-epic gate).
        3. Two or more epics in dependencies.yaml declare `independent: true`.
        4. preflight-merge.js reports NO conflicts between all pairs.
        5. Session-scoped disable flag {{cross_epic_disabled_this_session}}
@@ -511,15 +515,7 @@ Parse stdout as a single JSON object: `{"remaining":[...],"state":"..."}`.
 - `.state == "pre-planning"`       → `{{stories_remaining}}` = [],          `{{sprint_has_stories}}` = false, `{{sprint_is_complete}}` = false.
 - `.state == "parse-error"`        → log warning; treat as pre-planning. NEVER declare sprint-complete on a parse failure.
 </action>
-<!-- Sprint-complete handoff. Never run step 10 in the same session that
-     first observed the sprint-complete condition — that session has
-     spent a long time in context and its tail is the context-rot zone.
-     Instead, mark the state as sprint-finalize-pending and stop; the
-     next /sprint-autopilot-on boot will route straight to step 10 (via
-     the step 1 gate) with a clean window. If we ALREADY are the
-     finalize session (current_bmad_step was sprint-finalize-pending on
-     entry), step 1 has already jumped to step 10 and we never reach
-     this check — so this gate is unambiguous. -->
+<!-- Sprint-complete handoff: see FINALIZE_HANDOFF macro at top + AUTOPILOT RULES (context-rot mitigation). -->
 <check if="{{sprint_is_complete}} is true">
   <action>Update `{state_file}` with STATE_FIELDS: `current_bmad_step = "sprint-finalize-pending"`, `current_story = null`, `next_skill = null`, `stories_remaining = []`, `session_stories_done = {{session_stories_done}}`.</action>
   <action>Release autopilot lock (idempotent): `node {{project_root}}/_Sprintpilot/scripts/lock.js release` — ignore failures.</action>
@@ -528,9 +524,7 @@ Parse stdout as a single JSON object: `{"remaining":[...],"state":"..."}`.
   Autopilot sprint-complete checkpoint
 
   All stories are done. Pausing before finalization so step 10 runs
-  with a fresh context — this prevents late-session instruction decay
-  from skipping CRITICAL cleanup actions (commit artifacts, generate
-  docs, clean up worktrees, emit final report).
+  with a fresh context (see AUTOPILOT RULES — context-rot mitigation).
 
   Completed {{session_stories_done}} stories this session.
   State saved to: {state_file}
@@ -538,7 +532,7 @@ Parse stdout as a single JSON object: `{"remaining":[...],"state":"..."}`.
   Run `/sprint-autopilot-on` once more to finalize.
   ```
   </action>
-  <action>HALT — do not continue the execution loop. The next invocation enters via step 1, sees `sprint-finalize-pending`, and jumps to step 10.</action>
+  <action>HALT — do not continue the execution loop.</action>
 </check>
 <check if="{{sprint_has_stories}} is false">
   <action>Log: "Sprint pre-planning: no stories in status file yet. Routing through bmad-help to the next planning skill (do NOT go to step 10)."</action>
@@ -547,9 +541,7 @@ Parse stdout as a single JSON object: `{"remaining":[...],"state":"..."}`.
 <check if="{{next_skill}} is empty">
   <action>**Recover next_skill** — re-read `{status_file}`, find first story with status != "done"</action>
   <check if="no undone stories found AND {{sprint_has_stories}} is true">
-    <!-- Fallback sprint-complete detection. Route through the same
-         finalize-pending handoff as the primary gate above — never
-         jump into step 10 from this long-running session. -->
+    <!-- FINALIZE_HANDOFF (see top of file). -->
     <action>Update `{state_file}`: `current_bmad_step = "sprint-finalize-pending"`, `current_story = null`, `next_skill = null`, `stories_remaining = []`.</action>
     <action>Release lock: `node {{project_root}}/_Sprintpilot/scripts/lock.js release` — ignore failures.</action>
     <action>Report: "Sprint complete detected via fallback path. Pausing for fresh-context finalization — run /sprint-autopilot-on once more." Then HALT.</action>
@@ -597,12 +589,11 @@ Parse stdout as a single JSON object: `{"remaining":[...],"state":"..."}`.
 
 <step n="3" goal="Prepare and execute the recommended skill">
 
-<!-- ──────────────────────────────────────────────────────────────────
-     PR 11 PARALLEL DISPATCH (gates):
+<!-- PARALLEL DISPATCH (gates):
        - autopilot.parallel_stories: true (resolved at boot into
          {{parallel_stories}})
-       - host_supports_parallel: true with high confidence (PR 11
-         agent-adapter.js — only Claude Code today)
+       - host_supports_parallel: true with high confidence (only Claude
+         Code today, via agent-adapter.js)
        - implementation_flow != quick (nano runs sequentially per epic)
        - {{next_skill}} starts a fresh per-story flow (bmad-create-story
          OR bmad-dev-story OR bmad-quick-dev) — never mid-story
@@ -611,11 +602,7 @@ Parse stdout as a single JSON object: `{"remaining":[...],"state":"..."}`.
 
      When all gates pass, the autopilot dispatches every story in the
      current layer concurrently via the host's Agent tool — instead of
-     picking one story and running the full per-story flow sequentially.
-     This is the integration point that finally exercises the dispatcher
-     infrastructure built in PR 9 (resolve-dag) + PR 11 (dispatch-layer).
-     Without this block, parallel_stories=true had no behavioral effect.
-     ────────────────────────────────────────────────────────────────── -->
+     picking one story and running the full per-story flow sequentially. -->
 <check if="{{parallel_stories}} is true AND {{host_supports_parallel}} is true AND {{implementation_flow}} is NOT quick AND ({{next_skill}} is bmad-create-story OR {{next_skill}} is bmad-dev-story OR {{next_skill}} is bmad-quick-dev)">
   <action>**Compute current DAG layer.** Set `{{epic_id}}` = leading numeric segment of the FIRST undone story in `{status_file}`. Run:
   `node {{project_root}}/_Sprintpilot/scripts/resolve-dag.js layers --epic "{{epic_id}}" --project-root "{{project_root}}"`
@@ -627,7 +614,7 @@ Parse stdout as a single JSON object: `{"remaining":[...],"state":"..."}`.
     <action>**Parallel dispatch:** run:
     `node {{project_root}}/_Sprintpilot/scripts/dispatch-layer.js --layer "{{active_layer | join(',')}}" --max-parallel "{{max_parallel_stories}}" --project-root "{{project_root}}" --branch-prefix "{{branch_prefix}}" --base-branch "{{base_branch}}"`
     Parse stdout — captures the per-story worktree paths (`stories[*].worktree`) and the `effective_parallel` count.</action>
-    <action>Run: `node {{project_root}}/_Sprintpilot/scripts/log-timing.js mark --story sprint --phase "dispatch.layer-{{epic_id}}" --project-root "{{project_root}}"` — ignore failures.</action>
+    <action>Run: `node {{project_root}}/_Sprintpilot/scripts/log-timing.js mark --story sprint --phase "dispatch.layer-{{epic_id}}" --project-root "{{project_root}}"`.</action>
     <action>**Spawn N concurrent sub-agents — IMPORTANT: send a SINGLE message containing N parallel Agent tool calls (one per story).** Do NOT serialize. Each sub-agent runs the FULL per-story flow for its assigned story (bmad-create-story → bmad-check-implementation-readiness → bmad-dev-story → bmad-code-review → patches → mark done) inside its own worktree. The Agent tool calls run concurrently and the message reply contains all sub-agent results.
 
     For each story key `K` in `{{active_layer}}`, build one Agent call with `subagent_type=general-purpose` and a self-contained prompt of the form:
@@ -652,11 +639,10 @@ Parse stdout as a single JSON object: `{"remaining":[...],"state":"..."}`.
   </check>
 </check>
 
-<!-- PR 4 NANO ROUTING: when the active profile's implementation_flow is
-     'quick', route bmad-dev-story through bmad-quick-dev instead. Quick-dev
-     runs Implement → Review → Classify → Commit internally (BMad
-     step-oneshot.md), so bmad-create-story / bmad-check-readiness /
-     bmad-code-review are not invoked in this flow. -->
+<!-- Nano routing: when implementation_flow is 'quick', route bmad-dev-story
+     through bmad-quick-dev. Quick-dev runs Implement → Review → Classify →
+     Commit internally (BMad step-oneshot.md), so bmad-create-story /
+     bmad-check-readiness / bmad-code-review are not invoked in this flow. -->
 <check if="{{implementation_flow}} is quick AND {{next_skill}} is bmad-dev-story">
   <action>Override `{{next_skill}}` = `bmad-quick-dev`</action>
   <action>Log: "Routing {{current_story}} through bmad-quick-dev per nano profile (implementation_flow=quick)"</action>
@@ -687,11 +673,11 @@ Parse stdout as a single JSON object: `{"remaining":[...],"state":"..."}`.
   <action>Create per-story step tasks if not already created</action>
 </check>
 
-<!-- PR 5: determine per-story epic key + title so the workflow can branch
+<!-- Determine per-story epic key + title so the workflow can branch
      per-epic under granularity=epic and decide "is this the last story
      of the epic". Epic ID is the leading numeric segment of the story
-     key (e.g. '1-2-foo' → '1'); slug is the epic's title from sprint-
-     status.yaml (or the epic header in the epics file). Skip if empty. -->
+     key (e.g. '1-2-foo' → '1'); slug is the epic's title from
+     sprint-status.yaml (or the epic header in the epics file). -->
 <action>Set `{{epic_id}}` = leading numeric segment of `{{current_story}}` (e.g. `1-2-foo` → `1`). If the key doesn't match `^\d+-`, leave `{{epic_id}}` = "".</action>
 <action>Set `{{epic_branch_name}}` = `epic-{{epic_id}}` (only used when `{{granularity}} = epic`).</action>
 <action>**Detect first vs last story of epic** — read `{status_file}` (BMAD-owned; do not modify). Find all stories with the same `{{epic_id}}`:
@@ -717,7 +703,7 @@ Parse stdout as a single JSON object: `{"remaining":[...],"state":"..."}`.
   Detached HEAD is fine — `git worktree add` below creates a new branch from HEAD.
   </action>
 
-  <!-- PR 5: epic granularity — share one branch per epic instead of one per story.
+  <!-- Epic granularity: share one branch per epic instead of one per story.
        Under worktree.enabled=false + granularity=epic (nano default),
        subsequent stories of the same epic check out the epic branch in
        place and commit there; no worktree is created. -->
@@ -736,19 +722,19 @@ Parse stdout as a single JSON object: `{"remaining":[...],"state":"..."}`.
   </check>
 
   <check if="{{worktree_enabled}} is true">
-    <action>Run: `node {{project_root}}/_Sprintpilot/scripts/log-timing.js start --story "{{current_story}}" --phase "worktree.add" --project-root "{{project_root}}"` — ignore failures.</action>
+    <action>Run: `node {{project_root}}/_Sprintpilot/scripts/log-timing.js start --story "{{current_story}}" --phase "worktree.add" --project-root "{{project_root}}"`.</action>
     <action>**Create worktree.** Try: `git worktree add "{{project_root}}/.worktrees/{{current_story}}" -b "{{branch_prefix}}{{branch_name}}" 2>&1`. If it fails because the branch already exists, retry without `-b`: `git worktree add "{{project_root}}/.worktrees/{{current_story}}" "{{branch_prefix}}{{branch_name}}" 2>&1`.
 
   If both fail (disk/permissions): log "WARN: worktree add failed — continuing without isolation", set `{{in_worktree}}` = false, and fall back to branch-only mode: `git checkout -b {{branch_prefix}}{{branch_name}}` (retry without `-b` if branch exists). HALT only if the checkout also fails. Git push/PR still work on the branch.
     </action>
-    <action>Run: `node {{project_root}}/_Sprintpilot/scripts/log-timing.js end --story "{{current_story}}" --phase "worktree.add" --project-root "{{project_root}}"` — ignore failures.</action>
+    <action>Run: `node {{project_root}}/_Sprintpilot/scripts/log-timing.js end --story "{{current_story}}" --phase "worktree.add" --project-root "{{project_root}}"`.</action>
   </check>
 
   <check if="{{worktree_enabled}} is true AND worktree add succeeded">
     <action>`cd {{project_root}}/.worktrees/{{current_story}}`. All subsequent commands run from here. Set `{{worktree_path}}` = this path.</action>
-    <action>**Disable gc.auto on this worktree** (PR 10): save original value `{{original_gc_auto_worktree}}` = output of `node {{project_root}}/_Sprintpilot/scripts/git-portable.js config-get gc.auto --default unset --project-root "{{project_root}}/.worktrees/{{current_story}}"`, then `git -C {{project_root}}/.worktrees/{{current_story}} config --local gc.auto 0`.</action>
-    <action>Run: `node {{project_root}}/_Sprintpilot/scripts/log-timing.js start --story "{{current_story}}" --phase "worktree.submodule-init" --project-root "{{project_root}}"` — ignore failures.</action>
-    <action>**Init submodules** if `.gitmodules` exists (file-exists check via `node -e "process.exit(require('fs').existsSync('.gitmodules')?0:1)"`). PR 10 fast-path:
+    <action>**Disable gc.auto on this worktree**: save original value `{{original_gc_auto_worktree}}` = output of `node {{project_root}}/_Sprintpilot/scripts/git-portable.js config-get gc.auto --default unset --project-root "{{project_root}}/.worktrees/{{current_story}}"`, then `git -C {{project_root}}/.worktrees/{{current_story}} config --local gc.auto 0`.</action>
+    <action>Run: `node {{project_root}}/_Sprintpilot/scripts/log-timing.js start --story "{{current_story}}" --phase "worktree.submodule-init" --project-root "{{project_root}}"`.</action>
+    <action>**Init submodules** if `.gitmodules` exists (file-exists check via `node -e "process.exit(require('fs').existsSync('.gitmodules')?0:1)"`). Fast-path:
     Resolve the main repo's common git dir into a captured variable `{{git_common}}` (cross-platform; replaces a `$(...)` shell substitution):
     `node {{project_root}}/_Sprintpilot/scripts/git-portable.js common-dir --project-root "{{project_root}}"`. Trim trailing whitespace; the script exits 1 if git can't resolve the dir — log a warning and skip the submodule fast-path, falling through to the degraded-mode branch below.
     For each submodule path in `.gitmodules`:
@@ -759,7 +745,7 @@ Parse stdout as a single JSON object: `{"remaining":[...],"state":"..."}`.
       3. `node {{project_root}}/_Sprintpilot/scripts/submodule-lock.js release --submodule "<path>" --project-root "{{project_root}}"` (best-effort, ignore failures).
     If the loop fails or hangs: warn "Submodule init failed (may need auth). Continuing." and proceed.
     </action>
-    <action>Run: `node {{project_root}}/_Sprintpilot/scripts/log-timing.js end --story "{{current_story}}" --phase "worktree.submodule-init" --project-root "{{project_root}}"` — ignore failures.</action>
+    <action>Run: `node {{project_root}}/_Sprintpilot/scripts/log-timing.js end --story "{{current_story}}" --phase "worktree.submodule-init" --project-root "{{project_root}}"`.</action>
     <action>Set `{{in_worktree}}` = true</action>
   </check>
   <action>Update `{state_file}` (write to the worktree copy since cwd is now the worktree)</action>
@@ -784,7 +770,7 @@ Parse stdout as a single JSON object: `{"remaining":[...],"state":"..."}`.
      ~50% of the time), so most skills had no duration recorded. `mark`
      auto-computes the duration of the PREVIOUS phase from a small marker
      file — one call per transition, no open-phase failure mode. -->
-<action>Run: `node {{project_root}}/_Sprintpilot/scripts/log-timing.js mark --story "{{timing_story}}" --phase "skill.{{next_skill}}" --project-root "{{project_root}}"` — ignore failures.</action>
+<action>Run: `node {{project_root}}/_Sprintpilot/scripts/log-timing.js mark --story "{{timing_story}}" --phase "skill.{{next_skill}}" --project-root "{{project_root}}"`.</action>
 <action>INVOKE `{{next_skill}}` skill using the Skill tool</action>
 <action>Mark task "{{next_skill}}" as `completed`</action>
 
@@ -795,16 +781,16 @@ Parse stdout as a single JSON object: `{"remaining":[...],"state":"..."}`.
 
 <step n="4" goal="Handle skill completion and route to next action">
 
-<!-- PR 4 NANO ROUTING: quick-dev completion handler.
+<!-- Quick-dev completion handler (nano routing).
      Quick-dev's one-shot (step-oneshot.md:44) already ran Implement →
-     Review → Classify → Commit internally. Autopilot skips the external
-     bmad-code-review step and jumps straight to step 7 (mark story
-     done). Escalation safety net: if tests fail or classify severity is
-     high, flip implementation_flow to full for the rest of the session. -->
+     Review → Classify → Commit internally, so autopilot skips the
+     external bmad-code-review step and jumps straight to step 7.
+     Escalation safety net: if tests fail or classify severity is high,
+     flip implementation_flow to full for the rest of the session. -->
 <check if="{{completed_skill}} was bmad-quick-dev">
-  <action>Run: `node {{project_root}}/_Sprintpilot/scripts/log-timing.js start --story "{{current_story}}" --phase "tests.run" --project-root "{{project_root}}"` — ignore failures.</action>
+  <action>Run: `node {{project_root}}/_Sprintpilot/scripts/log-timing.js start --story "{{current_story}}" --phase "tests.run" --project-root "{{project_root}}"`.</action>
   <action>Verify tests ran — if not, run them now: report `N/N passed`. Record pass/fail into `{{tests_passed}}`.</action>
-  <action>Run: `node {{project_root}}/_Sprintpilot/scripts/log-timing.js end --story "{{current_story}}" --phase "tests.run" --project-root "{{project_root}}"` — ignore failures.</action>
+  <action>Run: `node {{project_root}}/_Sprintpilot/scripts/log-timing.js end --story "{{current_story}}" --phase "tests.run" --project-root "{{project_root}}"`.</action>
   <action>Read quick-dev's Classify severity from its stdout/output. If its output mentions `severity: high` or a failing classify, set `{{quickdev_severity_high}}` = true.</action>
   <check if="{{tests_passed}} is false OR {{quickdev_severity_high}} is true">
     <action>**Escalation** — flip the session-scoped flow to `full`: set `{{implementation_flow}}` = `full`. Do NOT write this back to config.yaml; it is session-only. Log decision: `category=scope, phase=autopilot:escalation, impact=medium, "nano story {{current_story}} triggered fallback (tests_passed={{tests_passed}}, severity_high={{quickdev_severity_high}}) — subsequent stories use full cycle"` to `{decision_log_file}`.</action>
@@ -814,9 +800,9 @@ Parse stdout as a single JSON object: `{"remaining":[...],"state":"..."}`.
 </check>
 
 <check if="{{completed_skill}} was bmad-dev-story">
-  <action>Run: `node {{project_root}}/_Sprintpilot/scripts/log-timing.js start --story "{{current_story}}" --phase "tests.run" --project-root "{{project_root}}"` — ignore failures.</action>
+  <action>Run: `node {{project_root}}/_Sprintpilot/scripts/log-timing.js start --story "{{current_story}}" --phase "tests.run" --project-root "{{project_root}}"`.</action>
   <action>Verify tests ran — if not, run them now: report `N/N passed`</action>
-  <action>Run: `node {{project_root}}/_Sprintpilot/scripts/log-timing.js end --story "{{current_story}}" --phase "tests.run" --project-root "{{project_root}}"` — ignore failures.</action>
+  <action>Run: `node {{project_root}}/_Sprintpilot/scripts/log-timing.js end --story "{{current_story}}" --phase "tests.run" --project-root "{{project_root}}"`.</action>
   <action>**Log decisions** — review implementation choices made during dev-story and append entries to `{decision_log_file}` for any architecture, test-strategy, dependency, scope, or workaround decisions (see DECISION LOGGING section)</action>
 
   <!-- GIT: Lint, stage, and commit after dev-story -->
@@ -907,8 +893,7 @@ Parse stdout as a single JSON object: `{"remaining":[...],"state":"..."}`.
 </check>
 
 <check if="{{completed_skill}} was bmad-sprint-planning AND {{git_enabled}}">
-  <action>If `{{has_origin}}` is true, run `git fetch origin` (log a warning on failure and continue — do not abort).
-  If `{{has_origin}}` is false, skip the fetch.</action>
+  <action>Run `git fetch origin` (warn + continue on failure; obeys hoisted `{{has_origin}}` rule).</action>
   <action>Initialize `{git_status_file}` if it doesn't exist (with git_integration block)</action>
 </check>
 
@@ -962,8 +947,7 @@ Parse stdout as a single JSON object: `{"remaining":[...],"state":"..."}`.
   Log: "next_skill was empty but undone stories remain — resolved to {{next_skill}} for {{current_story}}".
   </action>
   <check if="all stories in status_file are done">
-    <!-- Same finalize-pending handoff as step 2 — never run step 10 in
-         the session that first noticed sprint-complete. -->
+    <!-- FINALIZE_HANDOFF (see top of file). -->
     <action>Update `{state_file}`: `current_bmad_step = "sprint-finalize-pending"`, `current_story = null`, `next_skill = null`, `stories_remaining = []`.</action>
     <action>Release lock: `node {{project_root}}/_Sprintpilot/scripts/lock.js release` — ignore failures.</action>
     <action>Report: "Sprint complete detected during skill-recovery. Pausing for fresh-context finalization — run /sprint-autopilot-on once more." Then HALT.</action>
@@ -1013,7 +997,7 @@ For any finding that is DISMISSED (contradicts AC or is a false positive):
 
 <!-- Re-run code review to sync sprint-status.yaml — patches resolved all findings, so code-review will now set story to done -->
 <!-- Single-call timing (mark) — see step-3 comment for rationale. -->
-<action>Run: `node {{project_root}}/_Sprintpilot/scripts/log-timing.js mark --story "{{current_story}}" --phase "skill.bmad-code-review.rereview" --project-root "{{project_root}}"` — ignore failures.</action>
+<action>Run: `node {{project_root}}/_Sprintpilot/scripts/log-timing.js mark --story "{{current_story}}" --phase "skill.bmad-code-review.rereview" --project-root "{{project_root}}"`.</action>
 <action>Re-invoke `bmad-code-review` using the Skill tool.
 The review layers already ran — this pass will see zero unresolved findings and set the story status to `done` in sprint-status.yaml (code-review owns that transition per step-04-present.md:92).
 Instruct: "Re-verify code review for story {{current_story}} — all patch findings have been applied. Update story status accordingly."
@@ -1038,11 +1022,11 @@ Instruct: "Re-verify code review for story {{current_story}} — all patch findi
   - Final test count: `N/N passed`
 </action>
 
-<!-- PR 5: epic granularity — defer push/PR until the LAST story of the epic.
-     For intermediate stories (granularity=epic AND not is_last_story_of_epic):
-     the work is already committed to the epic branch locally via stage-and-
-     commit.js; no push or PR is attempted. The epic's last story pushes
-     the accumulated commits and opens one PR for the whole epic. -->
+<!-- Epic granularity: defer push/PR until the LAST story of the epic.
+     For intermediate stories (granularity=epic AND not is_last_story_of_epic),
+     the work is already committed to the epic branch locally via
+     stage-and-commit.js; no push or PR is attempted. The epic's last
+     story pushes the accumulated commits and opens one PR for the epic. -->
 <check if="{{granularity}} is epic AND {{is_last_story_of_epic}} is false">
   <action>Log: "Epic granularity: skipping push/PR for {{current_story}} — will push at end of epic {{epic_id}}"</action>
   <action>Set `{{push_status}}` = "deferred", `{{pr_url}}` = "DEFERRED", `{{merge_status}}` = "deferred"</action>
@@ -1089,7 +1073,7 @@ Instruct: "Re-verify code review for story {{current_story}} — all patch findi
 
   <check if="{{create_pr}} is false OR {{platform}} is git_only OR {{pr_url}} is null or SKIPPED">
     <action>**Merge story/epic branch to main.** If `{{has_origin}}` is false (local-only), substitute `origin/{{base_branch}}` → `{{base_branch}}` and skip all `git push origin` / `git fetch origin` calls below.
-    Choose merge strategy by `{{squash_on_merge}}` (PR 5): if true, use `git merge --squash` + single commit; otherwise standard merge commit.
+    Choose merge strategy by `{{squash_on_merge}}`: if true, use `git merge --squash` + single commit; otherwise standard merge commit.
     1. `git checkout -B {{base_branch}} origin/{{base_branch}}`
     2. If `{{squash_on_merge}}` is true:
        `git merge --squash {{branch_prefix}}{{branch_name}}` then
@@ -1097,9 +1081,9 @@ Instruct: "Re-verify code review for story {{current_story}} — all patch findi
        Otherwise: `git merge {{branch_prefix}}{{branch_name}} --no-edit`.
     3. On success: `git push origin {{base_branch}}`, set `{{merge_status}}` = "merged".
     4. On conflict: `git merge --abort`, `git fetch origin`, re-checkout base, retry merge once. On retry success: push + merged. On retry failure: `{{merge_status}}` = "failed", log warning, continue — the branch is preserved and boot reconciliation retries next session.
-    5. **PR 12 cross-epic conflict interlock**: if this merge conflict involved two independent epics AND `{{parallel_epics}}` is true, set `{{cross_epic_disabled_this_session}}` = true and log "EXPERIMENTAL: cross-epic merge conflict detected; disabling parallel_epics for the remainder of this session." The flag resets on next session start.
+    5. **Cross-epic conflict interlock**: if this merge conflict involved two independent epics AND `{{parallel_epics}}` is true, set `{{cross_epic_disabled_this_session}}` = true and log "EXPERIMENTAL: cross-epic merge conflict detected; disabling parallel_epics for the remainder of this session." The flag resets on next session start.
 
-    `{{merge_status}}` is persisted by the sync-status.js call later in this step (via `--merge-status`). Do NOT call sync-status.js here — it does full block replacement and would destroy other fields.
+    `{{merge_status}}` is persisted by the sync-status.js call later in this step. Do NOT call sync-status.js here (see SYNC_STATUS_RULE).
     </action>
     <check if="{{cleanup_on_merge}} is true AND {{in_worktree}} is true">
       <action>**Cleanup worktree** (ignore failures — may already be gone): `git worktree remove .worktrees/{{current_story}} --force` then `git worktree prune`</action>
@@ -1129,13 +1113,9 @@ Instruct: "Re-verify code review for story {{current_story}} — all patch findi
 <action>**Increment `{{session_stories_done}}` by 1** — this is the ONLY place the counter ticks up. It runs only after the story's full implementation cycle (dev-story GREEN + code-review + patches + artifacts committed + optional push/PR). Creating a story file in step 3 never increments this counter.</action>
 <action>Remove `{{current_story}}` from `{{stories_remaining}}` list</action>
 
-<!-- PR 6 STORY-BOUNDARY FLUSH: if coalescing is on, flush the sprint
-     shard's pending buffer now (writes accumulated non-critical fields
-     to the shard) and merge all shards into the authoritative
-     autopilot-state.yaml / decision-log.yaml. Fast on a single-story
-     sprint; amortized when multiple stories complete per session. -->
+<!-- Story-boundary FLUSH_SHARDS (see top of file). -->
 <check if="{{coalesce_state_writes}} is true">
-  <action>Run: `node {{project_root}}/_Sprintpilot/scripts/state-shard.js flush --story sprint --project-root "{{project_root}}"` — ignore failures.</action>
+  <action>Run: `node {{project_root}}/_Sprintpilot/scripts/state-shard.js flush --story sprint --project-root "{{project_root}}"`.</action>
   <action>Run: `node {{project_root}}/_Sprintpilot/scripts/state-shard.js flush --story "{{current_story}}" --project-root "{{project_root}}"` — ignore failures (no-op if no per-story shard was ever batched).</action>
   <action>Run: `node {{project_root}}/_Sprintpilot/scripts/merge-shards.js --project-root "{{project_root}}"` — ignore failures. Produces merged autopilot-state.yaml + decision-log.yaml.</action>
 </check>
@@ -1148,28 +1128,30 @@ Instruct: "Re-verify code review for story {{current_story}} — all patch findi
   <action>Create task "[epic {{epic_id}}] retrospective" → `in_progress`</action>
 
   <!-- Retrospective: driven by `autopilot.retrospective_mode`. The external
-       `bmad-retrospective` skill is NEVER invoked from autopilot (multi-persona
-       discussion loop under some CLIs). -->
+       `bmad-retrospective` skill is NEVER invoked from autopilot.
+       All three modes append a `autopilot:retrospective` decision-log entry
+       and mark the retrospective task complete. -->
 
   <check if="{{retrospective_mode}} is auto">
     <action>Collect from `{status_file}` for epic `{{epic_id}}`: done stories `{ story-key, title, test_pass_count, patch_count }`, epic title, dates if present.</action>
     <action>Collect decision-log entries for epic `{{epic_id}}` (match `story` prefix `{{epic_id}}-` or `phase: autopilot:*` tagged to this epic). Identify open risks / carry-over notes from any story `notes`/`risks` fields or `workaround` decisions for this epic.</action>
     <action>Ensure `{implementation_artifacts}/retrospectives/` exists. Read template `{{project_root}}/_Sprintpilot/templates/epic-retrospective.md`, fill mustache placeholders, write to `{implementation_artifacts}/retrospectives/epic-{{epic_id}}-retrospective.md`.</action>
     <action>Update `{status_file}`: `epics.{{epic_id}}.status = done`, `.retrospective_path = <file>`, `.completed_at = {current_date}`.</action>
-    <action>Append decision-log entry: `{ category: workaround, decision: "retrospective generated inline", rationale: "retrospective_mode=auto", impact: low, phase: autopilot:retrospective, story: "epic-{{epic_id}}" }`.</action>
-    <action>Mark retrospective task → `completed`. Set `{{completed_skill}}` = `retrospective-auto`.</action>
+    <action>Append decision-log entry: `{ category: workaround, decision: "retrospective generated inline", rationale: "retrospective_mode=auto", impact: low, phase: autopilot:retrospective, story: "epic-{{epic_id}}" }`. Set `{{completed_skill}}` = `retrospective-auto`.</action>
   </check>
 
   <check if="{{retrospective_mode}} is stop">
     <action>Update `{state_file}`: `paused_at = epic-complete-awaiting-retrospective`, `paused_epic_id = {{epic_id}}`, `next_action = "run /bmad-retrospective interactively for epic {{epic_id}}, then re-run /sprint-autopilot-on"`.</action>
-    <action>Append decision-log entry: `{ category: workaround, decision: "paused for interactive retrospective", rationale: "retrospective_mode=stop", impact: low, phase: autopilot:retrospective, story: "epic-{{epic_id}}" }`. Mark retrospective task → `completed`.</action>
+    <action>Append decision-log entry: `{ category: workaround, decision: "paused for interactive retrospective", rationale: "retrospective_mode=stop", impact: low, phase: autopilot:retrospective, story: "epic-{{epic_id}}" }`.</action>
     <action>Report: "Autopilot paused — epic {{epic_id}} complete, retrospective handed off. Run `/bmad-retrospective` interactively for epic {{epic_id}}, then re-run `/sprint-autopilot-on`. State saved to: {state_file}." Then STOP.</action>
   </check>
 
   <check if="{{retrospective_mode}} is skip">
     <action>Update `{status_file}`: `epics.{{epic_id}}.status = done`, `.retrospective_path = null`, `.retrospective_skipped = true`, `.completed_at = {current_date}`.</action>
-    <action>Append decision-log entry: `{ category: workaround, decision: "retrospective skipped", rationale: "retrospective_mode=skip (NOT RECOMMENDED)", impact: medium, phase: autopilot:retrospective, story: "epic-{{epic_id}}" }`. Mark retrospective task → `completed`. Set `{{completed_skill}}` = `retrospective-skip`.</action>
+    <action>Append decision-log entry: `{ category: workaround, decision: "retrospective skipped", rationale: "retrospective_mode=skip (NOT RECOMMENDED)", impact: medium, phase: autopilot:retrospective, story: "epic-{{epic_id}}" }`. Set `{{completed_skill}}` = `retrospective-skip`.</action>
   </check>
+
+  <action>Mark retrospective task → `completed`.</action>
 
   <check if="{{git_enabled}}">
     <action>**Epic PR summary** — list all epic PR/MR URLs from `{status_file}` and report as "Epic complete — PR/MR summary: [list]. Ready to merge — review PRs and confirm when ready."</action>
@@ -1220,16 +1202,16 @@ Instruct: "Re-verify code review for story {{current_story}} — all patch findi
         `git merge <branch-ref> --no-edit`
         `git push origin {{base_branch}}`
       - If merge succeeds: update merge_status in `{git_status_file}`.
-        **IMPORTANT:** sync-status.js does full block replacement — you MUST re-read the story's existing fields from `{git_status_file}` (branch, commit, patch_commits, push_status, pr_url, lint_result, worktree, platform, base_branch, worktree_cleaned) and pass ALL of them along with `--merge-status "merged"`. Omitting fields destroys them.
-      - If merge fails: `git merge --abort`, update merge_status to "failed" in `{git_status_file}` (same full-field requirement), log warning, continue
+        See SYNC_STATUS_RULE at top.
+      - If merge fails: `git merge --abort`, update merge_status to "failed" in `{git_status_file}` (see SYNC_STATUS_RULE), log warning, continue
   Log: "Pre-checkpoint merge: N stories verified on {{base_branch}}"
   </action>
 </check>
 
 <action>Update `{state_file}` with STATE_FIELDS.</action>
 <check if="{{coalesce_state_writes}} is true">
-  <action>Run: `node {{project_root}}/_Sprintpilot/scripts/state-shard.js flush --story sprint --project-root "{{project_root}}"` — ignore failures.</action>
-  <action>Run: `node {{project_root}}/_Sprintpilot/scripts/merge-shards.js --project-root "{{project_root}}"` — ignore failures.</action>
+  <action>Run: `node {{project_root}}/_Sprintpilot/scripts/state-shard.js flush --story sprint --project-root "{{project_root}}"`.</action>
+  <action>Run: `node {{project_root}}/_Sprintpilot/scripts/merge-shards.js --project-root "{{project_root}}"`.</action>
 </check>
 
 <!-- Phase-timing session snapshot (no-op if autopilot.phase_timings is false). -->
@@ -1273,15 +1255,7 @@ No work will be repeated.
 
 <step n="10" goal="Sprint complete — emit summary and next steps">
 
-<!-- CRITICAL-PATH-FIRST: these 6 actions MUST run before anything else in
-     step 10. They put the repo into a correct terminal state — orphan
-     worktrees removed, lock released, artifacts committed to main,
-     sprint-complete state marked, task checkboxes marked, final verification.
-     Even if the rest of step 10 is interrupted (SIGTERM, LLM improvises an
-     early summary, context exhaustion), the harness invariants hold. DO NOT
-     reorder or skip these — the order matters: worktrees-before-lock so a
-     concurrent autopilot session doesn't see orphans, lock-before-commit
-     so commits run with the repo already unlocked, etc. -->
+<!-- CRITICAL 1-7: must run in order before any other step-10 action; do not reorder or skip. -->
 
 <!-- GIT: Exit worktree if still in one (prerequisite for the rest) -->
 <check if="{{in_worktree}}">
@@ -1303,7 +1277,7 @@ No work will be repeated.
   Run: `git worktree list --porcelain` to enumerate. For each worktree whose path starts with `{{project_root}}/.worktrees/`:
   - `git worktree remove <path> --force 2>&1` (ignore failures — best-effort).
   Then once: `git worktree prune 2>&1` (ignore failures).
-  This is the SINGLE authoritative cleanup site for autopilot-owned worktrees — do not wait for a later "safety net" cleanup that might not run.
+  Final-pass cleanup: idempotent re-run that catches anything missed by per-story/epic-complete cleanup above.
 </check>
 </action>
 
@@ -1329,27 +1303,22 @@ Run: `node {{project_root}}/_Sprintpilot/scripts/lock.js release` — ignore fai
 Parse stdout as JSON. If `.state` is `sprint-complete` AND `.remaining` is empty, the sprint is verified complete. If `.state` is anything else (e.g. `sprint-in-progress` with leftover stories), log a warning — but do NOT revert the above actions. The worktrees are gone; the lock is released; the artifacts are committed; the state is marked complete; task checkboxes are marked. Manual recovery only.
 </action>
 
-<!-- Final terminal-state marker. Kept inside the CRITICAL block because
-     the previous "Delete state_file" action at the tail of step 10 was
-     being skipped by context-rot in long sessions (observed in e2e runs:
-     "autopilot-state.yaml still exists" warning), leaving a stale state
-     file that confused the next /sprint-autopilot-on boot. CRITICAL 5/7
-     already wrote sprint-complete as a belt-and-suspenders in case this
-     delete crashes mid-run; step 1 also short-circuits on a leftover
-     sprint-complete state so accidental re-invocation doesn't loop. -->
+<!-- See AUTOPILOT RULES (context-rot mitigation). CRITICAL 5/7 wrote
+     sprint-complete as a crash-safe marker; step 1 short-circuits on a
+     leftover sprint-complete state so accidental re-invocation doesn't loop. -->
 <action>**[CRITICAL 7/7] Delete state_file** — `node -e "require('node:fs').rmSync('{state_file}', { force: true })"` (idempotent; never halt on failure). Removes `autopilot-state.yaml` so the next invocation starts cleanly. CRITICAL 5/7 already wrote `current_bmad_step = sprint-complete` to the same file as a crash-safe marker, so if this delete fails mid-run the next session still sees the terminal state.</action>
 
 <!-- Close the last open `mark` phase so its duration gets recorded.
      Without this, the very last skill's duration would be lost (no
      subsequent mark fires after sprint-complete). -->
-<action>Run: `node {{project_root}}/_Sprintpilot/scripts/log-timing.js mark --story sprint --phase _end --project-root "{{project_root}}"` — ignore failures.</action>
+<action>Run: `node {{project_root}}/_Sprintpilot/scripts/log-timing.js mark --story sprint --phase _end --project-root "{{project_root}}"`.</action>
 
 <action>Run full test suite — report `N/N passed`</action>
 
-<!-- PR 6 SPRINT-COMPLETE FLUSH + ARCHIVE (no-op if coalescing is off). -->
+<!-- Sprint-complete FLUSH_SHARDS + archive (no-op if coalescing is off). -->
 <check if="{{coalesce_state_writes}} is true">
-  <action>Run: `node {{project_root}}/_Sprintpilot/scripts/state-shard.js flush --story sprint --project-root "{{project_root}}"` — ignore failures.</action>
-  <action>Run: `node {{project_root}}/_Sprintpilot/scripts/merge-shards.js --archive --project-root "{{project_root}}"` — ignore failures. --archive moves merged shards to .archive/layer-&lt;timestamp&gt;/ (the script generates the ISO timestamp itself; no shell `$(...)` substitution needed) so the next sprint starts clean.</action>
+  <action>Run: `node {{project_root}}/_Sprintpilot/scripts/state-shard.js flush --story sprint --project-root "{{project_root}}"`.</action>
+  <action>Run: `node {{project_root}}/_Sprintpilot/scripts/merge-shards.js --archive --project-root "{{project_root}}"` — ignore failures. `--archive` moves merged shards to `.archive/layer-<timestamp>/` so the next sprint starts clean.</action>
 </check>
 
 <!-- Final phase-timing hotspot report (no-op if autopilot.phase_timings is false). -->
@@ -1398,11 +1367,7 @@ Parse stdout as JSON. If `.state` is `sprint-complete` AND `.remaining` is empty
 <action>**Collect report data** from `{status_file}` (stories grouped by epic with titles, totals, final test count; PR/MR URLs, patch/dismissed counts per story if git_enabled) and `{decision_log_file}` (medium/high-impact decisions; counts of `review-accept`, `review-triage`, code-review rounds; per-story patches-applied / findings-dismissed).</action>
 
 <check if="{{git_enabled}}">
-  <!-- Worktree cleanup already ran as CRITICAL 2/7 above. Intentionally
-       no duplicate here — relying on early cleanup to avoid orphans
-       when the LLM short-circuits late actions. -->
-  <action>(No-op: worktree cleanup already executed in CRITICAL 2/7.)</action>
-  <!-- PR 10: restore main-repo gc.auto to its prior value. -->
+  <!-- Worktree cleanup ran as CRITICAL 2/7. Restore main-repo gc.auto. -->
   <action>**Restore main-repo gc.auto**:
   if `{{original_gc_auto_main}}` is "unset": `git config --local --unset gc.auto` (ignore failure — may already be unset).
   else: `git config --local gc.auto {{original_gc_auto_main}}`.
