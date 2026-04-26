@@ -613,11 +613,14 @@ Parse stdout as a single JSON object: `{"remaining":[...],"state":"..."}`.
   <check if="{{active_layer}} length is 2 or more">
     <action>**Parallel dispatch:** run:
     `node {{project_root}}/_Sprintpilot/scripts/dispatch-layer.js --layer "{{active_layer | join(',')}}" --max-parallel "{{max_parallel_stories}}" --project-root "{{project_root}}" --branch-prefix "{{branch_prefix}}" --base-branch "{{base_branch}}"`
-    Parse stdout — captures the per-story worktree paths (`stories[*].worktree`) and the `effective_parallel` count.</action>
+    Parse stdout — set `{{dispatched_stories}}` = the list of stories from `stories[*]` where `created === true` (typically the first `effective_parallel` entries; partial-failure runs may have fewer). Set `{{deferred_stories}}` = the response's `deferred` field (keys not dispatched in this batch — picked up by the next loop iteration).</action>
+    <check if="{{dispatched_stories}} length is 0">
+      <action>**Dispatch failed entirely** — `dispatch-layer.js` produced no successful worktrees. Report the per-story stderr from the response and HALT (this is a TRUE BLOCKER per AUTOPILOT RULES). Worktrees that succeeded mid-batch were rolled back by the script.</action>
+    </check>
     <action>Run: `node {{project_root}}/_Sprintpilot/scripts/log-timing.js mark --story sprint --phase "dispatch.layer-{{epic_id}}" --project-root "{{project_root}}"`.</action>
-    <action>**Spawn N concurrent sub-agents — IMPORTANT: send a SINGLE message containing N parallel Agent tool calls (one per story).** Do NOT serialize. Each sub-agent runs the FULL per-story flow for its assigned story (bmad-create-story → bmad-check-implementation-readiness → bmad-dev-story → bmad-code-review → patches → mark done) inside its own worktree. The Agent tool calls run concurrently and the message reply contains all sub-agent results.
+    <action>**Spawn N concurrent sub-agents — IMPORTANT: send a SINGLE message containing N parallel Agent tool calls (one per story in `{{dispatched_stories}}`).** Do NOT serialize. The number of sub-agents equals `{{dispatched_stories}}.length` (capped by `--max-parallel` via `dispatch-layer.js`); deferred stories are picked up automatically when the loop re-enters step 2 after this batch. Each sub-agent runs the FULL per-story flow for its assigned story (bmad-create-story → bmad-check-implementation-readiness → bmad-dev-story → bmad-code-review → patches → mark done) inside its own worktree. The Agent tool calls run concurrently and the message reply contains all sub-agent results.
 
-    For each story key `K` in `{{active_layer}}`, build one Agent call with `subagent_type=general-purpose` and a self-contained prompt of the form:
+    For each story key `K` in `{{dispatched_stories}}`, build one Agent call with `subagent_type=general-purpose` and a self-contained prompt of the form:
     ```
     You are running a single story for the Sprintpilot autopilot.
     - Project root: {{project_root}}
@@ -634,7 +637,7 @@ Parse stdout as a single JSON object: `{"remaining":[...],"state":"..."}`.
     <action>**Merge per-story shards** after the layer completes:
     `node {{project_root}}/_Sprintpilot/scripts/merge-shards.js --archive --project-root "{{project_root}}"` — collapses the per-story state shards into the authoritative project YAMLs and archives the layer's shards under `.archive/layer-<timestamp>/` so the next layer starts clean.</action>
     <action>Run: `node {{project_root}}/_Sprintpilot/scripts/log-timing.js mark --story sprint --phase "_end" --project-root "{{project_root}}"` — closes the open `dispatch.layer-{{epic_id}}` mark.</action>
-    <action>Update `{state_file}` with the new STATE_FIELDS (each completed story's status is reflected via the merge above; advance `session_stories_done` by `{{active_layer}}.length`). Then `goto step=2` to re-evaluate the loop.</action>
+    <action>Update `{state_file}` with the new STATE_FIELDS (each completed story's status is reflected via the merge above; advance `session_stories_done` by `{{dispatched_stories}}.length`). Then `goto step=2` to re-evaluate the loop — any `{{deferred_stories}}` (keys not in this batch because `--max-parallel` capped it) become the next iteration's active_layer.</action>
     <goto step="2">Re-evaluate after parallel layer dispatch</goto>
   </check>
 </check>

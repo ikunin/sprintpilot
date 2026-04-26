@@ -64,8 +64,25 @@ function parseLayer(raw) {
 }
 
 function planLayer({ keys, maxParallel, projectRoot, branchPrefix, baseBranch }) {
-  const effectiveParallel = Math.max(1, Math.min(maxParallel | 0, keys.length));
-  const worktrees = keys.map((key) => ({
+  // Dedupe story keys — a duplicated key in --layer would otherwise
+  // produce two entries pointing at the same worktree path and same
+  // branch name, racing on `git worktree add`.
+  const seen = new Set();
+  const dedupedKeys = [];
+  for (const k of keys) {
+    if (seen.has(k)) continue;
+    seen.add(k);
+    dedupedKeys.push(k);
+  }
+  const effectiveParallel = Math.max(1, Math.min(maxParallel | 0, dedupedKeys.length));
+  // CAP: only dispatch the first `effectiveParallel` stories. The
+  // remaining keys are deferred — the autopilot loop will pick them up
+  // in the next iteration after this batch completes. Pre-2.0.8 the
+  // script created worktrees for ALL keys regardless of the cap, then
+  // the workflow spawned N agents anyway, fully ignoring --max-parallel.
+  const dispatchedKeys = dedupedKeys.slice(0, effectiveParallel);
+  const deferredKeys = dedupedKeys.slice(effectiveParallel);
+  const worktrees = dispatchedKeys.map((key) => ({
     story: key,
     worktree: path.join(projectRoot, '.worktrees', key),
     branch: `${branchPrefix}${key}`,
@@ -77,6 +94,7 @@ function planLayer({ keys, maxParallel, projectRoot, branchPrefix, baseBranch })
     effective_parallel: effectiveParallel,
     max_parallel: maxParallel,
     stories: worktrees,
+    deferred: deferredKeys,
   };
 }
 
@@ -90,8 +108,14 @@ function writePlan(projectRoot, plan) {
   return file;
 }
 
+// Match git's "branch already exists" diagnostic. We retry without -b
+// only when the FIRST attempt failed for this specific reason —
+// pre-2.0.8 the bare retry fired on ANY first-attempt failure and
+// silently checked out whatever stale branch happened to exist at the
+// requested name (e.g. last week's commits from an abandoned story).
+const BRANCH_EXISTS_RE = /a branch named .* already exists/i;
+
 function createWorktree({ projectRoot, worktree, branch, baseBranch }) {
-  // Try -b first, fall back to checkout-existing-branch if already present.
   const args = ['worktree', 'add', worktree, '-b', branch];
   if (baseBranch) args.push(baseBranch);
   const first = spawnSync('git', ['-C', projectRoot, ...args], {
@@ -99,7 +123,16 @@ function createWorktree({ projectRoot, worktree, branch, baseBranch }) {
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   if (first.status === 0) return { created: true, retried: false, stderr: first.stderr || '' };
-  // Retry without -b (branch exists).
+  // Only retry without -b if git specifically reported the branch
+  // already exists. Any other error (path collision, missing base
+  // branch, dirty index, etc.) is propagated rather than masked.
+  if (!BRANCH_EXISTS_RE.test(first.stderr || '')) {
+    return {
+      created: false,
+      retried: false,
+      stderr: first.stderr || '',
+    };
+  }
   const second = spawnSync(
     'git',
     ['-C', projectRoot, 'worktree', 'add', worktree, branch],
@@ -112,26 +145,45 @@ function createWorktree({ projectRoot, worktree, branch, baseBranch }) {
   };
 }
 
+// After a worktree is created, disable gc.auto on it. The sequential
+// path in workflow.md does this at line 738; pre-2.0.8 the parallel
+// path skipped it, so concurrent sub-agents in heavy repos could
+// trigger gc on each worktree mid-dispatch. Best-effort — never block
+// dispatch on a config write.
+function disableGcAutoOnWorktree(worktree) {
+  spawnSync('git', ['-C', worktree, 'config', '--local', 'gc.auto', '0'], {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+}
+
+// Roll back successful worktrees when a later create fails — leaves
+// no orphaned worktrees on disk, no `.layer-plan.json` describing
+// state that doesn't exist. Best-effort; rollback failures are logged
+// but don't change the overall non-zero exit.
+function rollbackWorktrees(projectRoot, created) {
+  for (const entry of created) {
+    const r = spawnSync(
+      'git',
+      ['-C', projectRoot, 'worktree', 'remove', '--force', entry.worktree],
+      { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] },
+    );
+    if (r.status !== 0) {
+      log.warn(`failed to roll back worktree ${entry.worktree}: ${r.stderr || 'unknown'}`);
+    }
+  }
+}
+
 function dispatch({ keys, maxParallel, projectRoot, branchPrefix, baseBranch, dryRun }) {
   const plan = planLayer({ keys, maxParallel, projectRoot, branchPrefix, baseBranch });
   const results = {
     plan_file: null,
     effective_parallel: plan.effective_parallel,
     stories: [],
+    deferred: plan.deferred,
     dry_run: !!dryRun,
   };
-  if (!dryRun) {
-    for (const entry of plan.stories) {
-      const out = createWorktree({
-        projectRoot,
-        worktree: entry.worktree,
-        branch: entry.branch,
-        baseBranch: entry.base_branch,
-      });
-      results.stories.push({ story: entry.story, worktree: entry.worktree, branch: entry.branch, ...out });
-    }
-    results.plan_file = writePlan(projectRoot, plan);
-  } else {
+  if (dryRun) {
     results.stories = plan.stories.map((e) => ({
       story: e.story,
       worktree: e.worktree,
@@ -140,7 +192,60 @@ function dispatch({ keys, maxParallel, projectRoot, branchPrefix, baseBranch, dr
       retried: false,
       stderr: '(dry-run)',
     }));
+    return results;
   }
+  // Real dispatch. Track successful creates so we can roll them back if
+  // a later create fails — leaving an orphan worktree + a plan file
+  // claiming it succeeded was the v2.0.7 partial-failure bug.
+  const succeeded = [];
+  let failureIndex = -1;
+  for (let i = 0; i < plan.stories.length; i++) {
+    const entry = plan.stories[i];
+    const out = createWorktree({
+      projectRoot,
+      worktree: entry.worktree,
+      branch: entry.branch,
+      baseBranch: entry.base_branch,
+    });
+    results.stories.push({
+      story: entry.story,
+      worktree: entry.worktree,
+      branch: entry.branch,
+      ...out,
+    });
+    if (out.created) {
+      disableGcAutoOnWorktree(entry.worktree);
+      succeeded.push(entry);
+    } else {
+      failureIndex = i;
+      break; // stop creating; remaining keys are not attempted
+    }
+  }
+  if (failureIndex !== -1) {
+    rollbackWorktrees(projectRoot, succeeded);
+    // Mark the previously-succeeded entries as rolled back so the
+    // workflow doesn't think their worktrees still exist on disk.
+    for (let i = 0; i < failureIndex; i++) {
+      results.stories[i].rolled_back = true;
+      results.stories[i].created = false;
+    }
+    // Mark untried-after-failure stories (the keys past failureIndex
+    // that we never attempted) so the workflow can see what's missing.
+    for (let i = failureIndex + 1; i < plan.stories.length; i++) {
+      results.stories.push({
+        story: plan.stories[i].story,
+        worktree: plan.stories[i].worktree,
+        branch: plan.stories[i].branch,
+        created: false,
+        retried: false,
+        stderr: '(skipped — earlier dispatch failed)',
+      });
+    }
+    // Do NOT write the plan file on partial failure — workflow.md
+    // should never read a plan describing worktrees that don't exist.
+    return results;
+  }
+  results.plan_file = writePlan(projectRoot, plan);
   return results;
 }
 
