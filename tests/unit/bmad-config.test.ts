@@ -101,6 +101,53 @@ describe('bmad-config', () => {
     expect(await readBmadVersion(dir)).toBe('6.2.0');
   });
 
+  it('readBmadVersion returns the version from the v6.2.x installation-scoped manifest shape', async () => {
+    // v6.2.x BMad installer writes this shape — both the project and
+    // every module carry their own `version` field. The installer-level
+    // version under `installation.version` is the canonical "BMad
+    // Method version" we want to display. Pre-fix, neither code path
+    // (nested `bmad.version`, flat `version`) matched, so the installer
+    // showed "BMad Method version: unknown".
+    mkdirSync(join(dir, '_bmad', '_config'), { recursive: true });
+    writeFileSync(
+      join(dir, '_bmad', '_config', 'manifest.yaml'),
+      [
+        'installation:',
+        '  version: 6.2.2',
+        '  installDate: 2026-03-28T00:06:49.079Z',
+        'modules:',
+        '  - name: core',
+        '    version: 6.2.2',
+        '  - name: bmm',
+        '    version: 6.2.2',
+        '  - name: tea',
+        '    version: 1.7.2',
+        '',
+      ].join('\n'),
+      'utf8',
+    );
+    expect(await readBmadVersion(dir)).toBe('6.2.2');
+  });
+
+  it('readBmadVersion prefers installation.version over a module entry sharing the version field', async () => {
+    // The modules array carries per-module versions; we must NOT pick
+    // up a module's version when installation.version is present.
+    mkdirSync(join(dir, '_bmad', '_config'), { recursive: true });
+    writeFileSync(
+      join(dir, '_bmad', '_config', 'manifest.yaml'),
+      [
+        'installation:',
+        '  version: 6.2.2',
+        'modules:',
+        '  - name: tea',
+        '    version: 1.7.2',
+        '',
+      ].join('\n'),
+      'utf8',
+    );
+    expect(await readBmadVersion(dir)).toBe('6.2.2');
+  });
+
   it('readAddonManifestVersion parses addon.version', async () => {
     const p = join(dir, 'manifest.yaml');
     writeFileSync(p, 'addon:\n  name: x\n  version: 1.2.3\n', 'utf8');
