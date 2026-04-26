@@ -76,10 +76,20 @@ npx @ikunin/sprintpilot@latest install --tools all
 
 Replace `<tool>` with one of the keys from [Supported Tools](#supported-tools) below.
 
+### Pick a Complexity Profile
+
+The interactive installer asks which profile to use. To skip the prompt, pass `--profile`:
+
+```bash
+npx @ikunin/sprintpilot@latest install --tools claude-code --profile medium --yes
+```
+
+Valid values: `nano`, `small`, `medium` (default), `large`, `legacy`. See the [profile table in the README](../README.md#adaptive-process-scaling-v2) for what each enables. Missing profile defaults to `medium`.
+
 ### Non-Interactive (CI/CD)
 
 ```bash
-npx @ikunin/sprintpilot@latest install --tools <tool1>,<tool2> --yes
+npx @ikunin/sprintpilot@latest install --tools <tool1>,<tool2> --profile <profile> --yes
 ```
 
 ### Dry Run (preview without changes)

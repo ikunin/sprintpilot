@@ -2,6 +2,55 @@
 
 All configuration lives in `_Sprintpilot/modules/`. Changes take effect on the next `/sprint-autopilot-on` invocation.
 
+## Autopilot Configuration (`modules/autopilot/config.yaml`)
+
+### Complexity Profile (v2)
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `complexity_profile` | `medium` | One of `nano`, `small`, `medium`, `large`, `legacy`. Selects the per-story flow + which v2 layers are enabled. Missing key falls back to `medium` with a stderr notice. |
+
+Profile resolution happens at boot via `_Sprintpilot/scripts/resolve-profile.js`. Profile YAMLs live in `_Sprintpilot/modules/autopilot/profiles/` (`_base.yaml` shared by nano/small/medium/large; `legacy.yaml` stands alone with `version_pinned: "v1.0.5"`).
+
+| Profile | Per-story flow | Branching | Worktrees | Parallel stories |
+|---------|---------------|-----------|-----------|------------------|
+| `nano` | `bmad-quick-dev` (one-shot) | `epic` | off | n/a |
+| `small` | Full 7-step BMad cycle | `story` | on | off |
+| `medium` *(default)* | Full 7-step BMad cycle | `story` | on | off |
+| `large` | Full 7-step BMad cycle | `story` | on | on |
+| `legacy` | v1.0.5 byte-for-byte | `story` | on | off |
+
+### Session & Retrospective
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `autopilot.session_story_limit` | `3` (nano: `5`; large/legacy: `3`) | Stories per session before checkpoint. `0` = unlimited. Retuned in 2.0.1 after context-rot exposure. |
+| `autopilot.retrospective_mode` | `auto` | `auto` (deterministic artifact, continue) / `stop` (pause for `/bmad-retrospective`) / `skip` (no artifact). |
+
+### V2 Optimization Layers
+
+Every layer can be disabled in isolation. `legacy` profile pins all of these to `false` for v1.0.5 byte-for-byte behavior.
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `autopilot.phase_timings` | `true` (legacy: `false`) | Emit `duration` records via `log-timing.js mark`. Mark is a single-call replacement for start/end pairs — missed bracket calls are impossible because there are no brackets. Three deterministic scripts auto-emit on success: `mark-done-stories-tasks.js`, `infer-dependencies.js write`, `inject-tasks-section.js`. |
+| `autopilot.coalesce_state_writes` | `true` (legacy: `false`) | Buffer non-critical state in `.pending/<kind>/<story>.yaml`; flushed atomically at story boundary + session checkpoint + sprint complete. Crash-recovery keys (`current_story`, `current_bmad_step`, `in_worktree`, `patch_commits`) bypass the buffer. |
+| `autopilot.conditional_boot_work` | `true` (large/legacy: `false`) | Skip health-check + branch reconciliation on a clean repo (main worktree only, no in-progress stories). Saves 8–30s per session. |
+| `autopilot.cache_shared_reads` | `true` (legacy: `false`) | TTL + source-mtime aware file cache (`_Sprintpilot/scripts/cached-read.js`). Any writer's mtime advance forces a miss. |
+| `autopilot.auto_infer_dependencies` | `true` (nano + legacy: `false`) | Infer story DAG once after `bmad-sprint-planning` and write `_Sprintpilot/sprints/dependencies.yaml` with an `# AUTO-INFERRED` marker. Hand-authored files (no marker) are detected and respected silently. Failure logs and continues — `resolve-dag.js` falls back to linear ordering. |
+
+### Profile Files
+
+The profile system uses base + overlay (DRY). Files live in `_Sprintpilot/modules/autopilot/profiles/`:
+
+- `_base.yaml` — shared defaults (inherited by nano, small, medium, large)
+- `nano.yaml` — overrides for the quick-dev flow + epic granularity
+- `small.yaml` / `medium.yaml` — minimal overlays
+- `large.yaml` — enables `parallel_stories: true`, `state_sharding: always`, etc.
+- `legacy.yaml` — standalone (no inheritance), `version_pinned: "v1.0.5"`
+
+Re-run `sprintpilot install --profile <name>` to switch profiles non-destructively (your config values are preserved).
+
 ## Git Configuration (`modules/git/config.yaml`)
 
 ### Core Settings
@@ -145,6 +194,20 @@ GitHub and GitLab require their CLIs (`gh`, `glab`). No API fallback is availabl
 | `multi_agent.max_parallel_review_layers` | `3` | Always 3 (blind, edge-case, acceptance) |
 | `multi_agent.max_parallel_research` | `3` | Max concurrent research agents per batch |
 | `multi_agent.max_parallel_analysis` | `5` | Max concurrent codebase analysis agents |
+
+### V2 Parallelism & Sharding
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `ma.state_sharding` | `auto` (large: `always`; legacy: `never`) | `auto` / `always` / `never`. Per-story state shards live under `.autopilot-state/<story>.yaml` and `.decision-log/<story>.yaml`; merged into the project YAMLs by `merge-shards.js`. |
+| `ma.parallel_stories` | `false` (large: `true`) | Dispatch independent stories from a DAG layer concurrently. Requires Claude Code (or Gemini CLI w/ `experimental_parallel_on_gemini: true`). |
+| `ma.max_parallel_stories` | `2` (large: `3`) | Cap on concurrent stories per layer. |
+| `ma.experimental_parallel_on_gemini` | `false` | Opt-in parallel dispatch under Gemini CLI. Worktree-scoped subagents are still upstream (`gemini-cli#22967`) — at-your-own-risk. |
+| `ma.parallel_epics` | `false` | EXPERIMENTAL — cross-epic parallelism with merge-conflict preflight. Off on every profile by default. |
+| `ma.min_epic_duration_for_parallel_sec` | `300` | Don't bother spinning up parallel infrastructure if the epic is shorter than this. |
+| `ma.baseline_story_duration_sec` | `600` | Used to estimate epic duration for the gate above. |
+| `ma.max_consecutive_conflicts` | `2` | After this many consecutive merge conflicts mid-session, parallel dispatch flips a session-scoped disable flag. |
+| `ma.effective_parallel_floor` | `2` | Don't engage parallel dispatch unless at least this many stories run in parallel. |
 
 ## Secrets Allowlist (`.secrets-allowlist`)
 

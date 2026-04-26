@@ -1,53 +1,83 @@
 # Component Inventory
 
-## Shell Scripts
+## Node.js Scripts
 
-The operational backbone of the add-on. All scripts are in `_Sprintpilot/scripts/`.
+The operational backbone of the addon. All scripts live in `_Sprintpilot/scripts/` and run on Node.js 18+ with **zero third-party runtime dependencies**.
 
-| Script | Lines | Purpose | Dependencies |
-|--------|-------|---------|-------------|
-| `lock.js` | 112 | Mutex lock with stale timeout | Core Unix tools |
-| `health-check.js` | 108 | Worktree state classification | Git |
-| `stage-and-commit.js` | 169 | Explicit staging with pre-commit validation | Git |
-| `sanitize-branch.js` | 84 | Story key to branch name conversion | Git, sha256sum/shasum |
-| `detect-platform.js` | 90 | Git hosting platform auto-detection | Platform CLIs (optional) |
-| `create-pr.js` | 199 | PR/MR creation across platforms | Platform CLI or API tokens |
-| `sync-status.js` | 139 | Git metadata tracking in YAML | awk |
-| `lint-changed.js` | 293 | Multi-language linting of changed files | Language-specific linters |
+### Core Git / Commit Pipeline
 
-**Total:** 8 scripts, ~1,194 lines
+| Script | Purpose |
+|--------|---------|
+| `lock.js` | Mutex lock with stale timeout (epoch + UUID, no PID — Claude Code unreliable). |
+| `health-check.js` | Worktree state classification (COMMITTED / CLEAN_DONE / STALE / DIRTY / ORPHAN). |
+| `stage-and-commit.js` | Explicit staging with secrets / size / binary checks. Never uses `git add -A`. |
+| `sanitize-branch.js` | Story key → valid git branch name. |
+| `detect-platform.js` | Auto-detect GitHub / GitLab / Bitbucket / Gitea / git-only. |
+| `create-pr.js` | PR/MR creation across 4 platforms (CLI primary, REST fallback for Bitbucket / Gitea). |
+| `sync-status.js` | Git metadata → `git-status.yaml` (granularity-aware: story or epic). |
+| `lint-changed.js` | Multi-language linting on changed files (14 languages). |
+| `git-portable.js` | Cross-platform helpers (`count-worktrees`, `config-get`, `common-dir`, `safe-add`). |
+
+### V2 Profile + Adaptive Scaling
+
+| Script | Purpose |
+|--------|---------|
+| `resolve-profile.js` | Profile resolution (base + overlay; fallback to `medium` with notice). |
+| `check-prereqs.js` | Node ≥ 18, git ≥ 2.18 enforcement (warn-only on git 2.5–2.17). |
+| `log-timing.js` | Phase timing — `mark` (single-call), `start` / `end` (legacy bracket), `_end` sentinel. JSONL writes. |
+| `summarize-timings.js` | Hotspot report (phases > 5% of total time). text / json / md. |
+| `state-shard.js` | Per-story state shards (`write` / `read` / `append` / `init` / `batch` / `flush`). |
+| `merge-shards.js` | Atomic shard → project YAML merge with corrupt-archive handling. |
+| `cached-read.js` | TTL + mtime-aware file cache (`read` / `invalidate` / `clear` / `stats`). |
+| `inject-tasks-section.js` | Deterministic Tasks/Subtasks recovery from Acceptance Criteria. |
+| `list-remaining-stories.js` | Indent-agnostic sprint-status scanner; envelope-format output. |
+| `mark-done-stories-tasks.js` | Fenced-block-aware task checkbox repair. |
+
+### DAG + Parallel Dispatch
+
+| Script | Purpose |
+|--------|---------|
+| `infer-dependencies.js` | LLM JSON envelope → validated `dependencies.yaml` (`scaffold-prompt` / `dry-run` / `write`). Never calls an LLM. |
+| `resolve-dag.js` | DAG `graph` / `layers` / `width` / `scaffold` (Kahn cycle detection, explicit > ordering). |
+| `agent-adapter.js` | Host detection with confidence levels (env > parent process > markers; tautology guard). |
+| `dispatch-layer.js` | Worktree-per-story preflight + `.layer-plan.json`. |
+| `preflight-merge.js` | Cross-epic merge-conflict probe (per-pair dry-run, 60s lock, HEAD restore). |
+| `submodule-lock.js` | Per-submodule lock keyed by slug. |
+| `with-retry.js` | Ref-lock-pattern jittered backoff (500ms–2s, 3 attempts). |
 
 ### Script Characteristics
 
-- All use `set -e` for fail-fast behavior
-- Portable across macOS (Bash 3.2+) and Linux
-- Atomic file writes via temp+mv pattern
-- Multiple fallback implementations for cross-platform tools
+- All scripts use `spawnSync(..., args[])` with no shell — cross-platform safe (bash, zsh, Git Bash, PowerShell, cmd).
+- Atomic file writes via tmp-sibling + `rename()` everywhere state matters.
+- Shared zero-dep helpers in `_Sprintpilot/lib/runtime/`: args, git, http, log, secrets, spawn, text, yaml-lite.
+- Exit codes: 0 = success, 1 = expected failure, 2 = error.
+- All accept `--help`. Most accept `--story` / `--phase` / `--meta` for timing instrumentation.
 
 ## Skill Definitions
 
-Skills are markdown-based prompts interpreted by AI tools. All source skills are in `_Sprintpilot/skills/`.
+Skills are markdown-based prompts interpreted by AI tools. All source skills live in `_Sprintpilot/skills/` and install into `<tool>/skills/` per tool.
 
 ### Autopilot Skills
 
 | Skill | Files | Purpose |
 |-------|-------|---------|
-| `sprint-autopilot-on` | SKILL.md, workflow.md | Full autonomous sprint execution (10-step orchestrator) |
+| `sprint-autopilot-on` | SKILL.md, workflow.md (~890 lines, profile-aware) | Full autonomous sprint execution |
 | `sprint-autopilot-off` | SKILL.md, workflow.md | Graceful exit with status report |
+| `sprintpilot-update` | SKILL.md, workflow.md | In-IDE update flow (compares vs npm latest) |
 
 ### Multi-Agent Skills
 
 | Skill | Agents | Purpose | Output |
 |-------|--------|---------|--------|
-| `sprintpilot-code-review` | 3 | Parallel adversarial code review | Prioritized findings |
-| `sprintpilot-codebase-map` | 5 | Full codebase analysis | 5 analysis files |
-| `sprintpilot-assess` | 3 | Tech debt + dependency audit | brownfield-assessment.md |
-| `sprintpilot-reverse-architect` | 3 | Bottom-up architecture extraction | architecture.md |
-| `sprintpilot-migrate` | 4 | Migration planning | migration-plan.md |
-| `sprintpilot-research` | 3 | Parallel research fan-out | Research report |
+| `sprintpilot-code-review` | 3 | Parallel adversarial code review | Triaged findings (PATCH / WARN / DISMISS) |
+| `sprintpilot-codebase-map` | 5 | Brownfield codebase analysis | 5 analysis files |
+| `sprintpilot-assess` | 3 | Tech debt + dependency audit | `brownfield-assessment.md` |
+| `sprintpilot-reverse-architect` | 3 | Bottom-up architecture extraction | BMad-compatible `architecture.md` |
+| `sprintpilot-migrate` | 4 | Full-lifecycle migration planning | `migration-plan.md` + `migration-epics.md` |
+| `sprintpilot-research` | N | Parallel research fan-out | Research report |
 | `sprintpilot-party-mode` | 2-3 | Multi-persona group discussions | Discussion summary |
 
-**Total:** 9 skills, 19 subagent prompts
+**Total:** 10 skills, 20 subagent prompts.
 
 ### Subagent Prompts
 
@@ -63,46 +93,74 @@ Skills are markdown-based prompts interpreted by AI tools. All source skills are
 
 | File | Purpose |
 |------|---------|
-| `_Sprintpilot/manifest.yaml` | Addon metadata and skill registry |
-| `_Sprintpilot/modules/git/config.yaml` | Git workflow configuration (branches, commits, lint, push, PR, worktree, lock, platform) |
-| `_Sprintpilot/modules/ma/config.yaml` | Multi-agent parallelism limits |
+| `_Sprintpilot/manifest.yaml` | Addon metadata, version, BMad compat, `installed_skills` |
+| `_Sprintpilot/modules/autopilot/config.yaml` | Profile selection + session/retro settings |
+| `_Sprintpilot/modules/autopilot/profiles/_base.yaml` | Shared defaults for nano/small/medium/large |
+| `_Sprintpilot/modules/autopilot/profiles/{nano,small,medium,large}.yaml` | Profile overlays |
+| `_Sprintpilot/modules/autopilot/profiles/legacy.yaml` | v1.0.5 byte-for-byte (standalone, `version_pinned`) |
+| `_Sprintpilot/modules/git/config.yaml` | Git workflow (granularity, branches, lint, push, PR, worktree, lock, platform) |
+| `_Sprintpilot/modules/ma/config.yaml` | Multi-agent + parallelism (state sharding, parallel stories/epics, gates) |
 | `_Sprintpilot/modules/git/templates/pr-body.md` | PR body template |
-| `_Sprintpilot/modules/git/templates/commit-story.txt` | Story commit message template |
-| `_Sprintpilot/modules/git/templates/commit-patch.txt` | Patch commit message template |
-| `_Sprintpilot/modules/git/branching-and-pr-strategy.md` | Branching strategy documentation |
+| `_Sprintpilot/modules/git/templates/commit-story.txt` | Story commit template |
+| `_Sprintpilot/modules/git/templates/commit-patch.txt` | Patch commit template |
+| `_Sprintpilot/modules/git/branching-and-pr-strategy.md` | Branching strategy doc |
 
 ## Installation Components
 
 | File | Purpose |
 |------|---------|
-| `bin/sprintpilot.js (install subcommand)` | Multi-tool installer supporting 9 AI coding tools |
-| `bin/sprintpilot.js (uninstall subcommand)` | Clean removal with worktree cleanup |
-| `_Sprintpilot/templates/agent-rules.md` | Template for system prompt generation |
+| `bin/sprintpilot.js` | npm CLI (`install` / `uninstall` / `check-update`) |
+| `lib/commands/install.js` | Install subcommand — per-tool deploy, system prompt upsert, legacy migration, `--profile` flag |
+| `lib/commands/uninstall.js` | Uninstall subcommand — per-tool removal, marker strip, worktree cleanup |
+| `lib/commands/check-update.js` | npm latest-version lookup |
+| `lib/core/tool-registry.js` | 9 supported tools (skill dir + system-prompt strategy) |
+| `lib/core/markers.js` | `<!-- BEGIN/END:sprintpilot-rules -->` block handling (+ legacy migration) |
+| `lib/core/v1-detect.js` | Legacy `bmad-autopilot-addon` detection |
+| `_Sprintpilot/templates/agent-rules.md` | Per-tool system prompt template |
 | `_Sprintpilot/.secrets-allowlist` | Patterns excluded from secrets scanning |
 
 ## Test Components
 
-### Unit Tests (BATS)
+### Unit + Integration Tests (Vitest, TypeScript)
 
-| Test File | Count | Covers |
-|-----------|-------|--------|
-| `lock.bats` | 12 | Lock acquire, release, stale detection |
-| `health-check.bats` | 13 | Worktree classification |
-| `stage-and-commit.bats` | 15 | Staging, secrets, size, binary checks |
-| `sanitize-branch.bats` | 11 | Branch name sanitization |
-| `detect-platform.bats` | 6 | Platform auto-detection |
-| `create-pr.bats` | 6 | PR creation |
-| `sync-status.bats` | 11 | YAML status updates |
-| `lint-changed.bats` | 6 | Multi-language linting |
+Total: 535 tests across 32+ files. Highlights:
 
-**Total:** 8 suites, 80 tests
+| Suite | Coverage |
+|-------|----------|
+| `agent-adapter.test.ts` | Host detection priority + tautology guard |
+| `cached-read.test.ts` | TTL, mtime invalidation, stats |
+| `check-prereqs.test.ts` | Node / git version gates |
+| `complexity-profile.test.ts` | Profile resolution (base+overlay, fallback) |
+| `conditional-boot-work.test.ts` | Clean-repo fast-path |
+| `dispatch-layer.test.ts` | Worktree preflight + `.layer-plan.json` |
+| `git-portable.test.ts` | 18 cases against real temp git repo + non-repo failure path |
+| `infer-dependencies.test.ts` | 30 cases: schema, cycles, hash stability, override preservation, CLI round-trip |
+| `inject-tasks-section.test.ts` | Numbered / bullet / `**AC-N:**` styles, fenced-block awareness |
+| `list-remaining-stories.test.ts` | Every observed sprint-status shape |
+| `log-timing.test.ts` | 24-writer race-free subprocess append + mark API + `_end` sentinel |
+| `mark-done-stories-tasks.test.ts` | Fenced code blocks (``` and `~~~`), output_folder honoring |
+| `merge-shards.test.ts` | Decision-log dedup, corrupt archive |
+| `nano-routing.test.ts` | quick-dev escalation safety net |
+| `preflight-merge.test.ts` | Real-temp-git-repo conflict detection |
+| `resolve-dag.test.ts` | Kahn cycle detection, override merging, YAML round-trip |
+| `resolve-profile.test.ts` | Base+overlay merge, missing-key fallback |
+| `state-shard.test.ts` | Atomic write, monotonic tiebreaker |
+| `state-shard-coalesce.test.ts` | Buffer + flush + crash-recovery key bypass |
+| `submodule-lock.test.ts` | Concurrent acquire + slug keying |
+| `summarize-timings.test.ts` | Pairing, hotspot threshold, formats |
+| `sync-status-granularity.test.ts` | Story vs epic granularity passthrough |
+| `with-retry.test.ts` | Ref-lock pattern matching, non-matching pass-through |
+| `worktree-path-audit.test.ts` | `.worktrees/` scope enforcement |
 
-### E2E Tests (Vitest + TypeScript)
+### E2E Tests (Vitest, gated on Claude Code presence)
 
-| Test | Strategy | Duration Budget |
-|------|----------|----------------|
-| `greenfield.test.ts` | Build Tic Tac Toe from scratch via autopilot | 8 sessions x 20 min |
-| `brownfield.test.ts` | Multi-agent analysis pipeline on json-server | 4 phases x 10-25 min |
+| Test | Strategy |
+|------|----------|
+| `greenfield.test.ts` | Build Tic Tac Toe / sudoku from scratch via autopilot |
+| `brownfield.test.ts` | Multi-agent analysis pipeline on json-server |
+| `sudoku.test.ts` | Web-game e2e exercising parallel dispatch |
+| `medium-parallel.test.ts` | Asserts overlapping skill intervals in `.timings/*.jsonl` |
+| `nano.test.ts` | Asserts quick-dev invocation + no `bmad-dev-story` |
 
 ### Test Harness
 
@@ -110,18 +168,19 @@ Skills are markdown-based prompts interpreted by AI tools. All source skills are
 |--------|---------|
 | `claude-runner.ts` | Spawns Claude Code CLI, captures JSON output |
 | `assertions.ts` | File system, YAML, and git state assertions |
-| `temp-project.ts` | Temporary project factory with BMad Method setup |
+| `temp-project.ts` | Temporary project factory with BMad setup |
 | `cost-tracker.ts` | API cost tracking and reporting |
+| `git-utils.ts` | Story branch detection, dirty-tree probes |
 
 ## Platform Support Matrix
 
 | Platform | CLI | API Fallback | Tested |
 |----------|-----|-------------|--------|
-| GitHub | `gh` | - | Yes |
-| GitLab | `glab` | - | Yes |
-| Bitbucket | `bb` | `curl` + token | Yes |
-| Gitea | `tea` | `curl` + token | Yes |
-| Git-only | - | - | Yes |
+| GitHub | `gh` | — | Yes |
+| GitLab | `glab` | — | Yes |
+| Bitbucket | `bb` | `curl` + `BITBUCKET_TOKEN` | Yes |
+| Gitea | `tea` | `curl` + `GITEA_TOKEN` | Yes |
+| Git-only | — | — | Yes |
 
 ## Linter Support Matrix
 
@@ -134,8 +193,7 @@ Skills are markdown-based prompts interpreted by AI tools. All source skills are
 | Go | golangci-lint |
 | Ruby | rubocop |
 | Java | checkstyle, pmd |
-| C | cppcheck, clang-tidy |
-| C++ | cppcheck, clang-tidy |
+| C / C++ | cppcheck, clang-tidy |
 | C# | dotnet format |
 | Swift | swiftlint |
 | PL/SQL | sqlfluff |

@@ -20,14 +20,14 @@ cd tests && npm install && cd ..
 
 ## Project Structure
 
-The addon has no build step — skills are markdown, scripts are Node.js. The only compiled surface is the TypeScript e2e/integration test layer, compiled by Vitest on the fly.
+The addon has no build step — skills are markdown, scripts are Node.js, profiles are YAML. The only compiled surface is the TypeScript test layer, compiled by Vitest on the fly.
 
 | Layer | Language | Build |
 |-------|----------|-------|
 | Skills | Markdown | None (interpreted by AI tools) |
-| Scripts | Node.js | None (run via `node <file>.js`) |
-| Config | YAML / Markdown | None |
-| Unit + integration tests | TypeScript (Vitest) | On-the-fly by Vitest |
+| Scripts | Node.js (zero third-party deps) | None (run via `node <file>.js`) |
+| Profiles + module config | YAML | None |
+| Tests | TypeScript (Vitest) | On-the-fly by Vitest |
 
 ## Running Tests
 
@@ -65,12 +65,15 @@ npm run test:e2e:brownfield
 npm run test:e2e
 ```
 
-**Important:** E2e tests invoke Claude Code and cost real API credits. Budget limits are configured per test.
+**Important:** E2e tests invoke Claude Code and cost real API credits. They are gated on `claude-cli` presence (the `ANTHROPIC_API_KEY` gate from earlier was widened in 2.0.1).
 
-| Test | Budget | Timeout | Sessions |
-|------|--------|---------|----------|
-| Greenfield | $20/session x 8 sessions | 20 min/session | Up to 8 |
-| Brownfield | $8-10/phase x 4 phases | 10-25 min/phase | 4 phases |
+| Test | Strategy | Notes |
+|------|----------|-------|
+| `greenfield.test.ts` | Build Tic Tac Toe / sudoku from scratch | Full autopilot, multi-session |
+| `brownfield.test.ts` | Multi-agent analysis pipeline on json-server | 4 phases |
+| `sudoku.test.ts` | Web-game e2e exercising parallel dispatch | POSIX-only by design |
+| `medium-parallel.test.ts` | Asserts overlapping skill intervals in `.timings/*.jsonl` | Detects parallelism |
+| `nano.test.ts` | Asserts quick-dev invocation + no `bmad-dev-story` | Validates nano routing |
 
 **Environment variables:**
 - `BMAD_TEST_MODEL` — Override model (default: `sonnet`)

@@ -2,17 +2,19 @@
 
 ## Project Overview
 
-- **Type:** Monolith — CLI tool / AI coding tool add-on
-- **Primary Languages:** Shell (Bash), Markdown
-- **Architecture:** Additive add-on layered on BMad Method
+- **Type:** Monolith — npm CLI + BMad Method addon
+- **Primary Languages:** Node.js (zero-runtime-dep helper scripts), Markdown (skill prompts), YAML (config)
+- **Test Languages:** TypeScript (Vitest)
+- **Architecture:** Additive addon layered on BMad Method, profile-driven adaptive scaling (v2)
 - **Supported Tools:** Claude Code, Cursor, Windsurf, Cline, Roo, Trae, Kiro, GitHub Copilot, Gemini CLI
 
 ### Quick Reference
 
-- **Framework:** BMad Method >=6.2.0
-- **Entry Point:** `bin/sprintpilot.js (install subcommand)` (installation), `/sprint-autopilot-on` (execution)
-- **Architecture Pattern:** Skills-as-prompts + shell script infrastructure
-- **Test Suite:** 80 BATS unit tests + 2 Vitest e2e suites
+- **Framework:** BMad Method >= 6.2.0
+- **Runtime:** Node.js >= 18 (no Bash dependency at runtime)
+- **Entry Point:** `bin/sprintpilot.js install` (installation), `/sprint-autopilot-on` (execution)
+- **Architecture Pattern:** Skills-as-prompts + Node.js script infrastructure + complexity profiles
+- **Test Suite:** 535 unit + integration tests (Vitest) + 5 e2e suites (gated on Claude Code presence)
 
 ## Generated Documentation
 
@@ -20,6 +22,12 @@
 - [Source Tree Analysis](./source-tree-analysis.md)
 - [Component Inventory](./component-inventory.md)
 - [Development Guide](./development-guide.md)
+
+## V2 Design Notes
+
+- [Adaptive Process Scaling](./adaptive-process-scaling.md) — concept, profiles, rollout
+- [Implementation Plan](./implementation-plan.md) — 12-PR roadmap
+- [Implementation Decisions](./implementation-decisions.md) — per-PR rationale
 
 ## Existing Documentation
 

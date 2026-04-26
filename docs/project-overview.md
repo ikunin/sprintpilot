@@ -12,24 +12,23 @@ BMad Method provides a structured AI-driven development workflow with 50+ skills
 
 ## Project Type
 
-- **Type:** CLI tool / AI coding tool add-on
+- **Type:** npm CLI + BMad Method addon
 - **Repository:** Monolith
-- **Primary Languages:** Shell (Bash), Markdown
-- **Test Languages:** TypeScript (Vitest, BATS)
+- **Primary Languages:** Node.js (zero-runtime-dep helper scripts), Markdown (skill prompts), YAML (config)
+- **Test Languages:** TypeScript (Vitest)
 - **License:** Apache 2.0
 
 ## Technology Stack
 
 | Category | Technology | Version | Purpose |
 |----------|-----------|---------|---------|
-| Runtime | Bash | 3.2+ | Script execution (macOS compatible) |
+| Runtime | Node.js | >= 18 | Script execution (cross-platform; no Bash dependency at runtime) |
 | Skill Engine | Markdown | - | AI prompt-based skill definitions |
-| Base Framework | BMad Method | >=6.2.0 | Structured AI development workflow |
-| Test Runner (unit) | BATS | - | Shell script unit testing |
-| Test Runner (e2e) | Vitest | ^3.0.0 | End-to-end integration testing |
-| Test Language | TypeScript | ^5.7.0 | E2E test implementation |
-| Package Manager | npm | - | Test dependency management |
-| Version Control | Git | - | Worktree-based isolation |
+| Base Framework | BMad Method | >= 6.2.0 | Structured AI development workflow |
+| Test Runner | Vitest | ^3.0.0 | Unit, integration, and e2e tests |
+| Test Language | TypeScript | ^5.7.0 | Test implementation |
+| Package Manager | npm | - | Distribution + test dependencies |
+| Version Control | Git | >= 2.5 (>= 2.18 for submodule speedups) | Worktree-based isolation |
 | AI Tools | Claude Code, Cursor, Windsurf, Cline, Roo, Trae, Kiro, GitHub Copilot, Gemini CLI | - | Any of 9 supported coding agents |
 
 ## Architecture
@@ -43,23 +42,32 @@ BMad Method provides a structured AI-driven development workflow with 50+ skills
 ## Key Capabilities
 
 1. **Autonomous sprint execution** — reads sprint plan, implements stories end-to-end
-2. **Git workflow integration** — worktree isolation, explicit staging, stacked PRs
-3. **Multi-agent intelligence** — parallel code review (3 layers), codebase mapping (5 streams), migration planning (4 agents)
-4. **Session management** — checkpoints after 3 stories, crash recovery, orphaned worktree detection
-5. **Multi-language linting** — 12+ languages with configurable linter chains
-6. **Security-first commits** — secrets scanning, file size limits, binary detection
+2. **Adaptive process scaling (v2)** — `complexity_profile` selects nano (one-shot) / small / medium / large / legacy flow
+3. **Git workflow integration** — worktree isolation, explicit staging, stacked PRs, story / epic granularity
+4. **Multi-agent intelligence** — parallel code review (3 layers), codebase mapping (5 streams), migration planning (4 agents)
+5. **Parallel story dispatch** — when host supports concurrent subagents, the autopilot dispatches independent stories from a DAG layer in parallel (Claude Code today; Gemini CLI experimentally)
+6. **Auto-inferred story DAG** — autopilot infers inter-story dependencies once after `bmad-sprint-planning`; hand-authored sidecars are detected and respected
+7. **Phase timing instrumentation** — `mark` API + auto-emit on critical paths; hotspot reports surface phases > 5% of total time
+8. **Session management** — profile-aware checkpoints, crash recovery, orphaned worktree detection, fresh-context finalize
+9. **Multi-language linting** — 14 languages with configurable linter chains
+10. **Security-first commits** — secrets scanning, file size limits, binary detection
 
 ## Repository Structure
 
 | Directory | Purpose |
 |-----------|---------|
-| `_Sprintpilot/` | All addon source code (scripts, skills, modules, config) |
-| `_Sprintpilot/scripts/` | 8 shell scripts — git operations backbone |
-| `_Sprintpilot/skills/` | 9 skill definitions with 19 subagent prompts |
-| `_Sprintpilot/modules/` | Module configuration (git, multi-agent) |
+| `bin/` | npm CLI entry point (`sprintpilot install / uninstall / check-update`) |
+| `lib/` | Installer runtime (Node.js, zero-third-party-dep) |
+| `_Sprintpilot/` | Addon payload — copied into target projects by `sprintpilot install` |
+| `_Sprintpilot/scripts/` | ~30 Node.js scripts (git ops, profile, timing, DAG, dispatch, shards) |
+| `_Sprintpilot/lib/runtime/` | Shared zero-dep helpers (args, git, http, log, secrets, spawn, text, yaml-lite) |
+| `_Sprintpilot/skills/` | 10 addon-owned skills with 19 subagent prompts |
+| `_Sprintpilot/modules/autopilot/profiles/` | v2 profile YAMLs (base+overlay) |
+| `_Sprintpilot/modules/git/` | Git workflow config + platform.yaml |
+| `_Sprintpilot/modules/ma/` | Multi-agent + parallelism config |
+| `tests/unit/` | 535 Vitest unit + integration tests |
+| `tests/e2e/` | End-to-end suites (greenfield, brownfield, sudoku, medium-parallel, nano) |
 | `docs/` | Project documentation |
-| `tests/scripts/` | 80+ BATS unit tests for shell scripts |
-| `tests/e2e/` | End-to-end integration tests (greenfield + brownfield) |
 
 ## Links
 

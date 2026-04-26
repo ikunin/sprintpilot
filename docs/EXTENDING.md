@@ -30,40 +30,43 @@ The addon supports GitHub, GitLab, Bitbucket, and Gitea. To add another platform
 
 ### 2. Add to `scripts/detect-platform.js`
 
-Add CLI detection:
-```bash
-HAS_MYCLI=false
-mycli --version &>/dev/null && HAS_MYCLI=true
+Both scripts are Node.js. Add a CLI probe entry to the platform list (each entry has a `cli` command and a `urlPattern` regex), then re-export the platform name from the priority resolver:
+
+```js
+const PLATFORMS = [
+  // ...existing entries...
+  {
+    name: 'myplatform',
+    cli: 'mycli --version',
+    urlPattern: /myplatform\.com[:/]/i,
+  },
+];
 ```
 
-Add to the counter:
-```bash
-[ "$HAS_MYCLI" = true ] && DETECTED=$((DETECTED + 1)) && SINGLE="myplatform"
-```
-
-Add URL regex match:
-```bash
-if echo "$REMOTE_URL" | grep -qE 'myplatform\.com[:/]'; then
-  echo "myplatform"
-  exit 0
-fi
-```
+Both the CLI probe (`spawnSync('mycli', ['--version'])`) and the URL regex are tried in priority order: explicit config > CLI detection > remote URL regex > `git_only` fallback.
 
 ### 3. Add to `scripts/create-pr.js`
 
-Add a case block:
-```bash
-  myplatform)
-    if command -v mycli &>/dev/null; then
-      PR_URL=$(mycli pr create ...) || { echo "ERROR: ..." >&2; exit 1; }
-      echo "$PR_URL"
-    elif [ -n "$MYPLATFORM_TOKEN" ]; then
-      # API fallback
-      ...
-    else
-      echo "SKIPPED"; exit 2
-    fi
-    ;;
+Add a case for the new platform that delegates to the CLI primary path with an optional REST fallback. The pattern matches the existing Bitbucket/Gitea blocks:
+
+```js
+case 'myplatform': {
+  if (hasCli('mycli')) {
+    const result = spawnSync('mycli', ['pr', 'create',
+      '--base', baseBranch, '--head', branch,
+      '--title', title, '--body', body], { encoding: 'utf8' });
+    if (result.status !== 0) throw new Error(`mycli pr create failed: ${result.stderr}`);
+    return result.stdout.trim(); // PR URL
+  }
+  if (process.env.MYPLATFORM_TOKEN) {
+    // REST fallback via lib/runtime/http.js
+    return await postJson(`${baseUrl}/api/pulls`, {
+      headers: { Authorization: `token ${process.env.MYPLATFORM_TOKEN}` },
+      body: { base: baseBranch, head: branch, title, body },
+    });
+  }
+  return 'SKIPPED'; // git_only mode for this platform
+}
 ```
 
 ### 4. Update config
@@ -99,29 +102,25 @@ Under `lint.linters`, add your language:
 
 ### 2. Add to `scripts/lint-changed.js`
 
-Add a detection + run block inside the `detect_and_lint()` function:
+`lint-changed.js` is a Node.js script — language detection lives in a `LANGUAGES` table that pairs file-extension regexes with a list of linter probes. Add an entry:
 
-```bash
-  # MyLang
-  MYLANG_FILES=$(echo "$files" | grep -E '\.myext$' || true)
-  if [ -n "$MYLANG_FILES" ]; then
-    if command -v linter1 &>/dev/null; then
-      combined_output="${combined_output}$(run_linter "linter1" "linter1 check" "$MYLANG_FILES")\n"
-      found_any=true
-    elif command -v linter2 &>/dev/null; then
-      combined_output="${combined_output}$(run_linter "linter2" "linter2 --format text" "$MYLANG_FILES")\n"
-      found_any=true
-    fi
-  fi
+```js
+const LANGUAGES = [
+  // ...existing entries...
+  {
+    name: 'mylang',
+    extensions: /\.myext$/,
+    linters: [
+      { cmd: 'linter1', args: ['check'] },
+      { cmd: 'linter2', args: ['--format', 'text'] },
+    ],
+  },
+];
 ```
 
-**Pattern:** Match file extensions → check if linter is installed → run on matched files.
+**Pattern:** match file extensions → probe each linter in priority order via `spawnSync('command', ['-v'])` → run the first one found on matched files.
 
-For linters that don't take individual files (like `dotnet format` or `cargo clippy`), pass empty string for files and the linter runs on the whole project:
-
-```bash
-  combined_output="${combined_output}$(run_linter "dotnet-format" "dotnet format --verify-no-changes" "")\n"
-```
+For linters that don't take individual files (like `dotnet format` or `cargo clippy`), set `wholeProject: true` on the linter entry — the runner will invoke it without file arguments.
 
 ### Currently Supported Languages
 

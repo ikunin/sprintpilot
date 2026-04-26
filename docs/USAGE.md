@@ -25,6 +25,31 @@ All tools reference `_Sprintpilot/Sprintpilot.md` for the full skill catalog. Th
 
 ---
 
+## Complexity Profiles (v2)
+
+The per-story flow depends on the active `complexity_profile` in `_Sprintpilot/modules/autopilot/config.yaml`. It is set at install time (interactive prompt or `--profile` flag) and can be edited any time.
+
+| Profile | Per-story flow | Branching | Worktrees | Parallel stories | Notes |
+|---------|---------------|-----------|-----------|------------------|-------|
+| `nano` | `bmad-quick-dev` (one-shot) | `epic` (one PR per epic) | off | n/a | Quick-dev's internal review preserves quality gates. Auto-escalates to `full` if tests fail or classify severity is high (session-scoped only). |
+| `small` | Full 7-step BMad cycle | `story` | on | off | Default for single-developer projects. |
+| `medium` *(default)* | Full 7-step BMad cycle | `story` | on | off | Balanced for most sprints. Missing-key fallback. |
+| `large` | Full 7-step BMad cycle | `story` | on | **on** | Phase timings, state sharding, parallel dispatch all enabled. |
+| `legacy` | Pinned to v1.0.5 byte-for-byte | `story` | on | off | Zero behavior change vs. v1.0.5 — every v2 layer is forced off. |
+
+The autopilot resolves the profile at boot via `_Sprintpilot/scripts/resolve-profile.js`. Missing key falls back to `medium` with a stderr notice.
+
+### Parallel Story Dispatch
+
+When `ma.parallel_stories: true` AND the host supports concurrent subagents (Claude Code today; Gemini CLI experimentally) AND the active layer of the inferred DAG has ≥2 independent stories, step 3 of the autopilot:
+
+1. Runs `resolve-dag.js layers --epic <id>` to get layered story groups.
+2. Picks the first layer with non-done stories as the active layer.
+3. If `active_layer.length >= 2`: runs `dispatch-layer.js` to pre-create worktrees + write `.layer-plan.json`, spawns N concurrent Agent tool calls in a single message (one per story), and on return runs `merge-shards.js --archive` to collapse per-story state shards.
+4. Loops back to step 2 to re-evaluate the next layer.
+
+Single-story layers continue sequentially (no benefit from parallelism). Cross-epic parallelism (`ma.parallel_epics: true`) is experimental and gated behind a per-pair merge-conflict preflight — off on every profile by default.
+
 ## Git-Enhanced Autopilot
 
 ### Starting the Autopilot

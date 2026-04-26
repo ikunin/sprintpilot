@@ -197,6 +197,32 @@ Output files:
 
 ---
 
+## Adaptive Process Scaling (v2)
+
+Sprintpilot v2 introduced **complexity profiles** as a first-class config dimension. The right amount of process for a 2-story bug-fix sprint is different from a 30-story green-field rebuild — and the cost of running the heavy flow on a small change is real (more LLM turns, more context rot, more time). One knob picks the right balance:
+
+| Profile | Per-story flow | Branching | Worktrees | Parallel stories | Use it for |
+|---------|---------------|-----------|-----------|------------------|-----------|
+| `nano` | `bmad-quick-dev` (one-shot) | `epic` (one PR per epic) | off | n/a | Tiny patch sprints, hot-fix runs |
+| `small` | Full 7-step BMad cycle | `story` (one PR per story) | on | off | Single-developer projects, ≤10 stories |
+| `medium` *(default)* | Full 7-step BMad cycle | `story` | on | off | Default — balanced for most sprints |
+| `large` | Full 7-step BMad cycle | `story` | on | **on** (Claude Code) | Multi-epic sprints, 20+ stories |
+| `legacy` | Pinned to v1.0.5 behavior byte-for-byte | `story` | on | off | Existing installs that want zero behavior change |
+
+Pick the profile at install time — interactive installer asks, non-interactive flag is `--profile <nano|small|medium|large|legacy>`. Missing profile defaults to `medium` with no behavior change vs. v1.0.5.
+
+**One knob per feature** — every v2 optimization layer can be disabled in isolation without uninstalling. See [Configuration Reference](docs/CONFIGURATION.md#autopilot-configuration-modulesautopilotconfigyaml).
+
+### What v2 ships on top of the core flow
+
+- **Phase timing instrumentation** — `mark` action emits `duration` records per skill phase; auto-emitted on critical paths (no LLM bracket calls to skip). `summarize-timings.js` reports hotspots > 5% of total time.
+- **State sharding** — non-critical writes accumulate in `.pending/` shards, flushed atomically at story boundaries / session checkpoints / sprint complete. Crash-recovery keys still write straight through.
+- **Conditional boot work** — clean-repo sessions skip the slow health-check / branch-reconciliation block (saves 8–30s per session).
+- **Cached reads** — TTL + source-mtime aware file cache; any writer's mtime advance forces a miss without explicit invalidate.
+- **Auto-inferred story DAG** — autopilot infers inter-story dependencies once after `bmad-sprint-planning` and writes `_Sprintpilot/sprints/dependencies.yaml` with an `# AUTO-INFERRED` marker. Hand-authored files are detected and respected silently.
+- **Parallel story dispatch** — when `parallel_stories: true` and the host supports it, layer-aware dispatch runs N stories concurrently in their own worktrees, then merges their state shards. Claude Code today; Gemini CLI experimentally.
+- **Cross-platform** — every workflow.md call site runs under bash, zsh, Git Bash, PowerShell, and cmd. Portable Node.js helpers replace POSIX-shell idioms.
+
 ## Quick Start
 
 ```bash
@@ -215,8 +241,11 @@ npx bmad-method install
 ```
 
 ```bash
-# 2. Install Sprintpilot (interactive — select your tool when prompted)
+# 2. Install Sprintpilot (interactive — select your tool and complexity profile when prompted)
 npx @ikunin/sprintpilot@latest
+
+# 2b. Or pick the profile non-interactively
+npx @ikunin/sprintpilot@latest install --tools claude-code --profile medium --yes
 
 # 3. Start the autopilot in your IDE
 /sprint-autopilot-on
@@ -298,6 +327,19 @@ All settings live in two YAML files — edit after install to customize behavior
 | `git.lock.stale_timeout_minutes` | `30` | Auto-remove orphaned lock files |
 | `git.worktree.cleanup_on_merge` | `true` | Delete worktrees after merge |
 
+### Autopilot (`_Sprintpilot/modules/autopilot/config.yaml`)
+
+| Setting | Default (medium) | Description |
+|---------|------------------|-------------|
+| `complexity_profile` | `medium` | One of `nano`, `small`, `medium`, `large`, `legacy`. Selects the per-story flow + which v2 layers are enabled. |
+| `autopilot.session_story_limit` | `3` (nano: `5`) | Stories per session before checkpoint. `0` = unlimited. |
+| `autopilot.retrospective_mode` | `auto` | `auto` (deterministic artifact) / `stop` (pause for `/bmad-retrospective`) / `skip`. |
+| `autopilot.auto_infer_dependencies` | `true` (nano + legacy: `false`) | Infer story DAG once after `bmad-sprint-planning`. Hand-authored sidecars (no `# AUTO-INFERRED` marker) are respected silently. |
+| `autopilot.phase_timings` | `true` (legacy: `false`) | Emit phase duration records via `log-timing.js mark`. |
+| `autopilot.coalesce_state_writes` | `true` (legacy: `false`) | Buffer non-critical state in `.pending/` shards. |
+| `autopilot.conditional_boot_work` | `true` (large + legacy: `false`) | Skip health-check / branch-reconciliation on clean repos. |
+| `autopilot.cache_shared_reads` | `true` (legacy: `false`) | TTL + mtime-aware file cache for hot reads. |
+
 ### Multi-Agent (`_Sprintpilot/modules/ma/config.yaml`)
 
 | Setting | Default | Description |
@@ -305,6 +347,11 @@ All settings live in two YAML files — edit after install to customize behavior
 | `multi_agent.enabled` | `true` | Enable parallel agent skills |
 | `multi_agent.max_parallel_research` | `3` | Concurrent research agents per batch |
 | `multi_agent.max_parallel_analysis` | `5` | Concurrent codebase analysis agents |
+| `ma.state_sharding` | `auto` (large: `always`) | `auto`, `always`, `never` — shards per-story state instead of contending on root YAMLs. |
+| `ma.parallel_stories` | `false` (large: `true`) | Dispatch independent stories from a DAG layer concurrently. Requires Claude Code (or Gemini CLI w/ experimental flag). |
+| `ma.max_parallel_stories` | `2` (large: `3`) | Cap on concurrent stories per layer. |
+| `ma.experimental_parallel_on_gemini` | `false` | Opt-in parallel dispatch under Gemini CLI (worktree-scoped subagents are still upstream). |
+| `ma.parallel_epics` | `false` | EXPERIMENTAL — cross-epic parallelism with merge-conflict preflight. Off on every profile by default. |
 
 See the [Configuration Reference](docs/CONFIGURATION.md) for the full list.
 
