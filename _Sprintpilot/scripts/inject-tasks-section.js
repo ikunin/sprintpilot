@@ -222,6 +222,11 @@ function main() {
   const acSectionName = opts['ac-section'] || 'Acceptance Criteria';
   const projectRoot = opts['project-root'] || process.cwd();
   const storyKey = storyKeyFromFile(storyFile);
+  if (storyKey === null && timing.isEnabled(projectRoot)) {
+    log.error(
+      `inject-tasks-section: cannot derive a STORY_RE-compatible key from '${path.basename(storyFile)}' (must lower-case to /^[a-z0-9][a-z0-9-]*$/ after stripping leading 'story-' and trailing '.md'); skipping timing emit`,
+    );
+  }
 
   const body = fs.readFileSync(storyFile, 'utf8');
   const info = inspectTasksSection(body);
