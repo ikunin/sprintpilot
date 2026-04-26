@@ -52,12 +52,13 @@ const VALID_ACTIONS = ['start', 'end', 'once', 'mark'];
 // rename target). The constant is gone; runtime always uses per-story
 // paths.
 //
-// Sanity ceiling for a single duration record. A wall-clock skip
-// forward of more than this many ms is treated as clock skew rather
-// than a real duration — clamped to 0 with `clock_skew: true` stamped.
-// 24h chosen because no realistic skill phase is longer than that, and
-// it's well above any plausible CI timeout.
-const MAX_PLAUSIBLE_DURATION_MS = 24 * 60 * 60 * 1000;
+// Sanity ceiling for a single duration record. Phase durations longer
+// than this are treated as overflow (likely a forgotten _end across
+// sessions or a long-paused autopilot run) and clamped to 0 with
+// `over_threshold: true` stamped. 7 days chosen so legitimate
+// weekend-spanning sprint-level phases (sprint, dispatch.layer-X) are
+// preserved; only genuinely stale markers get clamped.
+const MAX_PLAUSIBLE_DURATION_MS = 7 * 24 * 60 * 60 * 1000;
 
 function help() {
   log.out(
@@ -336,8 +337,14 @@ function markPhase(projectRoot, story, phase, meta) {
     const prevTs = Date.parse(prev.ts);
     if (!Number.isNaN(prevTs)) {
       const rawDelta = now.getTime() - prevTs;
-      const clamped = rawDelta < 0 || rawDelta > MAX_PLAUSIBLE_DURATION_MS;
-      durationMs = clamped ? 0 : rawDelta;
+      // Two distinct anomalies — flagged separately so consumers can
+      // treat them differently. clock_skew = wall-clock went backwards
+      // (NTP backstep, DST, manual change). over_threshold = elapsed
+      // time exceeds the sanity ceiling (likely a stale marker, not
+      // genuine clock skew). Both clamp duration_ms to 0.
+      const clockSkew = rawDelta < 0;
+      const overThreshold = rawDelta > MAX_PLAUSIBLE_DURATION_MS;
+      durationMs = clockSkew || overThreshold ? 0 : rawDelta;
       prevPhase = prev.phase;
       durationEntry = {
         event: 'duration',
@@ -347,7 +354,8 @@ function markPhase(projectRoot, story, phase, meta) {
         ended: now.toISOString(),
         duration_ms: durationMs,
       };
-      if (clamped) durationEntry.clock_skew = true;
+      if (clockSkew) durationEntry.clock_skew = true;
+      if (overThreshold) durationEntry.over_threshold = true;
       if (prev.meta !== undefined) durationEntry.meta = prev.meta;
     }
   }

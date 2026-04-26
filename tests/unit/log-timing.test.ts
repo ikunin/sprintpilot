@@ -1,4 +1,4 @@
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -383,15 +383,18 @@ describe('markPhase', () => {
     markPhase(tmpRoot, '1-1-foo', 'skill.bmad-dev-story');
     markPhase(tmpRoot, '1-2-bar', 'skill.bmad-dev-story');
 
-    // Now close them via TWO real child processes started in parallel.
-    // This is the only way to demonstrate race-resolution (Promise.all of
-    // synchronous markPhase calls just queues microtasks — Node serializes
-    // the sync work and there's no interleaving). Two OS processes contend
-    // for the shared timings dir; with per-story markers each owns its own
-    // file and neither clobbers the other.
-    const spawn = (story: string, phase: string) =>
-      new Promise<{ stdout: string; status: number }>((resolve, reject) => {
-        const p = spawnSync(process.execPath, [
+    // Spawn two child processes async (NOT spawnSync — that blocks the
+    // calling thread until the child exits, so wrapping it in Promise.all
+    // would still serialize them). With async `spawn`, both children get
+    // launched before either blocks — the OS schedules them concurrently
+    // and they actually overlap on the shared `.timings/` directory.
+    // Per-story marker files (`.mark.<story>.json`) ensure each child
+    // owns its own rename target; with the pre-2.0.5 single global
+    // marker this test would consistently fail (one rename clobbers the
+    // other; the loser's duration record attributes to the wrong story).
+    const spawnAsync = (story: string, phase: string) =>
+      new Promise<{ status: number; stdout: string }>((resolve, reject) => {
+        const child = spawn(process.execPath, [
           SCRIPT,
           'mark',
           '--story',
@@ -401,14 +404,16 @@ describe('markPhase', () => {
           '--project-root',
           tmpRoot,
         ]);
-        if (p.error) reject(p.error);
-        else resolve({ stdout: p.stdout?.toString() ?? '', status: p.status ?? -1 });
+        let stdout = '';
+        child.stdout?.on('data', (d) => {
+          stdout += d.toString();
+        });
+        child.on('error', reject);
+        child.on('close', (code) => resolve({ status: code ?? -1, stdout }));
       });
-    // Start them as concurrently as Node's spawnSync allows — Promise.all
-    // resolves both child processes in parallel from Node's perspective.
     const [foo, bar] = await Promise.all([
-      spawn('1-1-foo', 'skill.bmad-code-review'),
-      spawn('1-2-bar', 'skill.bmad-code-review'),
+      spawnAsync('1-1-foo', 'skill.bmad-code-review'),
+      spawnAsync('1-2-bar', 'skill.bmad-code-review'),
     ]);
     expect(foo.status).toBe(0);
     expect(bar.status).toBe(0);
@@ -445,26 +450,50 @@ describe('markPhase', () => {
     const entry = JSON.parse(lines[0]);
     expect(entry.duration_ms).toBe(0);
     expect(entry.clock_skew).toBe(true);
+    // Negative-delta path doesn't set over_threshold.
+    expect(entry.over_threshold).toBeUndefined();
   });
 
-  it('clamps unrealistic positive durations (clock skip forward) and stamps clock_skew=true', () => {
+  it('clamps stale-marker durations exceeding 7d ceiling and stamps over_threshold=true (NOT clock_skew)', () => {
     tmpRoot = seedProjectRoot({ phaseTimings: true });
-    // Plant a marker with a timestamp 48h in the past — wall-clock skipped
-    // forward (container clock correction, NTP step). Pre-2.0.6 this would
-    // record a duration of ~48h as a real value; the upper bound now flags
-    // it as clock skew and clamps to 0.
-    const farPastTs = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
+    // Plant a marker 8 days in the past — exceeds the 7d sanity ceiling
+    // (likely a stale marker from an abandoned session, not a real clock
+    // skip). The two anomalies are flagged separately so consumers can
+    // distinguish "the clock did something weird" from "this marker is
+    // stale" — the clock_skew flag stays a reliable clock-skew signal.
+    const eightDaysAgo = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString();
     const dir = timingsDir(tmpRoot);
     mkdirSync(dir, { recursive: true });
     writeFileSync(
       markerPath(tmpRoot, 'sprint'),
-      JSON.stringify({ story: 'sprint', phase: 'skill.bmad-help', ts: farPastTs }),
+      JSON.stringify({ story: 'sprint', phase: 'skill.bmad-help', ts: eightDaysAgo }),
     );
     const r = markPhase(tmpRoot, 'sprint', 'skill.bmad-create-story');
     expect(r.duration_ms).toBe(0);
     const entry = JSON.parse(readFileSync(join(dir, 'sprint.jsonl'), 'utf8').trim().split('\n')[0]);
     expect(entry.duration_ms).toBe(0);
-    expect(entry.clock_skew).toBe(true);
+    expect(entry.over_threshold).toBe(true);
+    // over_threshold path doesn't set clock_skew.
+    expect(entry.clock_skew).toBeUndefined();
+  });
+
+  it('preserves legitimate weekend-spanning durations under the 7d ceiling', () => {
+    tmpRoot = seedProjectRoot({ phaseTimings: true });
+    // 3 days — a sprint paused over a weekend. Should be preserved as a
+    // real duration, not clamped. (Pre-2.0.7 the 24h ceiling would have
+    // clamped this to 0 with clock_skew=true.)
+    const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString();
+    const dir = timingsDir(tmpRoot);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      markerPath(tmpRoot, 'sprint'),
+      JSON.stringify({ story: 'sprint', phase: 'sprint.weekend', ts: threeDaysAgo }),
+    );
+    const r = markPhase(tmpRoot, 'sprint', 'skill.bmad-create-story');
+    expect(r.duration_ms).toBeGreaterThanOrEqual(3 * 24 * 60 * 60 * 1000);
+    const entry = JSON.parse(readFileSync(join(dir, 'sprint.jsonl'), 'utf8').trim().split('\n')[0]);
+    expect(entry.clock_skew).toBeUndefined();
+    expect(entry.over_threshold).toBeUndefined();
   });
 
   it('readMarker rejects a marker with a path-traversing story field (defense-in-depth)', () => {
