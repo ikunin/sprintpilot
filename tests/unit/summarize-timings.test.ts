@@ -119,6 +119,49 @@ describe('pairEvents', () => {
     const p = pairEvents(events);
     expect(p.phaseAgg.p).toEqual([500]);
   });
+
+  it('ingests `duration` events from the mark API into phase aggregates', () => {
+    // The `mark` API (log-timing.js markPhase) emits already-paired
+    // duration records. Pre-2.0.8 these were silently dropped because
+    // pairEvents only handled start/end/once — meaning the entire
+    // mark-API output (workflow.md skill markers, auto-emit from
+    // infer-deps / mark-done / inject-tasks) contributed zero to the
+    // hotspot report. Now they're treated as a paired record.
+    const events = [
+      { event: 'duration', story: 's', phase: 'mark-phase', duration_ms: 1500, _ms: 1000 },
+      { event: 'duration', story: 's', phase: 'mark-phase', duration_ms: 700, _ms: 2000 },
+    ];
+    const p = pairEvents(events);
+    expect(p.phaseAgg['mark-phase']).toEqual([1500, 700]);
+    expect(p.stories.s.phases['mark-phase']).toEqual([1500, 700]);
+  });
+
+  it('excludes anomaly records (clock_skew / over_threshold) from aggregates and counts them separately', () => {
+    // Anomalous records pollute p50/p95/max if folded in — that's the
+    // entire reason the flags exist. They are tracked in a parallel
+    // map and surfaced in the report's anomalies section.
+    const events = [
+      { event: 'duration', story: 's', phase: 'p', duration_ms: 100, _ms: 1000 },
+      { event: 'duration', story: 's', phase: 'p', duration_ms: 0, clock_skew: true, _ms: 2000 },
+      { event: 'duration', story: 's', phase: 'p', duration_ms: 0, over_threshold: true, _ms: 3000 },
+      { event: 'duration', story: 's', phase: 'p', duration_ms: 200, _ms: 4000 },
+    ];
+    const p = pairEvents(events);
+    expect(p.phaseAgg.p).toEqual([100, 200]);
+    expect(p.anomalies.p).toEqual({ clock_skew: 1, over_threshold: 1 });
+  });
+
+  it('rejects malformed `duration` records (non-finite, negative, missing duration_ms)', () => {
+    const events = [
+      { event: 'duration', story: 's', phase: 'p', duration_ms: -1, _ms: 1000 },
+      { event: 'duration', story: 's', phase: 'p', duration_ms: 'not-a-number', _ms: 2000 },
+      { event: 'duration', story: 's', phase: 'p', _ms: 3000 }, // missing duration_ms
+      { event: 'duration', story: 's', phase: 'p', duration_ms: 100, _ms: 4000 }, // valid
+    ];
+    const p = pairEvents(events);
+    expect(p.phaseAgg.p).toEqual([100]);
+    expect(p.anomalies.p).toBeUndefined();
+  });
 });
 
 describe('aggregate', () => {
@@ -209,6 +252,22 @@ describe('renderers', () => {
     const out = renderMarkdown(report);
     expect(out).toMatch(/^# Sprintpilot phase-timing summary/);
     expect(out).toContain('| Phase |');
+  });
+
+  it('renders an anomalies section when clock_skew or over_threshold records are present', () => {
+    const pairedAnomaly = pairEvents([
+      { event: 'duration', story: 's', phase: 'p', duration_ms: 100, _ms: 1000 },
+      { event: 'duration', story: 's', phase: 'p', duration_ms: 0, clock_skew: true, _ms: 2000 },
+      { event: 'duration', story: 's', phase: 'p', duration_ms: 0, over_threshold: true, _ms: 3000 },
+    ]);
+    const reportAnomaly = aggregate(pairedAnomaly);
+    const text = renderText(reportAnomaly);
+    expect(text).toContain('Anomalies');
+    expect(text).toContain('clock_skew ×1');
+    expect(text).toContain('over_threshold ×1');
+    const md = renderMarkdown(reportAnomaly);
+    expect(md).toContain('## Anomalies');
+    expect(md).toContain('| `p` | 1 | 1 |');
   });
 });
 

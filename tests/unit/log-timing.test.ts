@@ -377,7 +377,7 @@ describe('markPhase', () => {
     expect(() => readFileSync(barFile, 'utf8')).toThrow();
   });
 
-  it('parallel-marker race: two REAL OS processes marking different stories do not corrupt either', async () => {
+  it('two-process per-story isolation: concurrent mark calls for different stories do not corrupt each other', async () => {
     tmpRoot = seedProjectRoot({ phaseTimings: true });
     // Open both stories first via the in-process API so each has a marker.
     markPhase(tmpRoot, '1-1-foo', 'skill.bmad-dev-story');
@@ -386,14 +386,16 @@ describe('markPhase', () => {
     // Spawn two child processes async (NOT spawnSync — that blocks the
     // calling thread until the child exits, so wrapping it in Promise.all
     // would still serialize them). With async `spawn`, both children get
-    // launched before either blocks — the OS schedules them concurrently
-    // and they actually overlap on the shared `.timings/` directory.
-    // Per-story marker files (`.mark.<story>.json`) ensure each child
-    // owns its own rename target; with the pre-2.0.5 single global
-    // marker this test would consistently fail (one rename clobbers the
-    // other; the loser's duration record attributes to the wrong story).
-    const spawnAsync = (story: string, phase: string) =>
-      new Promise<{ status: number; stdout: string }>((resolve, reject) => {
+    // launched before either blocks. Per-story marker files
+    // (`.mark.<story>.json`) ensure each child writes to its own rename
+    // target — there's no shared resource to actually contend on, which
+    // is the whole point of the v2.0.5 fix. With the pre-2.0.5 single
+    // global marker this test would have consistently failed because
+    // each child's mark would have closed the OTHER child's open phase
+    // (cross-story marker pollution attributing duration records to the
+    // wrong story).
+    const spawnAsync = (story: string, phase: string, timeoutMs = 10_000) =>
+      new Promise<{ status: number; stdout: string; stderr: string }>((resolve, reject) => {
         const child = spawn(process.execPath, [
           SCRIPT,
           'mark',
@@ -405,18 +407,34 @@ describe('markPhase', () => {
           tmpRoot,
         ]);
         let stdout = '';
+        let stderr = '';
+        const timer = setTimeout(() => {
+          child.kill('SIGKILL');
+          reject(new Error(`spawnAsync(${story}) timed out after ${timeoutMs}ms; stderr so far: ${stderr}`));
+        }, timeoutMs);
         child.stdout?.on('data', (d) => {
           stdout += d.toString();
         });
-        child.on('error', reject);
-        child.on('close', (code) => resolve({ status: code ?? -1, stdout }));
+        child.stderr?.on('data', (d) => {
+          stderr += d.toString();
+        });
+        child.on('error', (e) => {
+          clearTimeout(timer);
+          reject(e);
+        });
+        child.on('close', (code) => {
+          clearTimeout(timer);
+          resolve({ status: code ?? -1, stdout, stderr });
+        });
       });
     const [foo, bar] = await Promise.all([
       spawnAsync('1-1-foo', 'skill.bmad-code-review'),
       spawnAsync('1-2-bar', 'skill.bmad-code-review'),
     ]);
-    expect(foo.status).toBe(0);
-    expect(bar.status).toBe(0);
+    // Surface stderr in the assertion message so a future regression
+    // is debuggable from the test output, not just an "expected 0".
+    expect(foo.status, `foo stderr: ${foo.stderr}`).toBe(0);
+    expect(bar.status, `bar stderr: ${bar.stderr}`).toBe(0);
 
     const fooLines = readFileSync(join(timingsDir(tmpRoot), '1-1-foo.jsonl'), 'utf8').trim().split('\n');
     const barLines = readFileSync(join(timingsDir(tmpRoot), '1-2-bar.jsonl'), 'utf8').trim().split('\n');
@@ -475,6 +493,29 @@ describe('markPhase', () => {
     expect(entry.over_threshold).toBe(true);
     // over_threshold path doesn't set clock_skew.
     expect(entry.clock_skew).toBeUndefined();
+  });
+
+  it('boundary: rawDelta just under MAX_PLAUSIBLE_DURATION_MS is preserved (strict > not >=)', () => {
+    tmpRoot = seedProjectRoot({ phaseTimings: true });
+    // Plant a marker so rawDelta lands JUST under the 7d ceiling. The
+    // safety margin (1 second) absorbs test-execution overhead so the
+    // boundary check is deterministic. Verifies the strict-inequality
+    // semantics: a duration of exactly MAX or anything less is a real
+    // measurement, not an anomaly.
+    const justUnder = 7 * 24 * 60 * 60 * 1000 - 1000;
+    const planted = new Date(Date.now() - justUnder).toISOString();
+    const dir = timingsDir(tmpRoot);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      markerPath(tmpRoot, 'sprint'),
+      JSON.stringify({ story: 'sprint', phase: 'sprint.long-pause', ts: planted }),
+    );
+    const r = markPhase(tmpRoot, 'sprint', 'skill.bmad-create-story');
+    expect(r.duration_ms).toBeGreaterThanOrEqual(justUnder);
+    expect(r.duration_ms).toBeLessThanOrEqual(7 * 24 * 60 * 60 * 1000);
+    const entry = JSON.parse(readFileSync(join(dir, 'sprint.jsonl'), 'utf8').trim().split('\n')[0]);
+    expect(entry.clock_skew).toBeUndefined();
+    expect(entry.over_threshold).toBeUndefined();
   });
 
   it('preserves legitimate weekend-spanning durations under the 7d ceiling', () => {

@@ -53,11 +53,15 @@ const VALID_ACTIONS = ['start', 'end', 'once', 'mark'];
 // paths.
 //
 // Sanity ceiling for a single duration record. Phase durations longer
-// than this are treated as overflow (likely a forgotten _end across
-// sessions or a long-paused autopilot run) and clamped to 0 with
-// `over_threshold: true` stamped. 7 days chosen so legitimate
-// weekend-spanning sprint-level phases (sprint, dispatch.layer-X) are
-// preserved; only genuinely stale markers get clamped.
+// than this are treated as overflow (likely a stale marker from an
+// abandoned session) and clamped to 0 with `over_threshold: true`
+// stamped. 7 days chosen so legitimate weekend-spanning sprint-level
+// phases (sprint, dispatch.layer-X) are preserved; only genuinely
+// stale markers get clamped.
+//
+// Negative deltas (wall-clock backsteps) are an orthogonal anomaly,
+// flagged with `clock_skew: true` instead. The two flags are mutually
+// exclusive — see the JSDoc on `markPhase`.
 const MAX_PLAUSIBLE_DURATION_MS = 7 * 24 * 60 * 60 * 1000;
 
 function help() {
@@ -315,10 +319,16 @@ function clearMarker(projectRoot, story) {
  * duration record but the next mark will read the new marker (not the
  * stale prev) and won't double-count.
  *
- * Wall-clock skew: durations are clamped to [0, MAX_PLAUSIBLE_DURATION_MS]
- * with a `clock_skew: true` flag in the entry so aggregators don't get
- * poisoned by NTP backsteps, DST transitions, or container clock skips
- * forward of unrealistic magnitudes (e.g. "this skill ran for 7 hours").
+ * Two anomaly classes are flagged separately so consumers can treat
+ * them differently. Both clamp `duration_ms` to 0:
+ *   - `clock_skew: true`  — wall-clock went backwards (NTP backstep,
+ *     DST transition, manual clock change). The flag is reliable as a
+ *     "the clock did something weird" signal.
+ *   - `over_threshold: true` — elapsed time exceeded
+ *     `MAX_PLAUSIBLE_DURATION_MS` (7 days). Almost always a stale
+ *     marker from an abandoned session, not a real measurement.
+ * The flags are mutually exclusive (a single rawDelta can be either
+ * negative OR exceed the ceiling, never both).
  *
  * Returns { duration_ms, prev_phase } so callers can log/inspect.
  */

@@ -8,11 +8,17 @@
 //
 // Behavior:
 //   Reads every .jsonl file under _bmad-output/implementation-artifacts/
-//   .timings/. Pairs start/end events by (story, phase) in LIFO order.
+//   .timings/. Two event shapes contribute to phase aggregates:
+//     - start/end pairs (matched LIFO by (story, phase))
+//     - duration records emitted by the `mark` API (already-paired)
+//   Records flagged with `clock_skew` or `over_threshold` are excluded
+//   from p50/p95/max so anomalies don't poison the distribution; they
+//   are counted separately in the anomalies section.
 //   Computes:
 //     - Wall-clock per story (min-start to max-end)
 //     - Per-phase aggregates: count, sum_ms, p50, p95, max
 //     - Hotspots: phases whose sum_ms consumes > 5% of total paired time
+//     - Anomalies: per-phase clock_skew / over_threshold counts
 //
 // Output:
 //   --format text (default) → stdout, human-readable table
@@ -82,15 +88,27 @@ function pairEvents(events) {
   // Returns { stories: { [story]: { first, last, phases: { [phase]: number[] } } },
   //           phaseAgg: { [phase]: number[] },
   //           onceCount: { [phase]: number },
+  //           anomalies: { [phase]: { clock_skew: number, over_threshold: number } },
   //           orphans: [{story, phase, event, ts}] }
   const stories = {};
   const phaseAgg = {};
   const onceCount = {};
+  const anomalies = {};
   const openByStoryPhase = {}; // key = story::phase → stack of start ms
 
   const ensureStory = (s) => {
     if (!stories[s]) stories[s] = { first: null, last: null, phases: {} };
     return stories[s];
+  };
+  const recordAnomaly = (phase, kind) => {
+    if (!anomalies[phase]) anomalies[phase] = { clock_skew: 0, over_threshold: 0 };
+    anomalies[phase][kind] += 1;
+  };
+  const recordDuration = (s, phase, duration) => {
+    if (!s.phases[phase]) s.phases[phase] = [];
+    s.phases[phase].push(duration);
+    if (!phaseAgg[phase]) phaseAgg[phase] = [];
+    phaseAgg[phase].push(duration);
   };
 
   for (const ev of events) {
@@ -114,10 +132,24 @@ function pairEvents(events) {
       const startMs = stack.pop();
       const duration = ev._ms - startMs;
       if (duration < 0) continue;
-      if (!s.phases[ev.phase]) s.phases[ev.phase] = [];
-      s.phases[ev.phase].push(duration);
-      if (!phaseAgg[ev.phase]) phaseAgg[ev.phase] = [];
-      phaseAgg[ev.phase].push(duration);
+      recordDuration(s, ev.phase, duration);
+      continue;
+    }
+    if (ev.event === 'duration') {
+      // mark-API records arrive already paired. Anomalous records
+      // (clock_skew / over_threshold) are tallied separately and never
+      // contribute to p50/p95/max — otherwise a single backstep or
+      // stale marker poisons aggregates the way the v2.0.4 raw clamp
+      // did before the split. duration_ms must be a finite non-negative
+      // number; defensive against hand-edited shards.
+      const skew = ev.clock_skew === true;
+      const over = ev.over_threshold === true;
+      if (skew) recordAnomaly(ev.phase, 'clock_skew');
+      if (over) recordAnomaly(ev.phase, 'over_threshold');
+      if (skew || over) continue;
+      const d = ev.duration_ms;
+      if (typeof d !== 'number' || !Number.isFinite(d) || d < 0) continue;
+      recordDuration(s, ev.phase, d);
     }
   }
 
@@ -129,7 +161,7 @@ function pairEvents(events) {
     }
   }
 
-  return { stories, phaseAgg, onceCount, orphans };
+  return { stories, phaseAgg, onceCount, anomalies, orphans };
 }
 
 function percentile(sorted, p) {
@@ -177,6 +209,7 @@ function aggregate(paired) {
     hotspots,
     stories,
     once_markers: paired.onceCount,
+    anomalies: paired.anomalies,
     orphans: paired.orphans,
   };
 }
@@ -234,6 +267,17 @@ function renderText(report) {
       lines.push(`  ${phase}  ×${count}`);
     }
   }
+  const anomalyEntries = Object.entries(report.anomalies || {});
+  if (anomalyEntries.length > 0) {
+    lines.push('');
+    lines.push('Anomalies (excluded from p50/p95/max):');
+    for (const [phase, counts] of anomalyEntries) {
+      const parts = [];
+      if (counts.clock_skew > 0) parts.push(`clock_skew ×${counts.clock_skew}`);
+      if (counts.over_threshold > 0) parts.push(`over_threshold ×${counts.over_threshold}`);
+      lines.push(`  ${phase}  ${parts.join('  ')}`);
+    }
+  }
   if (report.orphans.length > 0) {
     lines.push('');
     lines.push(`Orphaned starts (no matching end): ${report.orphans.length}`);
@@ -288,6 +332,19 @@ function renderMarkdown(report) {
     lines.push('');
     for (const [phase, count] of Object.entries(report.once_markers)) {
       lines.push(`- \`${phase}\` ×${count}`);
+    }
+  }
+  const mdAnomalyEntries = Object.entries(report.anomalies || {});
+  if (mdAnomalyEntries.length > 0) {
+    lines.push('');
+    lines.push('## Anomalies');
+    lines.push('');
+    lines.push('_Excluded from p50/p95/max so a single skew/stale-marker doesn\'t poison aggregates._');
+    lines.push('');
+    lines.push('| Phase | clock_skew | over_threshold |');
+    lines.push('|---|---:|---:|');
+    for (const [phase, counts] of mdAnomalyEntries) {
+      lines.push(`| \`${phase}\` | ${counts.clock_skew} | ${counts.over_threshold} |`);
     }
   }
   if (report.orphans.length > 0) {
