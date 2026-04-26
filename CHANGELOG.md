@@ -1,5 +1,21 @@
 # Changelog
 
+## [2.0.7] - 2026-04-26
+
+**Round-3 review fixes.** A third multi-agent review of v2.0.6 caught two real bugs in the v2.0.6 fixes themselves: (1) `spawnSync` is BLOCKING, so wrapping it in `Promise.all` doesn't yield concurrency — the "real two-OS-process race" test was still serialized; and (2) the 24h `MAX_PLAUSIBLE_DURATION_MS` ceiling clamps legitimate weekend-spanning sprint phases to 0 with a misleading `clock_skew: true` flag, contaminating the flag's meaning.
+
+### Fixed
+- **Genuine async parallelism in the race test** — replaced `spawnSync` (synchronous, blocks the calling thread until the child exits) with `child_process.spawn` (async, non-blocking) plus a Promise that resolves on the `'close'` event. Both children launch before either blocks, so the OS actually overlaps them and the test demonstrates per-story file isolation under real concurrent execution. The v2.0.6 test would have passed under v2.0.4's single-marker bug too — only because cross-story marker pollution catches the regression in either ordering, NOT because of any race contention.
+- **Split clock-skew from over-threshold** — durations that exceed `MAX_PLAUSIBLE_DURATION_MS` now stamp `over_threshold: true`; only true wall-clock backsteps stamp `clock_skew: true`. Aggregators can distinguish "stale marker from an abandoned session" from "the clock actually did something weird". The two flags are mutually exclusive.
+- **Raised `MAX_PLAUSIBLE_DURATION_MS` from 24h to 7d** — sprint-level phases (`sprint`, `dispatch.layer-X`) legitimately span weekends and holidays. 24h was too aggressive; 7d preserves real long-running phases while still catching genuinely stale markers.
+
+### Tests
+- Race test now uses async `spawn` + `'close'` Promises; both children's stdout is captured and exit codes verified.
+- New: 8-days-ago marker → `over_threshold: true`, no `clock_skew`.
+- New: 3-days-ago marker (legitimate weekend pause) → real duration preserved, neither flag set.
+- Updated negative-skew test to assert `over_threshold` is NOT set on negative-delta path.
+- 35/35 log-timing pass (was 34); 687/687 fast suite (was 686).
+
 ## [2.0.6] - 2026-04-26
 
 **Round-2 review polish.** A second multi-agent review of the v2.0.5 fix surfaced five low-to-medium items, all addressed here. The biggest find: the v2.0.5 "concurrent same-process" test wrapped synchronous `markPhase` calls in `Promise.resolve().then()` — Node serializes that, so the test would have passed even with the v2.0.4 single-marker bug. Replaced with a real two-OS-process race via `spawnSync`.
