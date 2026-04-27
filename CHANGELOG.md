@@ -1,5 +1,21 @@
 # Changelog
 
+## [2.0.8] - 2026-04-27
+
+**Concurrency, correctness, and docs.** Hardens the parallel-dispatch path against three real race / partial-failure modes (merge-shards TOCTOU, dispatch-layer cap violations, resolve-dag aliasing edges), fixes timing instrumentation, repairs the installer's BMad version detection, and restructures the README to lead with value.
+
+### Fixed
+- **`merge-shards` TOCTOU + cross-process safety** — snapshot-then-verify reads, cross-process advisory lock around the merge, deterministic dedup of overlapping shard entries. Two concurrent merges can no longer interleave and corrupt the merged state.
+- **`dispatch-layer` parallel cap + partial-failure rollback** — `--max-parallel` is now enforced as a hard cap (was advisory under burst conditions). Partial failures roll back cleanly, and only the failed branches are selected for retry instead of the whole layer.
+- **`resolve-dag` semantics** — `force_independent` honored correctly, alphanumeric epic IDs supported, indent parsing made flexible, and dedup of duplicate edges. Eliminates spurious "missing dependency" errors on hand-authored DAG sidecars.
+- **Installer BMad version detection** — reads the v6.2.x installation-scoped manifest instead of the legacy global location. Removes the false "BMad not detected" failure on fresh v6.2.x installs.
+- **Timing instrumentation** — `summarize-timings` now consumes the mark-API `duration` events directly (previously it only saw bracketed pairs). Mark-only stories get correct wall-clock durations, and split-flag accounting is dual-tallied so neither flag's count drifts.
+- **Truthy-flag handling in timings** — flags are coerced explicitly so `over_threshold`/`clock_skew` from string-encoded markers don't silently degrade to falsy.
+
+### Changed
+- **Autopilot `workflow.md` token reduction** — SAFE-only edits to remove redundancy without altering any control-flow path. Lower per-story prompt cost, identical behavior.
+- **README restructure** — top-down by value: hook + Quick Start above the fold, autonomy + crash recovery + fresh-context finalize promoted, profile-level config overrides correctly attributed (was misattributed to `ma/config.yaml`), three long config tables collapsed to a most-tweaked summary plus link to `docs/CONFIGURATION.md`. Net 377 → 323 lines.
+
 ## [2.0.7] - 2026-04-26
 
 **Round-3 review fixes.** A third multi-agent review of v2.0.6 caught two real bugs in the v2.0.6 fixes themselves: (1) `spawnSync` is BLOCKING, so wrapping it in `Promise.all` doesn't yield concurrency — the "real two-OS-process race" test was still serialized; and (2) the 24h `MAX_PLAUSIBLE_DURATION_MS` ceiling clamps legitimate weekend-spanning sprint phases to 0 with a misleading `clock_skew: true` flag, contaminating the flag's meaning.
