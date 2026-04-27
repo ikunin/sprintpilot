@@ -5,64 +5,64 @@
 [![License Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg?style=flat)](LICENSE)
 [![BMad Method](https://img.shields.io/badge/BMad%20Method-v6.2%2B-green.svg?style=flat)](https://github.com/bmad-code-org/BMAD-METHOD)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D18-brightgreen.svg?style=flat)](https://nodejs.org)
-[![Tools](https://img.shields.io/badge/tools-9%20supported-orange.svg?style=flat)](#supported-tools)
+[![Tools](https://img.shields.io/badge/tools-9%20supported-orange.svg?style=flat)](#tools-9-supported)
 [![GitHub stars](https://img.shields.io/github/stars/ikunin/sprintpilot.svg?style=flat)](https://github.com/ikunin/sprintpilot/stargazers)
 
-Sprintpilot is an autonomous delivery addon **compatible with [BMad Method](https://github.com/bmad-code-org/BMAD-METHOD) v6**. One command takes your project from sprint plan to reviewed, tested, PR-ready code — with full git workflow and multi-agent intelligence.
+Sprintpilot drives [BMad Method](https://github.com/bmad-code-org/BMAD-METHOD) v6 sprints to completion autonomously. One command turns your sprint plan into reviewed, tested, PR-ready code — story by story, with full git workflow and multi-agent intelligence.
+
+BMad Method's manual flow is dozens of skills, menus, and git operations per story. Sprintpilot drives all of it for you — one command per sprint.
 
 > **Independent project.** Sprintpilot is not affiliated with or endorsed by BMad Code, LLC. See [TRADEMARK.md](TRADEMARK.md).
-
+>
 > **Migrating from `bmad-autopilot-addon` v1?** See [MIGRATION.md](MIGRATION.md). `sprintpilot install` auto-detects v1 and cleanly replaces it.
 
-## Included Skills
+## Quick Start
 
-| Skill | Description |
-|-------|-------------|
-| `/sprint-autopilot-on` | Engage autonomous sprint execution |
-| `/sprint-autopilot-off` | Disengage and show status |
-| `/sprintpilot-update` | Check for updates and install the latest version |
-| `/sprintpilot-code-review` | Parallel 3-layer adversarial code review |
-| `/sprintpilot-codebase-map` | 5-stream brownfield codebase analysis |
-| `/sprintpilot-assess` | Tech debt and dependency audit |
-| `/sprintpilot-reverse-architect` | Extract architecture from existing code |
-| `/sprintpilot-migrate` | Legacy migration planning |
-| `/sprintpilot-research` | Parallel web research fan-out |
-| `/sprintpilot-party-mode` | Multi-persona agent discussions |
+```bash
+# 1. Install BMad Method (interactive — pick your tool when prompted)
+npx bmad-method install --modules bmm,tea
 
-## The Problem
+# 2. Install Sprintpilot (interactive — pick tool + complexity profile)
+npx @ikunin/sprintpilot@latest
 
-BMad Method provides a structured development workflow with 50+ skills and agent personas. But using it manually means invoking each skill one at a time, navigating menus, making routine decisions, and handling git operations yourself. For a sprint with 10 stories across 3 epics, that's dozens of manual steps, context switches, and session restarts.
-
-## The Solution: Sprint Autopilot
-
-```
+# 3. In your IDE, run:
 /sprint-autopilot-on
 ```
 
-That's it. The autopilot takes over and drives your entire sprint to completion:
+Non-interactive install:
 
-### What it does, story by story
+```bash
+npx @ikunin/sprintpilot@latest install --tools claude-code --profile medium --yes
+```
+
+Runs on Windows, macOS, and Linux — every workflow call site is portable across bash, zsh, Git Bash, PowerShell, and cmd.
+
+## What It Does, Story by Story
+
+When you run `/sprint-autopilot-on`, the autopilot drives your entire sprint to completion:
 
 1. **Reads your sprint plan** — picks the next story from `sprint-status.yaml`
 2. **Creates an isolated worktree** — each story gets its own branch via `git worktree add`, keeping `main` clean
-3. **Implements the story** — invokes `bmad-dev-story` which writes code and tests following TDD (RED then GREEN)
-4. **Lints the code** — auto-detects your language (Python, JS/TS, Rust, Go, Ruby) and runs the appropriate linter on changed files only
-5. **Stages explicitly** — never runs `git add -A`. Stages only changed files with pre-commit checks: secrets scanning, file size limits, binary detection
-6. **Commits with conventional messages** — `feat(epic): story title (story-key)` with all placeholders resolved from your sprint artifacts
-7. **Runs code review** — invokes `bmad-code-review` on the worktree diff
-8. **Applies every patch** — auto-accepts all review findings, commits each fix separately for clean git history
-9. **Pushes and creates a PR** (configurable) — auto-detects your platform (GitHub/GitLab) and creates a PR/MR with a detailed body. With `create_pr: false`, merges directly to main instead.
-10. **Moves to the next story** — syncs status, exits the worktree, commits artifacts to main, picks up the next story
-11. **Runs retrospective** — when all stories in an epic are done, runs `bmad-retrospective` and lists all PR URLs for merge
+3. **Implements the story** — invokes `bmad-dev-story`, which writes code and tests following TDD (RED then GREEN)
+4. **Lints the code** — auto-detects your language and runs the right linter on changed files only (not the whole repo)
+5. **Stages explicitly** — never `git add -A`. Only changed files, with secrets / size / binary pre-commit checks.
+6. **Commits with conventional messages** — `feat(epic): story title (story-key)`, placeholders resolved from your sprint artifacts
+7. **Runs parallel code review** — three reviewers in parallel (see [Multi-Agent Intelligence](#multi-agent-intelligence))
+8. **Applies every patch finding** — auto-accepts review fixes, commits each one separately for clean history
+9. **Pushes and creates a PR** (configurable) — auto-detects GitHub / GitLab / Bitbucket / Gitea. With `create_pr: false`, merges directly to `main`.
+10. **Moves to the next story** — exits the worktree, commits artifacts to `main`, picks up the next story
+11. **Runs retrospective** per epic — when all stories in an epic are done, lists all PR URLs ready for merge
 
-### What makes it autonomous
+## What Makes It Autonomous
 
 The autopilot handles everything that normally requires you to be present:
 
-- **Menu navigation** — BMad Method skills present menus, confirmations, and choices. The autopilot auto-selects "Continue", "Create Mode", and makes context-appropriate decisions from your PRD and architecture docs.
-- **Decision making** — when a skill asks a design question, the autopilot derives the answer from existing project artifacts (PRD, architecture, story specs). Only truly unanswerable questions pause execution.
-- **Session management** — after 3 stories, the autopilot checkpoints state to disk and tells you to start a fresh session. `/sprint-autopilot-on` in the new session resumes exactly where it left off. No work is ever repeated.
-- **Crash recovery** — if a session crashes mid-story, the next boot detects orphaned worktrees, recovers committed work (pushes it), and cleans up stale state.
+- **Auto-inferred story DAG** — after `bmad-sprint-planning`, the autopilot infers inter-story dependencies once and writes `_Sprintpilot/sprints/dependencies.yaml`. Parallel dispatch works out of the box; no hand-authored deps file required. Hand-authored sidecars are detected and respected silently.
+- **Menu navigation** — BMad skills present menus and confirmations. The autopilot auto-selects "Continue" / "Create Mode" and derives answers from your PRD and architecture docs.
+- **Decision making** — when a skill asks a design question, the autopilot answers from existing project artifacts. Only truly unanswerable questions pause execution.
+- **Session management** — checkpoints state to disk after N stories (configurable). Re-running `/sprint-autopilot-on` in a fresh session resumes exactly where it left off — no work repeated.
+- **Crash recovery** — on boot, the autopilot detects orphaned worktrees from a crashed previous run, pushes any committed-but-unpushed work, and cleans up stale state. No lost commits, no manual cleanup.
+- **Fresh-context finalize** — when the last story of a sprint completes, the autopilot writes a `sprint-finalize-pending` marker and stops. The next session runs sprint cleanup deterministically in fresh context, eliminating context-rot failures of the final step.
 
 ### When it stops (and only when)
 
@@ -76,9 +76,9 @@ The autopilot runs until the sprint is done or hits one of exactly 5 true blocke
 
 Everything else — it decides, documents the decision in one sentence, and moves on.
 
-### The git workflow in detail
+## The Git Workflow
 
-Controlled by `git.push.create_pr` in `_Sprintpilot/modules/git/config.yaml`:
+Controlled by `git.push.create_pr` in `_Sprintpilot/modules/git/config.yaml`.
 
 **PR flow** (`create_pr: true`, default) — stories are pushed and PRs are created. No auto-merge. Code reaches `main` only after PR approval.
 
@@ -95,7 +95,7 @@ main ─────────────────────────
   → "Ready to merge: PR #42, #43, #44"
 ```
 
-When previous stories have pending PRs, the autopilot creates **stacked PRs** — each story branches from the previous story's branch and targets it. When a PR is merged on the platform, subsequent PRs automatically retarget.
+When previous stories have pending PRs, the autopilot creates **stacked PRs** — each story branches from the previous story's branch and targets it. Reviewers see each story's diff in isolation while the next story is already in progress. When a PR is merged on the platform, subsequent PRs automatically retarget.
 
 **Direct merge flow** (`create_pr: false`) — stories are merged to `main` immediately after push:
 
@@ -103,19 +103,46 @@ When previous stories have pending PRs, the autopilot creates **stacked PRs** �
 main ── story/1-1 ──→ merge ── story/1-2 ──→ merge ── story/1-3 ──→ merge
 ```
 
-Each story is fully isolated in its own worktree. No half-finished code on `main`. The autopilot tracks git metadata in its own `git-status.yaml` (commit SHA, push status, PR URL, lint results) — it never modifies BMad Method's `sprint-status.yaml`. Implementation artifacts (sprint status, story files, planning docs) are always committed to `main` after each story, regardless of merge strategy.
+Each story is fully isolated in its own worktree. No half-finished code on `main`. The autopilot tracks git metadata in its own `git-status.yaml` (commit SHA, push status, PR URL, lint results) — it never modifies BMad Method's `sprint-status.yaml`. Implementation artifacts are always committed to `main` after each story, regardless of merge strategy.
 
-See [`modules/git/branching-and-pr-strategy.md`](_Sprintpilot/modules/git/branching-and-pr-strategy.md) for the full branching and PR decision matrix.
+Concurrent git operations (parallel pushes, submodule updates, ref locks) are serialized and retry with jittered backoff — safe under parallel dispatch.
 
----
+See [`modules/git/branching-and-pr-strategy.md`](_Sprintpilot/modules/git/branching-and-pr-strategy.md) for the full decision matrix.
+
+## Adaptive Process Scaling
+
+The right amount of process for a 2-story bug-fix sprint is different from a 30-story green-field rebuild — running the heavy flow on a small change costs more LLM turns, more context rot, more time. One knob picks the right balance:
+
+| Profile | Per-story flow | Branching | Worktrees | Parallel stories | Use it for |
+|---------|---------------|-----------|-----------|------------------|-----------|
+| `nano` | `bmad-quick-dev` (one-shot) | `epic` (one PR per epic) | off | n/a | Tiny patch sprints, hot-fix runs |
+| `small` | Full 7-step BMad cycle | `story` (one PR per story) | on | off | Single-developer projects, ≤10 stories |
+| `medium` *(default)* | Full 7-step BMad cycle | `story` | on | off | Default — balanced for most sprints |
+| `large` | Full 7-step BMad cycle | `story` | on | **on** (Claude Code) | Multi-epic sprints, 20+ stories |
+| `legacy` | Pinned to v1.0.5 behavior byte-for-byte | `story` | on | off | Existing installs that want zero behavior change |
+
+Pick the profile at install time — `--profile <nano|small|medium|large|legacy>` non-interactively. Missing profile defaults to `medium` with no behavior change vs. v1.0.5.
+
+**Nano safety net** — if `bmad-quick-dev` tests fail or its review classifies a finding as `high` severity, the autopilot escalates the session to the full 7-step cycle (session-scoped — never written back to config). Fast track for routine work, full rigor when something needs it.
+
+### v2 optimization layers
+
+Each can be disabled independently per profile in `_Sprintpilot/modules/autopilot/profiles/<profile>.yaml`:
+
+- **Auto-inferred story DAG** — see above.
+- **Phase timing instrumentation** — emits `duration` records per skill phase. `summarize-timings.js` reports hotspots over 5% of total runtime, so you can see where a sprint actually spends its time.
+- **State sharding** — non-critical writes accumulate in `.pending/` shards, flushed atomically at story boundaries / session checkpoints / sprint complete. Crash-recovery keys still write straight through. This is what makes parallel dispatch safe under contention.
+- **Conditional boot work** — on clean repos (main worktree only, no in-progress stories), skips the slow health-check / branch-reconciliation block, saving 8–30s per session. Disabled on `large` and `legacy` profiles, which always run full reconciliation.
+- **Cached reads** — TTL + source-mtime aware file cache for hot reads; any writer's mtime advance auto-invalidates without explicit calls.
+- **Parallel story dispatch** — when the host supports it, layer-aware dispatch runs N stories concurrently in their own worktrees, then merges their state shards. Claude Code today; Gemini CLI experimentally.
 
 ## Multi-Agent Intelligence
 
-Beyond the autopilot, Sprintpilot includes 7 multi-agent skills that launch parallel subagents for tasks that benefit from diverse perspectives:
+Beyond the autopilot, Sprintpilot includes 7 multi-agent skills that launch parallel subagents for tasks that benefit from diverse perspectives.
 
 ### Parallel Code Review (`/sprintpilot-code-review`)
 
-Three independent reviewers run simultaneously on the same diff:
+Three independent reviewers run **simultaneously** on the same diff — not serially. Each comes with a different bias by design:
 
 | Agent | Perspective | Access |
 |-------|------------|--------|
@@ -123,11 +150,11 @@ Three independent reviewers run simultaneously on the same diff:
 | **Edge Case Hunter** | Boundary conditions, race conditions, missing validation | Full codebase access |
 | **Acceptance Auditor** | Verifies every acceptance criterion is met | Diff + story spec |
 
-Results are triaged: duplicates merged, contradictions flagged, findings classified as PATCH / WARN / DISMISS.
+Results are triaged: duplicates merged, contradictions flagged, findings classified as **PATCH / WARN / DISMISS**. The autopilot auto-accepts every PATCH finding and commits each fix separately.
 
 ### Brownfield Analysis Pipeline
 
-> Codebase mapping inspired by [GSD's map-codebase](https://github.com/gsd-build/get-shit-done). Adapted with distinct output format, enriched agent prompts, and BMad Method-specific downstream integration.
+> Codebase mapping inspired by [GSD's map-codebase](https://github.com/gsd-build/get-shit-done). Adapted with a distinct output format, enriched agent prompts, and BMad Method-specific downstream integration.
 
 For existing codebases, three skills chain together:
 
@@ -155,18 +182,18 @@ Scanned file types: TypeScript, JavaScript, Python, Java, Go, Rust, Ruby, C, C++
 - Debt Classifier (prioritized tech debt with effort estimates)
 - Migration Analyzer (framework upgrade paths and phased roadmap)
 
-Output file: `_bmad-output/codebase-analysis/brownfield-assessment.md` — prioritized findings with severity, confidence, effort, and migration paths.
+Output: `_bmad-output/codebase-analysis/brownfield-assessment.md` — prioritized findings with severity, confidence, effort, and migration paths.
 
 **`/sprintpilot-reverse-architect`** — 3 parallel agents extract architecture from code:
 - Component Mapper (module boundaries, dependency graph)
 - Data Flow Tracer (request lifecycle, state management)
 - Pattern Extractor (design patterns, conventions, error handling)
 
-Output file: `{planning_artifacts}/architecture.md` — architecture document compatible with BMad Method that feeds directly into `bmad-create-epics-and-stories`.
+Output: `{planning_artifacts}/architecture.md` — BMad Method-compatible, feeds directly into `bmad-create-epics-and-stories`.
 
 ### Migration Planning (`/sprintpilot-migrate`)
 
-A 12-step workflow for taking a codebase from one stack to another. 4 subagent fan-outs across the process:
+A 12-step workflow for taking a codebase from one stack to another, with 4 subagent fan-outs:
 
 1. Validate prerequisites and get target stack from user
 2. Auto-recommend migration strategy (strangler fig / big bang / branch-by-abstraction / parallel run)
@@ -181,121 +208,69 @@ A 12-step workflow for taking a codebase from one stack to another. 4 subagent f
 11. Generate BMad Method-compatible epics for sprint planning
 12. Finalize migration plan, epics, and tracking artifacts
 
-Output files:
+Output:
 
 | File | Location | Content |
 |------|----------|---------|
-| `migration-plan.md` | `{planning_artifacts}/` | Full plan: strategy, compatibility matrix, coexistence design, phased roadmap, component cards, data/API migration, risk matrix |
-| `migration-epics.md` | `{planning_artifacts}/` | Epics with stories, acceptance criteria, and effort estimates (BMad Method-compatible) |
+| `migration-plan.md` | `{planning_artifacts}/` | Strategy, compatibility matrix, coexistence design, phased roadmap, component cards, data/API migration, risk matrix |
+| `migration-epics.md` | `{planning_artifacts}/` | Epics with stories, acceptance criteria, effort estimates (BMad Method-compatible) |
 | `migration-tracking.yaml` | `{implementation_artifacts}/` | Phase-by-phase progress tracking for sprint execution |
 
 ### Research and Discussion
 
-**`/sprintpilot-research`** — Fan out research across multiple topics in parallel, each with web search access. Results synthesized into a unified report.
+**`/sprintpilot-research`** — fan out research across multiple topics in parallel, each with web search access. Results synthesized into a unified report.
 
-**`/sprintpilot-party-mode`** — Launch 2-3 BMad Method personas (architect, PM, QA, dev, etc.) as parallel agents debating a topic. Multiple rounds where personas respond to each other. Produces consensus points, disagreements, and action items.
+**`/sprintpilot-party-mode`** — launch 2–3 BMad personas (architect, PM, QA, dev, etc.) as parallel agents debating a topic. Multiple rounds where personas respond to each other. Produces consensus points, disagreements, and action items.
 
----
+## Skills Reference
 
-## Adaptive Process Scaling (v2)
+| Skill | What it does |
+|-------|--------------|
+| `/sprint-autopilot-on` | Engage autonomous sprint execution |
+| `/sprint-autopilot-off` | Disengage and show status |
+| `/sprintpilot-update` | Check for updates and install the latest version |
+| `/sprintpilot-code-review` | Parallel 3-layer adversarial code review |
+| `/sprintpilot-codebase-map` | 5-stream brownfield codebase analysis |
+| `/sprintpilot-assess` | Tech debt, dependency audit, migration assessment |
+| `/sprintpilot-reverse-architect` | Extract architecture document from existing code |
+| `/sprintpilot-migrate` | 12-step legacy migration planning |
+| `/sprintpilot-research` | Parallel web research fan-out |
+| `/sprintpilot-party-mode` | Multi-persona BMad agent discussions |
 
-Sprintpilot v2 introduced **complexity profiles** as a first-class config dimension. The right amount of process for a 2-story bug-fix sprint is different from a 30-story green-field rebuild — and the cost of running the heavy flow on a small change is real (more LLM turns, more context rot, more time). One knob picks the right balance:
+## Compatibility
 
-| Profile | Per-story flow | Branching | Worktrees | Parallel stories | Use it for |
-|---------|---------------|-----------|-----------|------------------|-----------|
-| `nano` | `bmad-quick-dev` (one-shot) | `epic` (one PR per epic) | off | n/a | Tiny patch sprints, hot-fix runs |
-| `small` | Full 7-step BMad cycle | `story` (one PR per story) | on | off | Single-developer projects, ≤10 stories |
-| `medium` *(default)* | Full 7-step BMad cycle | `story` | on | off | Default — balanced for most sprints |
-| `large` | Full 7-step BMad cycle | `story` | on | **on** (Claude Code) | Multi-epic sprints, 20+ stories |
-| `legacy` | Pinned to v1.0.5 behavior byte-for-byte | `story` | on | off | Existing installs that want zero behavior change |
+### Tools (9 supported)
 
-Pick the profile at install time — interactive installer asks, non-interactive flag is `--profile <nano|small|medium|large|legacy>`. Missing profile defaults to `medium` with no behavior change vs. v1.0.5.
+Sprintpilot uses the universal SKILL.md format — same skills work everywhere:
 
-**One knob per feature** — every v2 optimization layer can be disabled in isolation without uninstalling. See [Configuration Reference](docs/CONFIGURATION.md#autopilot-configuration-modulesautopilotconfigyaml).
+| Tool | Directory | Tool | Directory |
+|------|-----------|------|-----------|
+| Claude Code | `.claude/skills/` | Roo Code | `.roo/skills/` |
+| Cursor | `.cursor/skills/` | Trae | `.trae/skills/` |
+| Windsurf | `.windsurf/skills/` | Kiro | `.kiro/skills/` |
+| Gemini CLI | `.gemini/skills/` | GitHub Copilot | `.github/copilot/skills/` |
+| Cline | `.cline/skills/` | | |
 
-### What v2 ships on top of the core flow
+For non-interactive installs:
 
-- **Phase timing instrumentation** — `mark` action emits `duration` records per skill phase; auto-emitted on critical paths (no LLM bracket calls to skip). `summarize-timings.js` reports hotspots > 5% of total time.
-- **State sharding** — non-critical writes accumulate in `.pending/` shards, flushed atomically at story boundaries / session checkpoints / sprint complete. Crash-recovery keys still write straight through.
-- **Conditional boot work** — clean-repo sessions skip the slow health-check / branch-reconciliation block (saves 8–30s per session).
-- **Cached reads** — TTL + source-mtime aware file cache; any writer's mtime advance forces a miss without explicit invalidate.
-- **Auto-inferred story DAG** — autopilot infers inter-story dependencies once after `bmad-sprint-planning` and writes `_Sprintpilot/sprints/dependencies.yaml` with an `# AUTO-INFERRED` marker. Hand-authored files are detected and respected silently.
-- **Parallel story dispatch** — when `parallel_stories: true` and the host supports it, layer-aware dispatch runs N stories concurrently in their own worktrees, then merges their state shards. Claude Code today; Gemini CLI experimentally.
-- **Cross-platform** — every workflow.md call site runs under bash, zsh, Git Bash, PowerShell, and cmd. Portable Node.js helpers replace POSIX-shell idioms.
-
-## Quick Start
-
-```bash
-# 1. Install BMad Method with the core method and Test Architect module
-#    (interactive — you'll be prompted to pick your tool)
-npx bmad-method install --modules bmm,tea
-```
-
-This installs:
-- **BMM** (BMad Method core) — the core development workflow with 34+ skills
-- **TEA** (Test Architect Enterprise) — risk-based test strategy, ATDD, CI quality gates, test framework scaffolding
-
-For full interactive setup (module *and* tool selection):
-```bash
-npx bmad-method install
-```
-
-```bash
-# 2. Install Sprintpilot (interactive — select your tool and complexity profile when prompted)
-npx @ikunin/sprintpilot@latest
-
-# 2b. Or pick the profile non-interactively
-npx @ikunin/sprintpilot@latest install --tools claude-code --profile medium --yes
-
-# 3. Start the autopilot in your IDE
-/sprint-autopilot-on
-```
-
-See [Supported Tools](#supported-tools) below for the full list of `--tools` values if you prefer non-interactive installs.
-
-## Supported Tools
-
-Sprintpilot uses the universal SKILL.md format — same skills work across all 9 tools:
-
-| Tool | Directory |
-|------|-----------|
-| Claude Code | `.claude/skills/` |
-| Cursor | `.cursor/skills/` |
-| Windsurf | `.windsurf/skills/` |
-| Gemini CLI | `.gemini/skills/` |
-| Cline | `.cline/skills/` |
-| Roo Code | `.roo/skills/` |
-| Trae | `.trae/skills/` |
-| Kiro | `.kiro/skills/` |
-| GitHub Copilot | `.github/copilot/skills/` |
-
-For non-interactive installs, pass one or more tool keys via `--tools`:
 ```bash
 npx @ikunin/sprintpilot@latest install --tools <tool1>,<tool2> --yes
 ```
+
 Valid values: `claude-code`, `cursor`, `windsurf`, `gemini-cli`, `cline`, `roo`, `trae`, `kiro`, `github-copilot`, or `all`.
 
-## Git Platforms
+### Git platforms
 
-| Platform | CLI | Auto-Detect | API Fallback |
-|----------|-----|-------------|-------------|
+| Platform | CLI | Auto-detect | API fallback |
+|----------|-----|-------------|--------------|
 | GitHub | `gh` | `github.com` | No |
 | GitLab | `glab` | `gitlab.*` | No |
 | Bitbucket | `bb` | `bitbucket.org` | Yes (`BITBUCKET_TOKEN`) |
 | Gitea | `tea` | Explicit config | Yes (`GITEA_TOKEN` + `base_url`) |
 
-No CLI installed? The addon falls back to **git_only mode** (direct merge, no PRs).
+No CLI installed? Falls back to **git_only mode** (direct merge, no PRs).
 
-To explicitly choose between PR and direct merge regardless of platform:
-```yaml
-# _Sprintpilot/modules/git/config.yaml
-git:
-  push:
-    create_pr: true   # PR flow (default) — push + PR, no auto-merge
-    create_pr: false  # Direct merge — merge to main after each story
-```
-
-## Supported Languages (Linting)
+### Linters (auto-detected, changed files only)
 
 | Language | Linters | Language | Linters |
 |----------|---------|----------|---------|
@@ -306,61 +281,32 @@ git:
 | Ruby | rubocop | PL/SQL | sqlfluff |
 | Kotlin | ktlint, detekt | PHP | phpstan, phpcs |
 
-First found wins per language. Multi-language projects (monorepos) lint all languages in one pass. See [Extending](docs/EXTENDING.md) to add more.
+First found wins per language. Multi-language monorepos lint all languages in one pass. See [Extending](docs/EXTENDING.md) to add more.
 
 ## Configuration
 
-All settings live in two YAML files — edit after install to customize behavior.
+All settings live in YAML files under `_Sprintpilot/modules/`. Most projects only ever change a handful — the rest have sensible profile-aware defaults.
 
-### Git Workflow (`_Sprintpilot/modules/git/config.yaml`)
+**Most-tweaked settings:**
 
-| Setting | Default | Description |
-|---------|---------|-------------|
-| `git.enabled` | `true` | Enable/disable all git operations |
-| `git.base_branch` | `main` | Branch PRs target |
-| `git.branch_prefix` | `story/` | Story branch naming (e.g., `story/1-2-user-auth`) |
-| `git.lint.enabled` | `true` | Lint changed files after implementation |
-| `git.lint.blocking` | `false` | `true` = lint errors halt autopilot |
-| `git.push.auto` | `true` | Auto-push branches after commit |
-| `git.push.create_pr` | `true` | Create PR (`false` = direct merge to base branch) |
-| `git.platform.provider` | `auto` | `auto` \| `github` \| `gitlab` \| `bitbucket` \| `gitea` \| `git_only` |
-| `git.lock.stale_timeout_minutes` | `30` | Auto-remove orphaned lock files |
-| `git.worktree.cleanup_on_merge` | `true` | Delete worktrees after merge |
+| Setting | File | Default | What it controls |
+|---------|------|---------|------------------|
+| `complexity_profile` | `autopilot/config.yaml` | `medium` | One of `nano`/`small`/`medium`/`large`/`legacy` — picks the per-story flow + which v2 layers are enabled |
+| `git.push.create_pr` | `git/config.yaml` | `true` | `true` = push + PR (no auto-merge), `false` = direct merge to base branch |
+| `git.lint.blocking` | `git/config.yaml` | `false` | `true` = lint errors halt the autopilot |
+| `autopilot.session_story_limit` | `autopilot/config.yaml` | `3` (nano: `5`) | Stories per session before checkpoint. `0` = unlimited |
+| `multi_agent.enabled` | `ma/config.yaml` | `true` | Enable parallel agent skills |
 
-### Autopilot (`_Sprintpilot/modules/autopilot/config.yaml`)
+**Profile-level overrides** — settings like `parallel_stories`, `state_sharding`, `phase_timings`, `cache_shared_reads`, and `conditional_boot_work` live in profile files at `_Sprintpilot/modules/autopilot/profiles/<profile>.yaml`, not in `autopilot/config.yaml` or `ma/config.yaml`. Their effective value depends on the active `complexity_profile`.
 
-| Setting | Default (medium) | Description |
-|---------|------------------|-------------|
-| `complexity_profile` | `medium` | One of `nano`, `small`, `medium`, `large`, `legacy`. Selects the per-story flow + which v2 layers are enabled. |
-| `autopilot.session_story_limit` | `3` (nano: `5`) | Stories per session before checkpoint. `0` = unlimited. |
-| `autopilot.retrospective_mode` | `auto` | `auto` (deterministic artifact) / `stop` (pause for `/bmad-retrospective`) / `skip`. |
-| `autopilot.auto_infer_dependencies` | `true` (nano + legacy: `false`) | Infer story DAG once after `bmad-sprint-planning`. Hand-authored sidecars (no `# AUTO-INFERRED` marker) are respected silently. |
-| `autopilot.phase_timings` | `true` (legacy: `false`) | Emit phase duration records via `log-timing.js mark`. |
-| `autopilot.coalesce_state_writes` | `true` (legacy: `false`) | Buffer non-critical state in `.pending/` shards. |
-| `autopilot.conditional_boot_work` | `true` (large + legacy: `false`) | Skip health-check / branch-reconciliation on clean repos. |
-| `autopilot.cache_shared_reads` | `true` (legacy: `false`) | TTL + mtime-aware file cache for hot reads. |
-
-### Multi-Agent (`_Sprintpilot/modules/ma/config.yaml`)
-
-| Setting | Default | Description |
-|---------|---------|-------------|
-| `multi_agent.enabled` | `true` | Enable parallel agent skills |
-| `multi_agent.max_parallel_research` | `3` | Concurrent research agents per batch |
-| `multi_agent.max_parallel_analysis` | `5` | Concurrent codebase analysis agents |
-| `ma.state_sharding` | `auto` (large: `always`) | `auto`, `always`, `never` — shards per-story state instead of contending on root YAMLs. |
-| `ma.parallel_stories` | `false` (large: `true`) | Dispatch independent stories from a DAG layer concurrently. Requires Claude Code (or Gemini CLI w/ experimental flag). |
-| `ma.max_parallel_stories` | `2` (large: `3`) | Cap on concurrent stories per layer. |
-| `ma.experimental_parallel_on_gemini` | `false` | Opt-in parallel dispatch under Gemini CLI (worktree-scoped subagents are still upstream). |
-| `ma.parallel_epics` | `false` | EXPERIMENTAL — cross-epic parallelism with merge-conflict preflight. Off on every profile by default. |
-
-See the [Configuration Reference](docs/CONFIGURATION.md) for the full list.
+See the [Configuration Reference](docs/CONFIGURATION.md) for every setting, default, and profile-level override.
 
 ## Requirements
 
 - [BMad Method](https://github.com/bmad-code-org/BMAD-METHOD) v6.2.0+
-- A supported AI code agent (see table above)
+- A supported AI code agent (see [Tools](#tools-9-supported))
 - Git repository with at least one commit
-- Platform CLI for PR creation (optional — see table above)
+- Platform CLI for PR creation (optional — see [Git platforms](#git-platforms))
 
 ## Documentation
 
