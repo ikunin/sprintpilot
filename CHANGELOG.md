@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.0.9] - 2026-04-27
+
+**Upgrade-path fix.** Users who upgraded from `bmad-autopilot-addon` v1 long ago — and have since removed `_bmad-addons/` — were keeping their stale `.claude/skills/bmad-ma-*` directories forever, alongside the new `sprintpilot-*` skills. The old slash commands kept appearing as live duplicates.
+
+### Fixed
+- **`installer`: orphan v1 skill dirs are now always evicted on install.** `evictV1SkillsFromToolDirs()` was previously reachable only via `evictV1Installation()`, which short-circuits when `_bmad-addons/` is missing. Decoupled the sweep — it now runs unconditionally as step 1b in `runInstall()` and honors `--dry-run`. Idempotent; no-op when nothing matches. v1-detected installs are unchanged (inner call still runs first, outer call finds nothing).
+
 ## [2.0.8] - 2026-04-27
 
 **Concurrency, correctness, and docs.** Hardens the parallel-dispatch path against three real race / partial-failure modes (merge-shards TOCTOU, dispatch-layer cap violations, resolve-dag aliasing edges), fixes timing instrumentation, repairs the installer's BMad version detection, and restructures the README to lead with value.
