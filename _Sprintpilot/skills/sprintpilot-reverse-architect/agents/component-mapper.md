@@ -6,6 +6,13 @@ You are extracting module boundaries and component contracts from an existing co
 
 Using the architecture-analysis.md analysis as a starting point, go deeper: trace actual imports, identify public APIs, and map the internal dependency graph.
 
+## Ignore-file Awareness
+
+Before any Glob or Grep, read the project's `.gitignore` and `.aiexclude` if
+they exist. Treat every non-comment, non-negation pattern as an additional
+excluded path: skip those files and directories entirely, do not Read them,
+and filter them out of pattern search results. Skip negation (`!`) lines.
+
 ## Method
 
 1. For each module/directory identified in architecture-analysis.md:

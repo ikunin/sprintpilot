@@ -20,6 +20,15 @@ Scan the project at `{{project_root}}` and write your findings to `{{output_file
 - `credentials.json`, `service-account.json`
 - Files in `.git/` directory
 
+## Ignore-file Awareness
+
+Before any Glob or Grep, read `{{project_root}}/.gitignore` and
+`{{project_root}}/.aiexclude` if they exist. Treat every non-comment,
+non-negation pattern as an additional excluded path: skip those files and
+directories entirely, do not Read them, and filter them out of pattern search
+results. `scan.js` applies these patterns automatically. Skip negation (`!`)
+lines.
+
 ## Exploration
 
 Use Grep for pattern searches and `scan.js` for aggregations. All Grep calls below should filter to code file types (e.g., `*.ts`, `*.js`, `*.py`, `*.java`, `*.go`, `*.rs`, `*.rb`, `*.cs`, `*.sql`, `*.sps`, `*.spb`, `*.xml`, `*.sh`, `*.c`, `*.h`, `*.cpp`, `*.hpp`, `*.cc`, `*.cxx`, `*.hxx`) and cap each result set (~20-50).

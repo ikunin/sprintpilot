@@ -6,6 +6,13 @@ You are tracing how data flows through the system — from entry points to stora
 
 Using architecture-analysis.md and integrations-analysis.md as context, trace the actual request/data paths through the code.
 
+## Ignore-file Awareness
+
+Before any Glob or Grep, read the project's `.gitignore` and `.aiexclude` if
+they exist. Treat every non-comment, non-negation pattern as an additional
+excluded path: skip those files and directories entirely, do not Read them,
+and filter them out of pattern search results. Skip negation (`!`) lines.
+
 ## Method
 
 1. Start from entry points (routes, CLI handlers, event listeners)

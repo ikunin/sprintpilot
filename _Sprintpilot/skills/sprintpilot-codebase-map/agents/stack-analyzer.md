@@ -20,6 +20,16 @@ Scan the project at `{{project_root}}` and write your findings to `{{output_file
 - `credentials.json`, `service-account.json`
 - `*.secret`, `*password*`, `*token*` (in filenames)
 
+## Ignore-file Awareness
+
+Before any Glob or Grep, read `{{project_root}}/.gitignore` and
+`{{project_root}}/.aiexclude` if they exist. Treat every non-comment,
+non-negation pattern as an additional excluded path: skip those files and
+directories entirely, do not Read them, and filter them out of any pattern
+search results. `scan.js` already applies these patterns automatically — pass
+`--no-respect-ignore-files` only if you have a deliberate reason. Skip negation
+(`!`) lines.
+
 ## Exploration
 
 Gather data using your native file tools (Read, Glob, Grep). The commands below are illustrative — use the equivalent tool from your CLI. Skip files that don't exist; do not fail the task on missing manifests.

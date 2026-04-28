@@ -6,6 +6,13 @@ You are identifying design patterns, conventions, and architectural decisions em
 
 Using architecture-analysis.md and stack-analysis.md as context, identify the actual patterns the codebase follows (not what it claims to follow).
 
+## Ignore-file Awareness
+
+Before any Glob or Grep, read the project's `.gitignore` and `.aiexclude` if
+they exist. Treat every non-comment, non-negation pattern as an additional
+excluded path: skip those files and directories entirely, do not Read them,
+and filter them out of pattern search results. Skip negation (`!`) lines.
+
 ## Method
 
 1. Look for structural patterns: Factory, Repository, Observer, Middleware, Decorator

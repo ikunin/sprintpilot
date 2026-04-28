@@ -161,6 +161,74 @@ describe('scan.js', () => {
       ]);
       expect(r.stdout.split('\n')).toHaveLength(2);
     });
+
+    it('respects .gitignore patterns by default', () => {
+      tree.write('keep.ts');
+      tree.write('secret.ts');
+      tree.write('logs/app.ts');
+      tree.write('logs/nested/x.ts');
+      tree.write('.gitignore', 'secret.ts\nlogs/\n');
+      const r = runScript('scan', ['files', '--include', '*.ts', '--root', tree.dir]);
+      expect(r.stdout.split('\n').sort()).toEqual(['keep.ts']);
+    });
+
+    it('respects .aiexclude patterns by default', () => {
+      tree.write('public/a.ts');
+      tree.write('proprietary/b.ts');
+      tree.write('.aiexclude', 'proprietary/\n');
+      const r = runScript('scan', ['files', '--include', '*.ts', '--root', tree.dir]);
+      expect(r.stdout.split('\n').sort()).toEqual(['public/a.ts']);
+    });
+
+    it('skips comments and blank lines in ignore files', () => {
+      tree.write('a.ts');
+      tree.write('b.ts');
+      tree.write('.gitignore', '# comment\n\n   \nb.ts\n');
+      const r = runScript('scan', ['files', '--include', '*.ts', '--root', tree.dir]);
+      expect(r.stdout.split('\n').sort()).toEqual(['a.ts']);
+    });
+
+    it('honors anchored ignore patterns (leading slash)', () => {
+      tree.write('config.ts');
+      tree.write('nested/config.ts');
+      tree.write('.gitignore', '/config.ts\n');
+      const r = runScript('scan', ['files', '--include', '*.ts', '--root', tree.dir]);
+      expect(r.stdout.split('\n').sort()).toEqual(['nested/config.ts']);
+    });
+
+    it('--no-respect-ignore-files disables ignore-file parsing', () => {
+      tree.write('a.ts');
+      tree.write('skip.ts');
+      tree.write('.gitignore', 'skip.ts\n');
+      const r = runScript('scan', [
+        'files',
+        '--include',
+        '*.ts',
+        '--root',
+        tree.dir,
+        '--no-respect-ignore-files',
+      ]);
+      expect(r.stdout.split('\n').sort()).toEqual(['a.ts', 'skip.ts']);
+    });
+
+    it('logs negation patterns to stderr but does not apply them', () => {
+      tree.write('a.ts');
+      tree.write('skip.ts');
+      tree.write('.gitignore', 'skip.ts\n!a.ts\n');
+      const r = runScript('scan', ['files', '--include', '*.ts', '--root', tree.dir]);
+      expect(r.stdout.split('\n').sort()).toEqual(['a.ts']);
+      expect(r.stderr).toContain('negation');
+    });
+
+    it('combines .gitignore and .aiexclude patterns', () => {
+      tree.write('keep.ts');
+      tree.write('git-ignored.ts');
+      tree.write('ai-ignored.ts');
+      tree.write('.gitignore', 'git-ignored.ts\n');
+      tree.write('.aiexclude', 'ai-ignored.ts\n');
+      const r = runScript('scan', ['files', '--include', '*.ts', '--root', tree.dir]);
+      expect(r.stdout.split('\n').sort()).toEqual(['keep.ts']);
+    });
   });
 
   describe('largest subcommand', () => {

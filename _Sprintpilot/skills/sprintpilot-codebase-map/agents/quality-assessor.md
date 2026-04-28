@@ -19,6 +19,15 @@ Scan the project at `{{project_root}}` and write your findings to `{{output_file
 - `*.key`, `*.pem`, `*.p12` (private keys)
 - `credentials.json`, `service-account.json`
 
+## Ignore-file Awareness
+
+Before any Glob or Grep, read `{{project_root}}/.gitignore` and
+`{{project_root}}/.aiexclude` if they exist. Treat every non-comment,
+non-negation pattern as an additional excluded path: skip those files and
+directories entirely, do not Read them, and filter them out of pattern search
+results. `scan.js` applies these patterns automatically. Skip negation (`!`)
+lines.
+
 ## Exploration
 
 Use your native file tools (Read, Glob, Grep) plus the `scan.js` helper for aggregations.

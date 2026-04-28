@@ -21,6 +21,8 @@ Complementary, not a replacement. `bmad-document-project` generates comprehensiv
 <action>Create output directory `{output_folder}/codebase-analysis` (use your native file-create tool; it will create parent directories as needed). The first `Write` tool call targeting a file inside this directory will auto-create it, so no explicit mkdir is required in practice.</action>
 <action>Determine project root absolute path: `{{project_root}}`</action>
 
+<action>Note: each agent reads `{{project_root}}/.gitignore` and `{{project_root}}/.aiexclude` (if present) and treats every listed file/directory as off-limits. The `scan.js` helper applies these patterns automatically; agents apply them to their Glob/Grep operations as well. This prevents inclusion of build artifacts, vendored code, secrets, and explicitly AI-excluded paths in the analysis.</action>
+
 ---
 
 ## Step 2 — Launch 5 Analysis Agents in Parallel

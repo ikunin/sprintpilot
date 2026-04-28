@@ -15,6 +15,10 @@
  *               Flags: --include, --exclude, --root
  *   extensions  Extension frequency histogram, descending.
  *               Flags: --exclude, --root, --limit (default 20)
+ *
+ * Ignore files: .gitignore and .aiexclude at the project root are parsed and
+ * applied as additional excludes by default. Pass --no-respect-ignore-files
+ * to disable. Negation patterns (`!pattern`) are logged to stderr and skipped.
  */
 
 const fs = require('fs');
@@ -41,9 +45,74 @@ const DEFAULT_EXCLUDES = [
   '.worktrees',
 ];
 
+const IGNORE_FILES = ['.gitignore', '.aiexclude'];
+
+// Translate one .gitignore / .aiexclude line into zero or more scan.js exclude
+// patterns. Blank lines and `#` comments → []. Negation (`!`) is unsupported
+// and returns []; the caller reports a stderr note. Trailing `/` marks a
+// directory; we expand to both `dir` and `dir/**` so descendant files are also
+// excluded. Leading `/` anchors to the ignore file's directory; we strip it
+// and rely on scan.js's path-anchored exclude semantics for patterns that
+// contain a slash.
+function parseIgnorePattern(line) {
+  let p = line.trim();
+  if (!p || p.startsWith('#')) return { patterns: [], negation: false };
+  if (p.startsWith('!')) return { patterns: [], negation: true };
+  // Unescape leading `\#` and `\!` (gitignore literal escapes).
+  if (p.startsWith('\\#') || p.startsWith('\\!')) p = p.slice(1);
+
+  const isDir = p.endsWith('/');
+  if (isDir) p = p.slice(0, -1);
+
+  const anchored = p.startsWith('/');
+  const body = anchored ? p.slice(1) : p;
+  if (!body) return { patterns: [], negation: false };
+  // compilePatterns handles a leading '/' by anchoring the pattern to the
+  // root, so we keep it intact for anchored patterns.
+  const prefix = anchored ? '/' : '';
+
+  const patterns = [];
+  if (isDir) {
+    patterns.push(`${prefix}${body}`);
+    patterns.push(`${prefix}${body}/**`);
+  } else {
+    patterns.push(`${prefix}${body}`);
+    // A non-anchored pattern that has no slash matches files at any depth as
+    // a basename, which scan.js's matcher already does. If the same name is
+    // also a directory anywhere in the tree, exclude its descendants too.
+    if (!anchored && !body.includes('/')) patterns.push(`**/${body}/**`);
+  }
+  return { patterns, negation: false };
+}
+
+function loadIgnoreFilePatterns(root) {
+  const out = [];
+  let negationCount = 0;
+  for (const name of IGNORE_FILES) {
+    const full = path.join(root, name);
+    let content;
+    try {
+      content = fs.readFileSync(full, 'utf8');
+    } catch {
+      continue;
+    }
+    for (const raw of content.split(/\r?\n/)) {
+      const { patterns, negation } = parseIgnorePattern(raw);
+      if (negation) negationCount++;
+      for (const p of patterns) out.push(p);
+    }
+  }
+  if (negationCount > 0) {
+    log.error(
+      `scan.js: ignored ${negationCount} negation pattern(s) from .gitignore/.aiexclude (not supported)`,
+    );
+  }
+  return out;
+}
+
 function help() {
   log.out(
-    'Usage: scan.js <files|largest|loc|extensions> [--include <globs>] [--exclude <globs>] [--root <path>] [--limit <N>] [--count]',
+    'Usage: scan.js <files|largest|loc|extensions> [--include <globs>] [--exclude <globs>] [--root <path>] [--limit <N>] [--count] [--no-respect-ignore-files]',
   );
 }
 
@@ -183,12 +252,22 @@ function toPosix(p) {
 // pathAnchored = true if the pattern contains a path separator; such patterns
 // only match the full relative path. Basename-only patterns (no '/') match
 // both the full path and the basename, so "*.ts" works at any depth.
+// A leading '/' anchors the pattern to the root (relative paths have no
+// leading slash, so we strip it but keep pathAnchored=true).
 function compilePatterns(patterns) {
-  return patterns.map((p) => ({
-    raw: p,
-    re: globToRegex(p),
-    pathAnchored: p.includes('/'),
-  }));
+  return patterns.map((p) => {
+    let raw = p;
+    let leadingSlash = false;
+    if (raw.startsWith('/')) {
+      raw = raw.slice(1);
+      leadingSlash = true;
+    }
+    return {
+      raw,
+      re: globToRegex(raw),
+      pathAnchored: leadingSlash || raw.includes('/'),
+    };
+  });
 }
 
 function matchesAny(relPath, compiled) {
@@ -335,8 +414,8 @@ function resolveRoot(opts) {
   return root;
 }
 
-function buildExcludes(extra) {
-  const list = [...DEFAULT_EXCLUDES, ...extra];
+function buildExcludes(extra, ignoreFromFiles) {
+  const list = [...DEFAULT_EXCLUDES, ...extra, ...ignoreFromFiles];
   // Patterns: match the basename of a directory OR any path containing it.
   const patterns = [];
   const basenames = new Set();
@@ -352,10 +431,18 @@ function buildExcludes(extra) {
   return { compiled: compilePatterns(patterns), basenames };
 }
 
+function ignoreFilePatternsFor(root, opts) {
+  if (opts['no-respect-ignore-files'] === true) return [];
+  return loadIgnoreFilePatterns(root);
+}
+
 function cmdFiles(opts) {
   const root = resolveRoot(opts);
   const includes = compilePatterns(splitList(opts.include));
-  const { compiled: excludes, basenames } = buildExcludes(splitList(opts.exclude));
+  const { compiled: excludes, basenames } = buildExcludes(
+    splitList(opts.exclude),
+    ignoreFilePatternsFor(root, opts),
+  );
   const limit = opts.limit ? Number(opts.limit) : 0;
   const count = opts.count === true || opts.count === 'true';
 
@@ -378,7 +465,10 @@ function cmdFiles(opts) {
 function cmdLargest(opts) {
   const root = resolveRoot(opts);
   const includes = compilePatterns(splitList(opts.include));
-  const { compiled: excludes, basenames } = buildExcludes(splitList(opts.exclude));
+  const { compiled: excludes, basenames } = buildExcludes(
+    splitList(opts.exclude),
+    ignoreFilePatternsFor(root, opts),
+  );
   const limit = opts.limit ? Number(opts.limit) : 10;
 
   const heap = []; // simple array; N is small so O(files * log N) is fine
@@ -396,7 +486,10 @@ function cmdLargest(opts) {
 function cmdLoc(opts) {
   const root = resolveRoot(opts);
   const includes = compilePatterns(splitList(opts.include));
-  const { compiled: excludes, basenames } = buildExcludes(splitList(opts.exclude));
+  const { compiled: excludes, basenames } = buildExcludes(
+    splitList(opts.exclude),
+    ignoreFilePatternsFor(root, opts),
+  );
 
   let total = 0;
   let fileCount = 0;
@@ -409,7 +502,10 @@ function cmdLoc(opts) {
 
 function cmdExtensions(opts) {
   const root = resolveRoot(opts);
-  const { compiled: excludes, basenames } = buildExcludes(splitList(opts.exclude));
+  const { compiled: excludes, basenames } = buildExcludes(
+    splitList(opts.exclude),
+    ignoreFilePatternsFor(root, opts),
+  );
   const limit = opts.limit ? Number(opts.limit) : 20;
 
   const counts = new Map();
@@ -427,7 +523,7 @@ function cmdExtensions(opts) {
 
 function main() {
   const { opts, positional } = parseArgs(process.argv.slice(2), {
-    booleanFlags: ['count'],
+    booleanFlags: ['count', 'no-respect-ignore-files'],
   });
   if (opts.help || positional.length === 0) {
     help();
