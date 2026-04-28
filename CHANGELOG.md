@@ -1,5 +1,14 @@
 # Changelog
 
+## [2.0.10] - 2026-04-28
+
+**Brownfield analysis now respects ignore files.** Previously, the codebase analysis skills walked the entire tree without consulting `.gitignore` or `.aiexclude`, sweeping in build artifacts, vendored code, and proprietary paths the user had explicitly hidden from AI tooling.
+
+### Changed
+- **`scan.js`: parses `.gitignore` and `.aiexclude` at the project root by default**, applying their patterns as additional excludes. Supports comments, blank lines, trailing-slash directory patterns, and leading-slash anchoring (matching gitignore semantics). Negation (`!`) lines are logged to stderr and skipped. Opt out with `--no-respect-ignore-files`.
+- **`compilePatterns`: leading `/` now anchors a pattern to the root**, so ignore patterns like `/config.ts` no longer leak into subdirectories.
+- **Brownfield agent prompts (5 codebase-map + 3 reverse-architect agents) gained an "Ignore-file Awareness" section** instructing them to apply these patterns to their native Glob/Grep operations.
+
 ## [2.0.9] - 2026-04-27
 
 **Upgrade-path fix.** Users who upgraded from `bmad-autopilot-addon` v1 long ago — and have since removed `_bmad-addons/` — were keeping their stale `.claude/skills/bmad-ma-*` directories forever, alongside the new `sprintpilot-*` skills. The old slash commands kept appearing as live duplicates.
