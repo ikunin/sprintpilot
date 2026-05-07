@@ -7,7 +7,9 @@ const { URL } = require('node:url');
 // API response we'd expect.
 const MAX_RESPONSE_BYTES = 5 * 1024 * 1024;
 
-function postJson(urlStr, body, { headers = {}, timeoutMs = 15_000 } = {}) {
+// Single shared request engine so postJson / getJson / putJson all behave
+// identically on edge cases (redirects, body cap, timeout, settle race).
+function requestJson(method, urlStr, body, { headers = {}, timeoutMs = 15_000 } = {}) {
   return new Promise((resolve, reject) => {
     let url;
     try {
@@ -29,24 +31,30 @@ function postJson(urlStr, body, { headers = {}, timeoutMs = 15_000 } = {}) {
     const ok = (val) => done(resolve, val);
     const fail = (err) => done(reject, err);
 
-    const payload = typeof body === 'string' ? body : JSON.stringify(body);
+    const hasBody = body !== undefined && body !== null;
+    const payload = hasBody ? (typeof body === 'string' ? body : JSON.stringify(body)) : null;
+
     // Pick the transport based on URL scheme so http:// can be used by local
     // integration tests without standing up a TLS cert. Production callers
     // always use https://.
     const transport = url.protocol === 'http:' ? http : https;
     const defaultPort = url.protocol === 'http:' ? 80 : 443;
+    const reqHeaders = {
+      'User-Agent': 'sprintpilot',
+      ...headers,
+    };
+    if (hasBody) {
+      reqHeaders['Content-Type'] = reqHeaders['Content-Type'] || 'application/json';
+      reqHeaders['Content-Length'] = Buffer.byteLength(payload);
+    }
+
     const req = transport.request(
       {
-        method: 'POST',
+        method,
         hostname: url.hostname,
         port: url.port || defaultPort,
         path: `${url.pathname}${url.search || ''}`,
-        headers: {
-          'Content-Type': 'application/json',
-          'Content-Length': Buffer.byteLength(payload),
-          'User-Agent': 'sprintpilot',
-          ...headers,
-        },
+        headers: reqHeaders,
         timeout: timeoutMs,
       },
       (res) => {
@@ -95,9 +103,21 @@ function postJson(urlStr, body, { headers = {}, timeoutMs = 15_000 } = {}) {
       req.destroy(new Error(`HTTP timeout after ${timeoutMs}ms`));
     });
     req.on('error', fail);
-    req.write(payload);
+    if (payload !== null) req.write(payload);
     req.end();
   });
 }
 
-module.exports = { postJson, MAX_RESPONSE_BYTES };
+function postJson(urlStr, body, opts) {
+  return requestJson('POST', urlStr, body, opts);
+}
+
+function getJson(urlStr, opts) {
+  return requestJson('GET', urlStr, null, opts);
+}
+
+function putJson(urlStr, body, opts) {
+  return requestJson('PUT', urlStr, body, opts);
+}
+
+module.exports = { postJson, getJson, putJson, MAX_RESPONSE_BYTES };

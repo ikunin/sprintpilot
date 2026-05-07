@@ -1,90 +1,17 @@
 #!/usr/bin/env node
 
 const { parseArgs } = require('../lib/runtime/args');
-const { tryRun, run } = require('../lib/runtime/spawn');
+const { tryRun } = require('../lib/runtime/spawn');
 const { tryGitStdout } = require('../lib/runtime/git');
 const { extractUrl, headLines } = require('../lib/runtime/text');
 const { postJson } = require('../lib/runtime/http');
+const { hasCli, parseGitRemote, extractOwnerRepo, redactAuth } = require('../lib/runtime/platform');
 const log = require('../lib/runtime/log');
 
 function help() {
   log.out(
     "Usage: create-pr.js --platform <github|gitlab|bitbucket|gitea|git_only> --branch <name> --base <branch> --title 'title' --body 'body' [--base-url <url>]",
   );
-}
-
-async function hasCli(name) {
-  const r = await tryRun(name, ['--version'], { timeoutMs: 2000 });
-  return r.exitCode === 0;
-}
-
-// Accept only safe path components so a hostile remote URL can't inject
-// into the REST API path. Both segments must match this pattern; the full
-// path (repo name plus any GitLab subgroup segments) must contain only
-// allowed characters. This prevents paths like `..`, URL-encoded slashes,
-// or whitespace sneaking into the request.
-const SAFE_SEGMENT = /^[A-Za-z0-9._-]+$/;
-
-function parseGitRemote(url) {
-  if (!url) return null;
-  let u = url.trim();
-  // Strip a trailing `.git` and trailing `/` from either form.
-  u = u.replace(/\.git\/?$/, '').replace(/\/$/, '');
-
-  // SCP-style: user@host:path (e.g. git@github.com:owner/repo,
-  // git@github.com-work:org/sub/repo). Exclude URL-scheme inputs from this
-  // branch — they belong to the URL parser below.
-  if (!/^(?:https?|ssh|git):/i.test(u)) {
-    // SCP-style cannot sensibly represent IPv6 hosts or ports — reject
-    // inputs whose host portion starts with `[` or contains a second `:`
-    // in the path (which would indicate an embedded port that would then
-    // be interpolated into a REST URL).
-    if (u.startsWith('[')) return null;
-    const scp = u.match(/^(?:[^@]+@)?([^:]+):(.+)$/);
-    if (scp) {
-      const host = scp[1];
-      const path = scp[2].replace(/^\/+/, '');
-      // Reject when the "path" contains a colon — that indicates a
-      // non-standard `user@host:port:path` form which would silently
-      // misroute to the wrong REST API path.
-      if (path.includes(':')) return null;
-      return { host, path };
-    }
-  }
-
-  // URL form: https://host/path, ssh://git@host:port/path, git://host/path.
-  try {
-    const parsed = new URL(u);
-    return { host: parsed.hostname, path: parsed.pathname.replace(/^\/+/, '') };
-  } catch {
-    return null;
-  }
-}
-
-async function extractOwnerRepo() {
-  const remoteUrl = (await tryGitStdout(['remote', 'get-url', 'origin'])) || '';
-  const parts = parseGitRemote(remoteUrl);
-  if (!parts) return '';
-  const segments = parts.path.split('/').filter(Boolean);
-  if (segments.length < 2) return '';
-  // Validate every segment — ownerRepo gets interpolated into the REST URL.
-  for (const seg of segments) {
-    if (!SAFE_SEGMENT.test(seg)) return '';
-  }
-  return segments.join('/');
-}
-
-// Strip Authorization header values and obvious token fields from a response
-// body before we echo it to the user's terminal or logs.
-function redactAuth(text) {
-  if (!text) return text;
-  return String(text)
-    .replace(/("?authorization"?\s*:\s*")[^"]*(")/gi, '$1[REDACTED]$2')
-    .replace(/(bearer\s+)\S+/gi, '$1[REDACTED]')
-    .replace(
-      /("?(?:token|access_token|api_key|private_token)"?\s*[:=]\s*")[^"]*(")/gi,
-      '$1[REDACTED]$2',
-    );
 }
 
 async function main() {
