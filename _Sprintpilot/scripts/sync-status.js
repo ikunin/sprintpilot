@@ -131,12 +131,19 @@ function main() {
     process.exit(1);
   }
 
+  // Pitfalls lint summary — passed through verbatim from
+  // `lint-test-pitfalls.js --format json | jq -c '{total: .summary.total, byLang}'`
+  // (or whatever shorthand the workflow chooses). Stored as a quoted scalar
+  // so the YAML stays line-oriented; downstream readers parse it back.
+  const testPitfalls = opts['test-pitfalls'];
+
   const fields = [
     { key: 'branch', value: branch },
     { key: 'worktree', value: worktree },
     { key: 'story_commit', value: storyCommit },
     { key: 'patch_commits', value: patchCommits ? `[${patchCommits}]` : undefined, raw: true },
     { key: 'lint_result', value: lintResult },
+    { key: 'test_pitfalls', value: testPitfalls },
     { key: 'push_status', value: pushStatus },
     { key: 'merge_status', value: mergeStatus },
     { key: 'pr_url', value: prUrl },

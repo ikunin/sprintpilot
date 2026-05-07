@@ -1,0 +1,117 @@
+# Sprintpilot — default lint patterns for test-time pitfalls that pass
+# locally but fail in CI.
+#
+# Each pattern is checked against test files of the matching `lang`. A
+# match emits a warning (never a halt) — the autopilot surfaces these
+# alongside CI-parity warnings post-GREEN so the dev can react before the
+# next story stacks on top of green.
+#
+# Pattern fields:
+#   id        — unique identifier; surfaces in lint output
+#   lang      — file-extension family this pattern applies to:
+#               python | js-ts | go | rust | ruby
+#   runner    — optional human-readable hint about the runner (informational
+#               only; matching is currently lang-based)
+#   grep      — regex (string) that triggers the warning when found
+#   not_grep  — optional regex; if it matches *anywhere* in the same file
+#               the pattern is suppressed (cleanup is present)
+#   message   — single-line rationale shown in the lint output
+#   severity  — warning (default) | info
+#
+# Projects can override or extend this bundle by writing
+# `_Sprintpilot/modules/autopilot/test-pitfalls.yaml` — additive merge by id.
+
+patterns:
+  # ────────────────────────── Python / pytest ───────────────────────────
+  - id: fastapi-lifecycle-trigger
+    lang: python
+    runner: pytest
+    grep: 'with TestClient\('
+    message: "with-block on TestClient triggers FastAPI lifespan startup; if startup loads CI-absent resources (model files, DB), tests pass locally and fail on a fresh CI runner"
+    severity: warning
+
+  - id: pytest-asyncio-loop-leak
+    lang: python
+    runner: pytest
+    grep: 'asyncio\.run\([^)]*\).*TestClient\('
+    message: "asyncio.run + TestClient in the same test leaks engine state across event loops; dispose the engine between them or migrate to pytest-asyncio's loop fixture"
+    severity: warning
+
+  - id: pytest-fixture-literal-path
+    lang: python
+    runner: pytest
+    grep: '"\.?\/(fixtures?|test-data|model_files?)\/[^"]+"'
+    not_grep: 'pytest\.fixture'
+    message: "fixture file referenced by literal path; if not tracked by git or downloaded by your bootstrap, this passes locally where the file is cached and fails on CI"
+    severity: warning
+
+  # ────────────────────────── JavaScript / TypeScript ───────────────────
+  - id: jest-pool-no-cleanup
+    lang: js-ts
+    runner: jest
+    grep: 'beforeAll\([\s\S]*?new Pool\('
+    not_grep: 'afterAll\([\s\S]*?\.end\('
+    message: "beforeAll creates a connection pool but no afterAll(pool.end) — CI runners surface as 'open handles after test run completed' and time out"
+    severity: warning
+
+  - id: vitest-globalThis-in-beforeAll
+    lang: js-ts
+    runner: vitest
+    grep: 'beforeAll\([\s\S]*?globalThis\.[A-Za-z_$][\w$]*\s*='
+    not_grep: 'afterAll\([\s\S]*?globalThis\.[A-Za-z_$][\w$]*\s*=\s*(undefined|null)'
+    message: "beforeAll mutates globalThis without afterAll cleanup; CI test order differs and other tests may see leaked state"
+    severity: warning
+
+  - id: jsts-fs-cwd-relative
+    lang: js-ts
+    grep: "fs\\.(read|write|appendFile)(Sync)?\\(['\"][^/'\"]"
+    message: "filesystem call with cwd-relative path; CI runners change cwd between tasks — anchor with __dirname or path.resolve(import.meta.dirname, ...)"
+    severity: info
+
+  # ────────────────────────── Go / go test ──────────────────────────────
+  - id: go-parallel-shared-globals
+    lang: go
+    runner: go-test
+    grep: 't\.Parallel\(\)'
+    not_grep: 't\.Cleanup\('
+    message: "t.Parallel() without t.Cleanup() — if the test mutates package-level state, concurrent runs in CI can race even when serial runs locally pass"
+    severity: warning
+
+  - id: go-tempfile-not-cleaned
+    lang: go
+    runner: go-test
+    grep: 'os\.CreateTemp\('
+    not_grep: '(t\.Cleanup\(|defer\s+os\.Remove\(|defer\s+os\.RemoveAll\()'
+    message: "os.CreateTemp without t.Cleanup or defer; CI runners hit disk-quota or polluted /tmp on long sessions"
+    severity: warning
+
+  # ────────────────────────── Rust / cargo test ─────────────────────────
+  - id: cargo-ignore-without-reason
+    lang: rust
+    runner: cargo-test
+    grep: '#\[ignore\]\s*$'
+    not_grep: '#\[ignore\s*='
+    message: "#[ignore] without a reason string — CI logs surface no triage hint when this fires"
+    severity: info
+
+  - id: cargo-thread-unsafe-static
+    lang: rust
+    runner: cargo-test
+    grep: 'static\s+mut\s+'
+    message: "static mut in a test crate; CI test runners default to multi-threaded execution and surface UB cargo test --test-threads=1 hides locally"
+    severity: warning
+
+  # ────────────────────────── Ruby / rspec ──────────────────────────────
+  - id: rspec-pending-without-message
+    lang: ruby
+    runner: rspec
+    grep: '^\s*pending\s*$'
+    message: "pending without an explanation — use pending('reason') so CI logs explain why"
+    severity: info
+
+  - id: rspec-let-side-effect
+    lang: ruby
+    runner: rspec
+    grep: 'let\([^)]+\)\s*\{[^}]*(create|update|delete|insert)'
+    message: "let { create … } in RSpec invokes the block lazily; CI parallelization can interleave creates between examples"
+    severity: warning

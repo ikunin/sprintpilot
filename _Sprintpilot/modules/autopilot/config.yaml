@@ -58,3 +58,21 @@ autopilot:
   # which exhausts the token/memory budget. That's why "auto" generates
   # the artifact inline instead of invoking the external skill.
   retrospective_mode: auto
+
+  # Test-pitfalls lint — pattern-matching warning gate that runs after
+  # bmad-dev-story GREEN, alongside lint-changed.js and ci-parity-scan.
+  # Catches test-time patterns that pass locally but fail in CI:
+  # lifecycle hooks loading absent resources (FastAPI lifespan + cached
+  # model files), async loop leaks, fixture-by-literal-path, etc.
+  #
+  # Severity is always at most warning — the lint never halts the
+  # autopilot. Findings are stashed in git-status.yaml so the session
+  # checkpoint surfaces them.
+  #
+  # The default pattern bundle ships at
+  # `_Sprintpilot/templates/test-pitfalls.yaml`. Override per-project at
+  # `_Sprintpilot/modules/autopilot/test-pitfalls.yaml` (additive merge
+  # by `id`).
+  test_pitfalls:
+    enabled: true
+    # config_path: _Sprintpilot/modules/autopilot/test-pitfalls.yaml
