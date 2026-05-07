@@ -152,6 +152,14 @@ Both live in `_bmad-output/implementation-artifacts/`. The autopilot reads `spri
 
 For the `git-status.yaml` schema and field reference, see [Configuration Reference](CONFIGURATION.md#git-status-file-git-statusyaml).
 
+#### Sanctioned exception: `sprint-status.yaml` conflict resolution
+
+The auto-merge driver registered by the installer (`merge=bmad-doc` in `.gitattributes`) reconciles conflicts in `sprint-status.yaml` by taking the most-progressed status per story key (`done > review > in-progress > ready-for-dev > backlog`) and the latest `last_updated` timestamp.
+
+This is the only code path where Sprintpilot writes to `sprint-status.yaml`, and it does so only as conflict resolution — the driver never originates a write to fields BMad doesn't already record on both sides. Without it, every stacked-PR merge re-fights the same trivial conflicts (BMad core writes the file from `bmad-dev-story` and `bmad-code-review`; concurrent stacked branches guarantee N-way overlaps).
+
+Implementation: `_Sprintpilot/scripts/auto-merge-bmad-docs.js` dispatching to `_Sprintpilot/lib/runtime/yaml-merge.js#mergeSprintStatus`. Disabling: remove the `_bmad-output/implementation-artifacts/sprint-status.yaml merge=bmad-doc` line from the installer's `.gitattributes` block, or run `sprintpilot uninstall` to drop the entire wiring.
+
 ### Lock File
 
 Prevents concurrent autopilot sessions. Uses epoch timestamp + UUID (no PID — unreliable in Claude Code). All time math in Bash, not the LLM.

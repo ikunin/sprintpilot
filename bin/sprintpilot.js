@@ -7,6 +7,7 @@ const pkg = require('../package.json');
 const { runInstall } = require('../lib/commands/install');
 const { runUninstall } = require('../lib/commands/uninstall');
 const { runCheckUpdate } = require('../lib/commands/check-update');
+const { runResolveDocs } = require('../lib/commands/resolve-docs');
 const { readAddonManifestVersion } = require('../lib/core/bmad-config');
 
 async function resolveVersion() {
@@ -90,6 +91,20 @@ async function main() {
     .action(async () => {
       try {
         await runCheckUpdate();
+      } catch (err) {
+        bail(err);
+      }
+    });
+
+  program
+    .command('resolve-docs [paths...]')
+    .description(
+      'Resolve <<<<<<< conflict markers in BMad state YAML files using domain-aware merge logic (sprint-status, git-status, decision-log, autopilot-state)',
+    )
+    .option('--dry-run', 'Print which files would be resolved without writing')
+    .action(async (paths, options) => {
+      try {
+        await runResolveDocs({ paths, dryRun: !!options.dryRun });
       } catch (err) {
         bail(err);
       }
