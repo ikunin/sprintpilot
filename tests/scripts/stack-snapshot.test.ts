@@ -1,7 +1,7 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { runScript } from './helpers/run.js';
 
 let dir: string;
@@ -103,7 +103,53 @@ describe('stack-snapshot (end-to-end)', () => {
     expect(r.status).toBe(0);
     const payload = JSON.parse(r.stdout);
     expect(payload.snapshot.conflicts_at_base).toBe(true);
-    expect(payload.snapshot.recommendation).toMatch(/resolve-docs/);
+    expect(payload.snapshot.recommendation).toMatch(/land-stack/);
+    expect(payload.snapshot.recommendation).not.toMatch(/resolve-docs/);
+    // dirty_prs surfaces the specific PR numbers in the JSON payload.
+    expect(payload.snapshot.dirty_prs).toEqual([1]);
+    // …and lands in the YAML body so the next session and the dev can see it.
+    const yamlBody = readFileSync(gitStatus, 'utf8');
+    expect(yamlBody).toMatch(/dirty_prs: \[1\]/);
+  });
+
+  it('emits dirty_prs with multiple ids in the YAML body', () => {
+    const prsFile = writeFixture('prs.json', {
+      platform: 'github',
+      prs: [
+        {
+          number: 7,
+          sourceBranch: 'story/1-1',
+          targetBranch: 'main',
+          mergeStateStatus: 'DIRTY',
+        },
+        {
+          number: 9,
+          sourceBranch: 'story/1-2',
+          targetBranch: 'story/1-1',
+          mergeStateStatus: 'DIRTY',
+        },
+      ],
+    });
+    const checksFile = writeFixture('checks.json', { '7': 'success', '9': 'pending' });
+    const gitStatus = path.join(dir, 'git-status.yaml');
+    const r = runScript(
+      'stack-snapshot',
+      [
+        '--platform',
+        'github',
+        '--git-status-file',
+        gitStatus,
+        '--prs-from-file',
+        prsFile,
+        '--checks-from-file',
+        checksFile,
+      ],
+      { cwd: dir },
+    );
+    expect(r.status).toBe(0);
+    const yamlBody = readFileSync(gitStatus, 'utf8');
+    // Order follows topological depth in the snapshot composition.
+    expect(yamlBody).toMatch(/dirty_prs: \[7, 9\]/);
   });
 
   it('git_only platform exits 2 with degraded snapshot', () => {
@@ -167,7 +213,9 @@ describe('stack-snapshot (end-to-end)', () => {
     );
     const prsFile = writeFixture('prs.json', {
       platform: 'github',
-      prs: [{ number: 1, sourceBranch: 'story/1-1', targetBranch: 'main', mergeStateStatus: 'CLEAN' }],
+      prs: [
+        { number: 1, sourceBranch: 'story/1-1', targetBranch: 'main', mergeStateStatus: 'CLEAN' },
+      ],
     });
     const checksFile = writeFixture('checks.json', { '1': 'success' });
 

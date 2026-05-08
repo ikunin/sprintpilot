@@ -100,8 +100,11 @@ describe('buildRecommendation', () => {
       dirtyPrs: [{ pr: 7 }, { pr: 9 }],
       mergeStrategy: 'manual',
     });
-    expect(r).toMatch(/resolve-docs/);
+    // Recommendation points at land-stack only — resolve-docs operates on
+    // already-conflicted working-tree files and can't fix platform-side
+    // DIRTY merge state. land-stack does the full flow.
     expect(r).toMatch(/land-stack/);
+    expect(r).not.toMatch(/resolve-docs/);
     // The new wording lists the specific dirty PR numbers.
     expect(r).toMatch(/#7, #9/);
   });
@@ -195,7 +198,8 @@ describe('composeSnapshot', () => {
       recommendation: string;
     };
     expect(s.conflicts_at_base).toBe(true);
-    expect(s.recommendation).toMatch(/resolve-docs/);
+    expect(s.recommendation).toMatch(/land-stack/);
+    expect(s.recommendation).not.toMatch(/resolve-docs/);
   });
 
   it('returns depth 0 and no recommendation when stack is empty', () => {

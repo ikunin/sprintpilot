@@ -114,16 +114,20 @@ function topologicalOrder(prs) {
 function buildRecommendation({ depth, ciAllGreen, dirtyPrs, mergeStrategy }) {
   if (depth === 0) return null;
   if (dirtyPrs && dirtyPrs.length > 0) {
-    // Dirty merge state can be against the base branch (PR's targetBranch)
-    // OR against another stacked PR. The recommendation message lists the
-    // specific PRs so the user knows where to look. Both `resolve-docs`
-    // (BMad state-file conflicts) and `land-stack` (rebases each PR on
-    // the latest base) can help; we recommend trying them in order.
+    // Dirty merge state lives on the platform side — the conflict
+    // doesn't exist in the user's worktree yet, so `resolve-docs`
+    // (which only operates on already-conflicted working-tree files
+    // with `<<<<<<<` markers) has nothing to act on. The actual fix is
+    // `land-stack`, which fetches each branch, runs `git merge` to
+    // surface the conflicts locally (the auto-merge driver from chunk
+    // 1 then resolves the BMad state files automatically), and pushes
+    // the rebased branch back. The user only needs to step in for
+    // real-code conflicts the driver can't handle.
     const list = dirtyPrs.map((p) => `#${p.pr}`).join(', ');
     return (
-      `Stack has dirty merge state on PR ${list} — try \`sprintpilot resolve-docs\` ` +
-      'to clear BMad doc conflicts, then `sprintpilot land-stack` to rebase each ' +
-      'PR on the latest base. Real-code conflicts will surface for manual resolution.'
+      `Stack has dirty merge state on PR ${list} — run \`sprintpilot land-stack\` ` +
+      'to rebase each PR on the latest base. The auto-merge driver resolves BMad ' +
+      'state-file conflicts; real-code conflicts surface for manual resolution.'
     );
   }
   if (ciAllGreen) {
@@ -252,7 +256,11 @@ function renderStackYaml(snapshot) {
   lines.push(`  ci_all_green: ${snapshot.ci_all_green ? 'true' : 'false'}`);
   lines.push(`  conflicts_at_base: ${snapshot.conflicts_at_base ? 'true' : 'false'}`);
   if (snapshot.dirty_prs && snapshot.dirty_prs.length > 0) {
-    lines.push(`  dirty_prs: [${snapshot.dirty_prs.join(', ')}]`);
+    // Run each PR identifier through escYaml — they're integers today on
+    // every supported platform, but a defensive escape keeps us safe if
+    // a future provider returns a non-numeric ID (or a number that
+    // collides with a YAML reserved literal once stringified).
+    lines.push(`  dirty_prs: [${snapshot.dirty_prs.map((p) => escYaml(p)).join(', ')}]`);
   }
   if (snapshot.pending_merges.length === 0) {
     lines.push('  pending_merges: []');

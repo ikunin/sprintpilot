@@ -1119,8 +1119,9 @@ Instruct: "Re-verify code review for story {{current_story}} — all patch findi
     <!-- Validate merge_strategy against the documented values; an unknown
          value (typo like `land-as-you-go` with hyphens, or a future
          strategy this workflow doesn't speak yet) silently falls into
-         `manual` mode without warning otherwise. -->
-    <check if="{{merge_strategy}} not in ('manual', 'land_as_you_go')">
+         `manual` mode without warning otherwise. The `!= AND !=` form
+         matches the comparison style used elsewhere in this workflow. -->
+    <check if="{{merge_strategy}} != 'manual' AND {{merge_strategy}} != 'land_as_you_go'">
       <action>Log warning: "Unknown autopilot.merge_strategy '{{merge_strategy}}' — falling back to 'manual'. Valid values: manual, land_as_you_go. Check `_Sprintpilot/modules/autopilot/config.yaml`." Then set `{{merge_strategy}}` = "manual".</action>
     </check>
 

@@ -8,17 +8,25 @@
 //   {
 //     platform, pr,
 //     state: "success" | "failure" | "pending" | "unknown",
-//     polled: <int>,
+//     polled: <int>,                  // total fetchChecks invocations
+//     consecutive_unknown: <int>,     // streak of `unknown` results at exit;
+//                                     // 0 unless we're degrading
 //     elapsed_seconds: <number>,
-//     timed_out: <bool>,
+//     timed_out: <bool>,              // true if we hit `--timeout`
+//     gave_up: <bool>,                // true if we bailed early after
+//                                     // MAX_CONSECUTIVE_UNKNOWN unknowns
+//                                     // (CLI missing, API hung, etc.)
 //     // plus the most-recent pr-checks payload (checks[], summary, etc.)
 //   }
 //
 // Exit codes:
 //   0 — terminal state reached (success or failure); caller checks `state`.
-//   2 — platform unavailable or pr-checks subprocess failed; payload still
-//       contains best-effort state.
-//   3 — timed out before reaching terminal state.
+//   2 — platform unavailable, pr-checks subprocess failed, or `gave_up`
+//       fired (couldn't reach CI at all); payload still contains best-
+//       effort state. The workflow treats this the same as "skip" / fall
+//       back to manual stacking.
+//   3 — timed out before reaching terminal state. CI was reachable but
+//       didn't finish in `--timeout` seconds.
 
 const path = require('node:path');
 
