@@ -1112,67 +1112,37 @@ Instruct: "Re-verify code review for story {{current_story}} — all patch findi
     <action>Log: "Story {{current_story}} pushed — PR awaiting review: {{pr_url}}"</action>
 
     <!-- merge_strategy: land_as_you_go (RFC #3) — opt-in branch that
-         waits for CI green per story, merges, and advances base before
-         the next story. Default `manual` falls through unchanged. -->
-    <action>Run: `node {{project_root}}/_Sprintpilot/scripts/resolve-profile.js get autopilot.merge_strategy` — fall back to `manual` on non-zero exit. Set `{{merge_strategy}}`.</action>
-
-    <!-- Validate merge_strategy against the documented values; an unknown
-         value (typo like `land-as-you-go` with hyphens, or a future
-         strategy this workflow doesn't speak yet) silently falls into
-         `manual` mode without warning otherwise. The `!= AND !=` form
-         matches the comparison style used elsewhere in this workflow. -->
-    <check if="{{merge_strategy}} != 'manual' AND {{merge_strategy}} != 'land_as_you_go'">
-      <action>Log warning: "Unknown autopilot.merge_strategy '{{merge_strategy}}' — falling back to 'manual'. Valid values: manual, land_as_you_go. Check `_Sprintpilot/modules/autopilot/config.yaml`." Then set `{{merge_strategy}}` = "manual".</action>
-    </check>
+         waits for CI green per story, merges, and advances base. Default
+         `manual` falls through unchanged. resolve-profile.js validates
+         enum values and falls back to the default on unknown / missing. -->
+    <action>Set `{{merge_strategy}}` = `resolve-profile.js get --default manual --enum manual,land_as_you_go autopilot.merge_strategy`.</action>
 
     <check if="{{merge_strategy}} == 'land_as_you_go'">
-      <action>Resolve options (each `resolve-profile.js get` falls back to its documented default):
-        `{{merge_method}}` = `autopilot.merge_strategy_options.merge_method` (default: `merge`) — must be `merge|squash|rebase`; warn + fall back to `merge` on unknown,
-        `{{wait_timeout_sec}}` = `autopilot.merge_strategy_options.wait_for_ci_timeout_seconds` (default: `600`),
-        `{{poll_interval_sec}}` = `autopilot.merge_strategy_options.poll_interval_seconds` (default: `30`),
-        `{{on_ci_failure}}` = `autopilot.merge_strategy_options.on_ci_failure` (default: `halt`) — must be `halt|warn_and_continue`; warn + fall back to `halt` on unknown,
-        `{{delete_branch_after_merge}}` = `autopilot.merge_strategy_options.delete_branch_after_merge` (default: `true`).
+      <action>Resolve options:
+        `{{merge_method}}` = `resolve-profile.js get --default merge --enum merge,squash,rebase autopilot.merge_strategy_options.merge_method`,
+        `{{wait_timeout_sec}}` = `resolve-profile.js get --default 600 autopilot.merge_strategy_options.wait_for_ci_timeout_seconds`,
+        `{{poll_interval_sec}}` = `resolve-profile.js get --default 30 autopilot.merge_strategy_options.poll_interval_seconds`,
+        `{{on_ci_failure}}` = `resolve-profile.js get --default halt --enum halt,warn_and_continue autopilot.merge_strategy_options.on_ci_failure`,
+        `{{delete_branch_after_merge}}` = `resolve-profile.js get --default true autopilot.merge_strategy_options.delete_branch_after_merge`.
       </action>
 
-      <action>**Extract PR number** from `{{pr_url}}`. Look for the FIRST integer-only path segment after the platform's keyword (Bitbucket Server appends `/overview`, GitLab can have `?tab=...` query strings, etc. — strip query/fragment first):
-        - GitHub: `/pull/(\d+)`
-        - GitLab: `/-/merge_requests/(\d+)`
-        - Bitbucket Cloud or Server: `/pull-requests/(\d+)` (or `/pullrequests/(\d+)`)
-        - Gitea: `/pulls/(\d+)`
-      Set `{{pr_number}}`. If extraction fails, leave `{{merge_status}}` = "pr_pending" and skip the rest of this branch.</action>
+      <action>Set `{{pr_number}}` = `extract-pr-number.js --url "{{pr_url}}" --platform {{platform}}` (stdout). On non-zero exit, skip the rest of this branch — `{{merge_status}}` stays "pr_pending".</action>
 
-      <action>**Watch CI** — run:
-      `node {{project_root}}/_Sprintpilot/scripts/pr-watch.js --platform {{platform}} --pr {{pr_number}} --timeout {{wait_timeout_sec}} --interval {{poll_interval_sec}}`
-      (add `--base-url {{base_url}}` for self-hosted Gitea/Bitbucket/GitLab.)
-      Capture stdout JSON. Read `state` (`success` | `failure` | `pending` | `unknown`) and `timed_out`.
-      </action>
+      <action>Run `pr-watch.js --platform {{platform}} --pr {{pr_number}} --timeout {{wait_timeout_sec}} --interval {{poll_interval_sec}}` (add `--base-url {{base_url}}` for self-hosted). Capture JSON; read `state` and `timed_out`.</action>
 
       <check if="state == 'success'">
-        <action>**Merge PR** — run:
-        `node {{project_root}}/_Sprintpilot/scripts/pr-merge.js --platform {{platform}} --pr {{pr_number}} --method {{merge_method}}{{#if delete_branch_after_merge}} --delete-branch{{/if}}`
-        Capture JSON. On `merged: true`: log "Story {{current_story}}: PR #{{pr_number}} merged ({{merge_method}})", set `{{merge_status}}` = "merged".
-        On `merged: false` (platform refused — required reviews, branch protection, etc.): leave `{{merge_status}}` = "pr_pending" with the platform's error message logged.
-        </action>
-        <check if="{{merge_status}} == 'merged'">
-          <action>**Update base** — pull the freshly-merged commit so the next story branches from updated main:
-          `git checkout {{base_branch}}` then `git pull origin {{base_branch}}` (skip pull when `{{has_origin}}` is false).
-          </action>
-        </check>
+        <action>Run `pr-merge.js --platform {{platform}} --pr {{pr_number}} --method {{merge_method}}{{#if delete_branch_after_merge}} --delete-branch{{/if}}`. On `merged: true`: set `{{merge_status}}` = "merged" and run `git checkout {{base_branch}} && git pull origin {{base_branch}}` (skip pull when `{{has_origin}}` is false). On `merged: false`: log the platform's error; `{{merge_status}}` stays "pr_pending".</action>
       </check>
 
       <check if="state == 'failure' OR timed_out == true">
         <check if="{{on_ci_failure}} == 'halt'">
-          <critical>**HALT — CI did not go green for {{pr_url}}.** Reason: {{state}} (timed_out={{timed_out}}). Story {{current_story}} stays open; subsequent stories deferred. Investigate, push fixes, and re-run /sprint-autopilot-on to resume.</critical>
-          <action>Set `{{merge_status}}` = "ci_red", report to user, STOP this session.</action>
+          <critical>HALT — CI for {{pr_url}} ended state={{state}} timed_out={{timed_out}}. Story {{current_story}} stays open; subsequent stories deferred. Fix CI then re-run /sprint-autopilot-on.</critical>
+          <action>Set `{{merge_status}}` = "ci_red"; report to user; STOP this session.</action>
         </check>
-        <check if="{{on_ci_failure}} == 'warn_and_continue'">
-          <action>Log warning: "Story {{current_story}}: CI {{state}} (timed_out={{timed_out}}); leaving PR stacked at {{pr_url}}." (`{{merge_status}}` already "pr_pending" from above.)</action>
-        </check>
+        <action>(warn_and_continue) Log warning; `{{merge_status}}` stays "pr_pending".</action>
       </check>
-
-      <!-- state == 'unknown' or 'pending' without timeout → degrade to
-           manual stacking; no extra action needed because merge_status is
-           already "pr_pending". -->
+      <!-- state ∈ {'unknown', 'pending'} without timeout: fall through to
+           manual stacking — `{{merge_status}}` is already "pr_pending". -->
     </check>
   </check>
 

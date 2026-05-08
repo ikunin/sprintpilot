@@ -297,10 +297,37 @@ function main() {
       process.exit(1);
     }
     const { resolved } = resolveProfile(projectRoot, explicitProfile);
-    const value = getByDottedKey(resolved, key);
+    let value = getByDottedKey(resolved, key);
+    // --default <v>: when the key is absent OR the value fails --enum
+    // validation, fall back to <v> instead of erroring. Lets workflow
+    // callers do `resolve-profile.js get --default manual --enum
+    // manual,land_as_you_go autopilot.merge_strategy` to get a single
+    // command that handles missing config, typos, and unrecognized
+    // values uniformly.
+    const defaultValue = opts.default;
+    const enumList = opts.enum
+      ? String(opts.enum)
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean)
+      : null;
     if (value === undefined) {
-      log.error(`key not found: ${key}`);
-      process.exit(1);
+      if (defaultValue !== undefined) {
+        value = defaultValue;
+      } else {
+        log.error(`key not found: ${key}`);
+        process.exit(1);
+      }
+    } else if (enumList && !enumList.includes(String(value))) {
+      log.error(
+        `value '${value}' for ${key} is not in allowed set [${enumList.join(', ')}]` +
+          (defaultValue !== undefined ? `; falling back to '${defaultValue}'` : ''),
+      );
+      if (defaultValue !== undefined) {
+        value = defaultValue;
+      } else {
+        process.exit(1);
+      }
     }
     process.stdout.write(
       typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean'
