@@ -1116,16 +1116,29 @@ Instruct: "Re-verify code review for story {{current_story}} — all patch findi
          the next story. Default `manual` falls through unchanged. -->
     <action>Run: `node {{project_root}}/_Sprintpilot/scripts/resolve-profile.js get autopilot.merge_strategy` — fall back to `manual` on non-zero exit. Set `{{merge_strategy}}`.</action>
 
+    <!-- Validate merge_strategy against the documented values; an unknown
+         value (typo like `land-as-you-go` with hyphens, or a future
+         strategy this workflow doesn't speak yet) silently falls into
+         `manual` mode without warning otherwise. -->
+    <check if="{{merge_strategy}} not in ('manual', 'land_as_you_go')">
+      <action>Log warning: "Unknown autopilot.merge_strategy '{{merge_strategy}}' — falling back to 'manual'. Valid values: manual, land_as_you_go. Check `_Sprintpilot/modules/autopilot/config.yaml`." Then set `{{merge_strategy}}` = "manual".</action>
+    </check>
+
     <check if="{{merge_strategy}} == 'land_as_you_go'">
       <action>Resolve options (each `resolve-profile.js get` falls back to its documented default):
-        `{{merge_method}}` = `autopilot.merge_strategy_options.merge_method` (default: `merge`),
+        `{{merge_method}}` = `autopilot.merge_strategy_options.merge_method` (default: `merge`) — must be `merge|squash|rebase`; warn + fall back to `merge` on unknown,
         `{{wait_timeout_sec}}` = `autopilot.merge_strategy_options.wait_for_ci_timeout_seconds` (default: `600`),
         `{{poll_interval_sec}}` = `autopilot.merge_strategy_options.poll_interval_seconds` (default: `30`),
-        `{{on_ci_failure}}` = `autopilot.merge_strategy_options.on_ci_failure` (default: `halt`),
+        `{{on_ci_failure}}` = `autopilot.merge_strategy_options.on_ci_failure` (default: `halt`) — must be `halt|warn_and_continue`; warn + fall back to `halt` on unknown,
         `{{delete_branch_after_merge}}` = `autopilot.merge_strategy_options.delete_branch_after_merge` (default: `true`).
       </action>
 
-      <action>**Extract PR number** from `{{pr_url}}`. GitHub: trailing path segment after `/pull/`. GitLab: after `/-/merge_requests/`. Bitbucket: after `/pull-requests/`. Gitea: after `/pulls/`. Set `{{pr_number}}`. If extraction fails, leave `{{merge_status}}` = "pr_pending" and skip the rest of this branch.</action>
+      <action>**Extract PR number** from `{{pr_url}}`. Look for the FIRST integer-only path segment after the platform's keyword (Bitbucket Server appends `/overview`, GitLab can have `?tab=...` query strings, etc. — strip query/fragment first):
+        - GitHub: `/pull/(\d+)`
+        - GitLab: `/-/merge_requests/(\d+)`
+        - Bitbucket Cloud or Server: `/pull-requests/(\d+)` (or `/pullrequests/(\d+)`)
+        - Gitea: `/pulls/(\d+)`
+      Set `{{pr_number}}`. If extraction fails, leave `{{merge_status}}` = "pr_pending" and skip the rest of this branch.</action>
 
       <action>**Watch CI** — run:
       `node {{project_root}}/_Sprintpilot/scripts/pr-watch.js --platform {{platform}} --pr {{pr_number}} --timeout {{wait_timeout_sec}} --interval {{poll_interval_sec}}`

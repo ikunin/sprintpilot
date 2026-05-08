@@ -89,26 +89,28 @@ describe('topologicalOrder', () => {
 describe('buildRecommendation', () => {
   it('returns null when stack is empty', () => {
     expect(
-      buildRecommendation({ depth: 0, ciAllGreen: false, conflictsAtBase: false, mergeStrategy: 'manual' }),
+      buildRecommendation({ depth: 0, ciAllGreen: false, dirtyPrs: [], mergeStrategy: 'manual' }),
     ).toBe(null);
   });
 
-  it('flags conflicts above all else', () => {
+  it('flags dirty PRs above all else', () => {
     const r = buildRecommendation({
       depth: 2,
       ciAllGreen: true,
-      conflictsAtBase: true,
+      dirtyPrs: [{ pr: 7 }, { pr: 9 }],
       mergeStrategy: 'manual',
     });
     expect(r).toMatch(/resolve-docs/);
     expect(r).toMatch(/land-stack/);
+    // The new wording lists the specific dirty PR numbers.
+    expect(r).toMatch(/#7, #9/);
   });
 
   it('recommends land-stack when CI is fully green', () => {
     const r = buildRecommendation({
       depth: 3,
       ciAllGreen: true,
-      conflictsAtBase: false,
+      dirtyPrs: [],
       mergeStrategy: 'manual',
     });
     expect(r).toMatch(/land-stack/);
@@ -119,7 +121,7 @@ describe('buildRecommendation', () => {
     const r = buildRecommendation({
       depth: 3,
       ciAllGreen: false,
-      conflictsAtBase: false,
+      dirtyPrs: [],
       mergeStrategy: 'manual',
     });
     expect(r).toMatch(/land_as_you_go/);
@@ -130,7 +132,7 @@ describe('buildRecommendation', () => {
       buildRecommendation({
         depth: 1,
         ciAllGreen: false,
-        conflictsAtBase: false,
+        dirtyPrs: [],
         mergeStrategy: 'manual',
       }),
     ).toBe(null);

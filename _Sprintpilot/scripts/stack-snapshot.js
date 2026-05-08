@@ -70,11 +70,13 @@ function computeDepth(prs, baseBranch) {
   function visit(pr, seen) {
     if (cache.has(pr.sourceBranch)) return cache.get(pr.sourceBranch);
     // Cycle protection — shouldn't happen in real PR graphs, but a
-    // misconfigured platform listing could send us spinning.
-    if (seen.has(pr.sourceBranch)) {
-      cache.set(pr.sourceBranch, 0);
-      return 0;
-    }
+    // misconfigured platform listing could send us spinning. We return 0
+    // on cycle but DO NOT cache: the value is determined by traversal
+    // order, not by the branch's actual depth, so caching would poison
+    // future independent traversals that legitimately reference this
+    // branch (e.g. a self-cycle on a stale branch shared with a real
+    // open PR).
+    if (seen.has(pr.sourceBranch)) return 0;
     if (pr.targetBranch === baseBranch || !pr.targetBranch) {
       cache.set(pr.sourceBranch, 0);
       return 0;
@@ -109,10 +111,20 @@ function topologicalOrder(prs) {
 // Recommendation
 // =============================================================================
 
-function buildRecommendation({ depth, ciAllGreen, conflictsAtBase, mergeStrategy }) {
+function buildRecommendation({ depth, ciAllGreen, dirtyPrs, mergeStrategy }) {
   if (depth === 0) return null;
-  if (conflictsAtBase) {
-    return 'Stack has conflicts at base — run `sprintpilot resolve-docs` to auto-resolve BMad state-file conflicts, then `sprintpilot land-stack` to merge bottom-up.';
+  if (dirtyPrs && dirtyPrs.length > 0) {
+    // Dirty merge state can be against the base branch (PR's targetBranch)
+    // OR against another stacked PR. The recommendation message lists the
+    // specific PRs so the user knows where to look. Both `resolve-docs`
+    // (BMad state-file conflicts) and `land-stack` (rebases each PR on
+    // the latest base) can help; we recommend trying them in order.
+    const list = dirtyPrs.map((p) => `#${p.pr}`).join(', ');
+    return (
+      `Stack has dirty merge state on PR ${list} — try \`sprintpilot resolve-docs\` ` +
+      'to clear BMad doc conflicts, then `sprintpilot land-stack` to rebase each ' +
+      'PR on the latest base. Real-code conflicts will surface for manual resolution.'
+    );
   }
   if (ciAllGreen) {
     const plural = depth > 1 ? 's' : '';
@@ -185,12 +197,13 @@ function composeSnapshot({ prs, baseBranch, branchPrefix, mergeStrategy, fetched
     depth: pr.depth,
   }));
   const ciAllGreen = pending.length > 0 && pending.every((p) => p.ci === 'success');
-  const conflictsAtBase = pending.some((p) => (p.mergeStateStatus || '').toUpperCase() === 'DIRTY');
+  const dirtyPrs = pending.filter((p) => (p.mergeStateStatus || '').toUpperCase() === 'DIRTY');
+  const conflictsAtBase = dirtyPrs.length > 0;
   const depth = pending.length;
   const recommendation = buildRecommendation({
     depth,
     ciAllGreen,
-    conflictsAtBase,
+    dirtyPrs,
     mergeStrategy,
   });
   return {
@@ -198,7 +211,11 @@ function composeSnapshot({ prs, baseBranch, branchPrefix, mergeStrategy, fetched
     depth,
     base_branch: baseBranch,
     pending_merges: pending,
+    // `conflicts_at_base` keeps the existing field name for back-compat
+    // with the YAML consumers; `dirty_prs` is the more accurate
+    // surface — list of PR numbers that report DIRTY merge state.
     conflicts_at_base: conflictsAtBase,
+    dirty_prs: dirtyPrs.map((p) => p.pr),
     ci_all_green: ciAllGreen,
     recommendation: recommendation || '',
   };
@@ -234,6 +251,9 @@ function renderStackYaml(snapshot) {
   lines.push(`  base_branch: ${escYaml(snapshot.base_branch)}`);
   lines.push(`  ci_all_green: ${snapshot.ci_all_green ? 'true' : 'false'}`);
   lines.push(`  conflicts_at_base: ${snapshot.conflicts_at_base ? 'true' : 'false'}`);
+  if (snapshot.dirty_prs && snapshot.dirty_prs.length > 0) {
+    lines.push(`  dirty_prs: [${snapshot.dirty_prs.join(', ')}]`);
+  }
   if (snapshot.pending_merges.length === 0) {
     lines.push('  pending_merges: []');
   } else {

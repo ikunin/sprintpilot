@@ -62,10 +62,26 @@ async function fetchChecks({ platform, pr, baseUrl }) {
   }
 }
 
-async function pollUntilTerminal({ platform, pr, baseUrl, intervalMs, timeoutMs }) {
+// Bail early after this many consecutive `unknown` results. An `unknown`
+// state from `pr-checks` means we couldn't reach the platform CLI / API at
+// all — repeating the same call yields the same answer, so there's no
+// point burning the full timeout. After `MAX_CONSECUTIVE_UNKNOWN` failures
+// we return with `gave_up: true` so callers can distinguish "we couldn't
+// even ask CI" from "CI is genuinely still running".
+const MAX_CONSECUTIVE_UNKNOWN = 3;
+
+async function pollUntilTerminal({
+  platform,
+  pr,
+  baseUrl,
+  intervalMs,
+  timeoutMs,
+  maxConsecutiveUnknown = MAX_CONSECUTIVE_UNKNOWN,
+}) {
   const start = Date.now();
   let polled = 0;
   let last = null;
+  let consecutiveUnknown = 0;
   while (true) {
     polled++;
     last = await fetchChecks({ platform, pr, baseUrl });
@@ -73,16 +89,35 @@ async function pollUntilTerminal({ platform, pr, baseUrl, intervalMs, timeoutMs 
       return {
         ...last,
         polled,
+        consecutive_unknown: 0,
         elapsed_seconds: (Date.now() - start) / 1000,
         timed_out: false,
+        gave_up: false,
       };
+    }
+    if (last.state === 'unknown') {
+      consecutiveUnknown++;
+      if (consecutiveUnknown >= maxConsecutiveUnknown) {
+        return {
+          ...last,
+          polled,
+          consecutive_unknown: consecutiveUnknown,
+          elapsed_seconds: (Date.now() - start) / 1000,
+          timed_out: false,
+          gave_up: true,
+        };
+      }
+    } else {
+      consecutiveUnknown = 0;
     }
     if (Date.now() - start >= timeoutMs) {
       return {
         ...last,
         polled,
+        consecutive_unknown: consecutiveUnknown,
         elapsed_seconds: (Date.now() - start) / 1000,
         timed_out: true,
+        gave_up: false,
       };
     }
     // Don't sleep past the timeout — clamp the next interval if needed.
@@ -141,7 +176,10 @@ async function main() {
   });
   emit(result);
   if (result.timed_out) process.exit(3);
-  if (result.error || result.skipped) process.exit(2);
+  // gave_up means we couldn't reach the platform at all — surface as
+  // platform-unavailable so callers can distinguish from "CI didn't
+  // finish in time".
+  if (result.gave_up || result.error || result.skipped) process.exit(2);
   // success or failure → exit 0; caller decides what to do based on state.
   process.exit(0);
 }
