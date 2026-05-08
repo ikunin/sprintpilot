@@ -70,6 +70,34 @@ function trimTrailingBlank(s) {
   return s.replace(/[ \t]+$/gm, '').replace(/\s+$/, '');
 }
 
+// Normalize input before regex anchors run. Strips a UTF-8 BOM (common on
+// Windows-edited files; otherwise the first-line `^header:$` match fails)
+// and collapses CRLF / CR line endings to LF (`\r\n` clones break every
+// `^…$` anchor with the `m` flag because `\r` isn't whitespace under `^`).
+// Without this, every per-file merger returns null on a Windows-cloned
+// repo → conflict markers in the user's state file.
+function normalizeInput(text) {
+  if (text === null || text === undefined) return text;
+  let s = String(text);
+  if (s.charCodeAt(0) === 0xfeff) s = s.slice(1);
+  return s.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+}
+
+// Detect the indent of the first non-blank, indented line after `startLine`.
+// Returns the indent length (number of leading whitespace chars) or null
+// when no indented child follows. Used to make per-section parsers accept
+// any consistent indentation (2-space and 4-space are both valid YAML; the
+// regex parsers used to require exactly 2).
+function detectChildIndent(lines, startLine) {
+  for (let j = startLine + 1; j < lines.length; j++) {
+    if (lines[j] === '') continue;
+    const m = lines[j].match(/^([ \t]+)\S/);
+    if (!m) return null;
+    return m[1].length;
+  }
+  return null;
+}
+
 // =============================================================================
 // autopilot-state.yaml — single-writer; latest last_updated wins outright.
 // =============================================================================
@@ -78,9 +106,11 @@ function mergeAutopilotState(a, _o, b) {
   if (!a && !b) return '';
   if (!a) return b;
   if (!b) return a;
-  if (a === b) return a;
-  const ta = unquote(readTopLevelScalar(a, 'last_updated'));
-  const tb = unquote(readTopLevelScalar(b, 'last_updated'));
+  const aN = normalizeInput(a);
+  const bN = normalizeInput(b);
+  if (aN === bN) return a;
+  const ta = unquote(readTopLevelScalar(aN, 'last_updated'));
+  const tb = unquote(readTopLevelScalar(bN, 'last_updated'));
   // Ties favor A (current side / "ours") so a re-merge doesn't flip output.
   return compareTs(ta, tb) >= 0 ? a : b;
 }
@@ -106,21 +136,38 @@ function parseDecisionEntries(text) {
   if (!m) return null;
   const startLine = text.slice(0, m.index).split('\n').length - 1;
   const lines = text.split('\n');
+  // Detect the indent of the first list item — accepts 2-space, 4-space,
+  // or tab indentation. Continuation lines (entry fields) must be indented
+  // strictly more than the list-item dash.
+  const itemIndent = detectChildIndent(lines, startLine);
   const entries = [];
   let current = null;
   let i = startLine + 1;
   for (; i < lines.length; i++) {
     const line = lines[i];
-    if (line.startsWith('  - ')) {
+    if (line === '') {
+      if (current) current.lines.push(line);
+      continue;
+    }
+    const leadingMatch = line.match(/^[ \t]*/);
+    const indent = leadingMatch ? leadingMatch[0].length : 0;
+    // Back to top level (no indent) → end of decisions: block.
+    if (indent === 0) break;
+    // List-item header: `- ` at the detected indent.
+    const isItemHeader =
+      itemIndent !== null &&
+      indent === itemIndent &&
+      line.slice(itemIndent, itemIndent + 2) === '- ';
+    if (isItemHeader) {
       if (current) entries.push(current);
       current = { lines: [line] };
       continue;
     }
-    if (line === '' || line.startsWith('    ') || line.startsWith('\t')) {
+    // Continuation line: indented more than the item header.
+    if (itemIndent !== null && indent > itemIndent) {
       if (current) current.lines.push(line);
       continue;
     }
-    // Non-blank, not indented enough → end of `decisions:` block.
     break;
   }
   if (current) entries.push(current);
@@ -159,9 +206,11 @@ function indexOfLine(text, lineNo) {
 function mergeDecisionLog(a, _o, b) {
   if (!a) return b || '';
   if (!b) return a;
-  if (a === b) return a;
-  const pa = parseDecisionEntries(a);
-  const pb = parseDecisionEntries(b);
+  const aN = normalizeInput(a);
+  const bN = normalizeInput(b);
+  if (aN === bN) return a;
+  const pa = parseDecisionEntries(aN);
+  const pb = parseDecisionEntries(bN);
   if (!pa || !pb) return null;
   const byId = new Map();
   // Insertion preserves first-seen order; we resort below for determinism.
@@ -184,14 +233,14 @@ function mergeDecisionLog(a, _o, b) {
     return String(x.id).localeCompare(String(y.id));
   });
   // Update last_updated to the newer side.
-  const tla = unquote(readTopLevelScalar(a, 'last_updated'));
-  const tlb = unquote(readTopLevelScalar(b, 'last_updated'));
-  let head = a.slice(0, pa.headerEndIdx);
+  const tla = unquote(readTopLevelScalar(aN, 'last_updated'));
+  const tlb = unquote(readTopLevelScalar(bN, 'last_updated'));
+  let head = aN.slice(0, pa.headerEndIdx);
   if (compareTs(tla, tlb) < 0) {
-    const rawTlb = readTopLevelScalar(b, 'last_updated');
+    const rawTlb = readTopLevelScalar(bN, 'last_updated');
     head = head.replace(/^last_updated:\s*.*$/m, `last_updated: ${rawTlb}`);
   }
-  const tail = a.slice(pa.blockEndIdx);
+  const tail = aN.slice(pa.blockEndIdx);
   const body = merged.map((e) => e.text).join('\n');
   return `${trimTrailingBlank(head)}\n${body}\n${tail.replace(/^\s+/, '')}`.replace(/\s+$/, '\n');
 }
@@ -206,20 +255,35 @@ function parseStoryBlocks(text) {
   if (!m) return null;
   const startLine = text.slice(0, m.index).split('\n').length - 1;
   const lines = text.split('\n');
+  // Detect story-key indent — accepts 2-space, 4-space, or tab. Field
+  // continuations must be indented strictly more.
+  const childIndent = detectChildIndent(lines, startLine);
   const stories = [];
   let current = null;
   let i = startLine + 1;
-  // Story headers are exactly 2-space-indented, end with `:`.
-  const headerRe = /^ {2}([A-Za-z0-9][A-Za-z0-9._-]*):[ \t]*$/;
+  const headerRe =
+    childIndent !== null
+      ? new RegExp(`^[ \\t]{${childIndent}}([A-Za-z0-9][A-Za-z0-9._-]*):[ \\t]*$`)
+      : null;
   for (; i < lines.length; i++) {
     const line = lines[i];
-    const hm = line.match(headerRe);
-    if (hm) {
-      if (current) stories.push(current);
-      current = { key: hm[1], lines: [line] };
+    if (line === '') {
+      if (current) current.lines.push(line);
       continue;
     }
-    if (line === '' || line.startsWith('    ') || line.startsWith('\t')) {
+    const indent = (line.match(/^[ \t]*/) || [''])[0].length;
+    if (indent === 0) break;
+    if (headerRe && indent === childIndent) {
+      const hm = line.match(headerRe);
+      if (hm) {
+        if (current) stories.push(current);
+        current = { key: hm[1], lines: [line] };
+        continue;
+      }
+      // Same-indent line that isn't a story header → end of stories: block.
+      break;
+    }
+    if (childIndent !== null && indent > childIndent) {
       if (current) current.lines.push(line);
       continue;
     }
@@ -244,9 +308,11 @@ function parseStoryBlocks(text) {
 function mergeGitStatus(a, _o, b) {
   if (!a) return b || '';
   if (!b) return a;
-  if (a === b) return a;
-  const pa = parseStoryBlocks(a);
-  const pb = parseStoryBlocks(b);
+  const aN = normalizeInput(a);
+  const bN = normalizeInput(b);
+  if (aN === bN) return a;
+  const pa = parseStoryBlocks(aN);
+  const pb = parseStoryBlocks(bN);
   if (!pa || !pb) return null;
   const byKey = new Map();
   for (const s of pa.stories) byKey.set(s.key, s);
@@ -260,8 +326,8 @@ function mergeGitStatus(a, _o, b) {
       byKey.set(s.key, s);
     }
   }
-  const head = a.slice(0, pa.headerEndIdx);
-  const tail = a.slice(pa.blockEndIdx);
+  const head = aN.slice(0, pa.headerEndIdx);
+  const tail = aN.slice(pa.blockEndIdx);
   const sorted = Array.from(byKey.values()).sort((x, y) => x.key.localeCompare(y.key));
   const body = sorted.map((s) => s.text).join('\n');
   return `${trimTrailingBlank(head)}\n${body}\n${tail.replace(/^\s+/, '')}`.replace(/\s+$/, '\n');
@@ -292,22 +358,40 @@ function parseTopLevelSection(text, sectionName) {
   if (!m) return null;
   const startLine = text.slice(0, m.index).split('\n').length - 1;
   const lines = text.split('\n');
-  const childHeader = /^ {2}((?:"[^"]+")|[A-Za-z0-9][A-Za-z0-9._-]*):[ \t]*$/;
+  // Detect child indent (accepts 2-space, 4-space, or tab — BMad-method
+  // generates 2-space but third-party tooling and editor reformatters
+  // happily emit 4-space. The strict 2-space regex used here previously
+  // produced zero-children parses → silent section erasure on merge.)
+  const childIndent = detectChildIndent(lines, startLine);
+  const childHeader =
+    childIndent !== null
+      ? new RegExp(`^[ \\t]{${childIndent}}((?:"[^"]+")|[A-Za-z0-9][A-Za-z0-9._-]*):[ \\t]*$`)
+      : null;
   const children = [];
   let current = null;
   let i = startLine + 1;
   for (; i < lines.length; i++) {
     const line = lines[i];
-    const ch = line.match(childHeader);
-    if (ch) {
-      if (current) children.push(current);
-      current = {
-        key: unquote(ch[1]),
-        lines: [line],
-      };
+    if (line === '') {
+      if (current) current.lines.push(line);
       continue;
     }
-    if (line === '' || line.startsWith('    ') || line.startsWith('\t')) {
+    const indent = (line.match(/^[ \t]*/) || [''])[0].length;
+    if (indent === 0) break;
+    if (childHeader && indent === childIndent) {
+      const ch = line.match(childHeader);
+      if (ch) {
+        if (current) children.push(current);
+        current = {
+          key: unquote(ch[1]),
+          lines: [line],
+        };
+        continue;
+      }
+      // Same-indent line that isn't a child header → leave the section.
+      break;
+    }
+    if (childIndent !== null && indent > childIndent) {
       if (current) current.lines.push(line);
       continue;
     }
@@ -360,7 +444,13 @@ function mergeSection(text, sectionName, otherText) {
     }
     const ra = statusRank(existing.status);
     const rb = statusRank(c.status);
-    if (rb > ra) byKey.set(c.key, c);
+    // Take B only when BOTH sides have a recognized status AND B is strictly
+    // higher. If either side has an unrecognized status (rank -1 — possibly
+    // a future BMad value like `blocked` / `paused` / `cancelled`), keep A's
+    // entry: silently overwriting an unknown status would lose semantics
+    // we don't understand. The conservative default is "ours wins on
+    // doubt"; the dev sees the merge happen and can re-review.
+    if (ra >= 0 && rb >= 0 && rb > ra) byKey.set(c.key, c);
   }
   // Trailing newline matters: the next section's `^header:$` regex
   // anchor depends on the previous section ending with a newline, so the
@@ -374,15 +464,17 @@ function mergeSection(text, sectionName, otherText) {
 function mergeSprintStatus(a, _o, b) {
   if (!a) return b || '';
   if (!b) return a;
-  if (a === b) return a;
-  let result = a;
+  const aN = normalizeInput(a);
+  const bN = normalizeInput(b);
+  if (aN === bN) return a;
+  let result = aN;
   // last_updated: latest wins (preserves quoting from whichever side wins).
-  const tla = unquote(readTopLevelScalar(a, 'last_updated'));
-  const tlb = unquote(readTopLevelScalar(b, 'last_updated'));
+  const tla = unquote(readTopLevelScalar(aN, 'last_updated'));
+  const tlb = unquote(readTopLevelScalar(bN, 'last_updated'));
   if (tla !== null || tlb !== null) {
-    const aHadLU = readTopLevelScalar(a, 'last_updated') !== null;
+    const aHadLU = readTopLevelScalar(aN, 'last_updated') !== null;
     if (compareTs(tla, tlb) < 0) {
-      const rawB = readTopLevelScalar(b, 'last_updated');
+      const rawB = readTopLevelScalar(bN, 'last_updated');
       if (aHadLU) {
         result = result.replace(/^last_updated:\s*.*$/m, `last_updated: ${rawB}`);
       } else {
@@ -391,7 +483,7 @@ function mergeSprintStatus(a, _o, b) {
     }
   }
   for (const sectionName of ['epics', 'development_status']) {
-    result = mergeSection(result, sectionName, b);
+    result = mergeSection(result, sectionName, bN);
   }
   return `${trimTrailingBlank(result)}\n`;
 }
