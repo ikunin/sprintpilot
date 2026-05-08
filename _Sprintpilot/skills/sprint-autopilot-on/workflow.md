@@ -1231,6 +1231,13 @@ Instruct: "Re-verify code review for story {{current_story}} — all patch findi
   <action>Run: `node {{project_root}}/_Sprintpilot/scripts/merge-shards.js --project-root "{{project_root}}"`.</action>
 </check>
 
+<!-- Stack-health snapshot (RFC #5). Aggregates the open-PR stack into a
+     `stack:` block in git-status.yaml so this session and the next can
+     see depth + CI state + recommendation without manual `gh pr list`. -->
+<check if="{{git_enabled}} AND {{platform}} != 'git_only'">
+  <action>Run: `node {{project_root}}/_Sprintpilot/scripts/stack-snapshot.js --platform {{platform}} --branch-prefix {{branch_prefix}} --base-branch {{base_branch}} --git-status-file "{{project_root}}/_bmad-output/implementation-artifacts/git-status.yaml" --merge-strategy {{merge_strategy|default("manual")}}`. Ignore failures (exit 2 = platform unavailable; degraded snapshot still written). Capture stdout JSON; surface `snapshot.depth`, `snapshot.ci_all_green`, `snapshot.conflicts_at_base`, and `snapshot.recommendation` in the checkpoint report below.</action>
+</check>
+
 <!-- Phase-timing session snapshot (no-op if autopilot.phase_timings is false). -->
 <action>Run: `node {{project_root}}/_Sprintpilot/scripts/summarize-timings.js --session-only --format md --quiet --project-root "{{project_root}}"` — ignore failures. The stdout line is the artifact path; include it in the checkpoint report if non-empty.</action>
 
@@ -1247,6 +1254,14 @@ Git status:
 {{#each completed_stories_this_session}}
   - {{story-key}}: {{push_status}} {{pr_url}}
 {{/each}}
+{{#if stack_snapshot_depth > 0}}
+
+Stack health:
+  Depth: {{stack_snapshot_depth}} open PR{{#if stack_snapshot_depth != 1}}s{{/if}}
+  CI all green: {{stack_snapshot_ci_all_green}}
+  Conflicts at base: {{stack_snapshot_conflicts_at_base}}
+  {{#if stack_snapshot_recommendation}}Recommendation: {{stack_snapshot_recommendation}}{{/if}}
+{{/if}}
 {{/if}}
 {{#if medium_high_decisions_count > 0}}
 
