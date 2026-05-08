@@ -212,26 +212,37 @@ function mergeDecisionLog(a, _o, b) {
   const pa = parseDecisionEntries(aN);
   const pb = parseDecisionEntries(bN);
   if (!pa || !pb) return null;
+  // Preserve A's original entry order — re-sorting on every merge would
+  // produce a churn diff even when only a single new entry is appended.
+  // For B-only entries we sort them by ts amongst themselves and append
+  // at the end, so newly-arrived decisions accumulate at the bottom in
+  // chronological order (matching how an append-only log naturally grows).
+  const orderA = [];
   const byId = new Map();
-  // Insertion preserves first-seen order; we resort below for determinism.
   for (const e of pa.entries) {
     if (!e.id) continue;
     byId.set(e.id, e);
+    orderA.push(e.id);
   }
+  const fromBOnly = [];
   for (const e of pb.entries) {
     if (!e.id) continue;
     const existing = byId.get(e.id);
     if (!existing) {
       byId.set(e.id, e);
+      fromBOnly.push(e.id);
       continue;
     }
     if (compareTs(e.ts, existing.ts) > 0) byId.set(e.id, e);
   }
-  const merged = Array.from(byId.values()).sort((x, y) => {
+  fromBOnly.sort((xId, yId) => {
+    const x = byId.get(xId);
+    const y = byId.get(yId);
     const c = compareTs(x.ts, y.ts);
     if (c !== 0) return c;
-    return String(x.id).localeCompare(String(y.id));
+    return String(xId).localeCompare(String(yId));
   });
+  const merged = [...orderA, ...fromBOnly].map((id) => byId.get(id));
   // Update last_updated to the newer side.
   const tla = unquote(readTopLevelScalar(aN, 'last_updated'));
   const tlb = unquote(readTopLevelScalar(bN, 'last_updated'));
@@ -328,7 +339,12 @@ function mergeGitStatus(a, _o, b) {
   }
   const head = aN.slice(0, pa.headerEndIdx);
   const tail = aN.slice(pa.blockEndIdx);
-  const sorted = Array.from(byKey.values()).sort((x, y) => x.key.localeCompare(y.key));
+  // Natural-sort so `1-10` lands after `1-2` rather than between `1-1`
+  // and `1-2`. localeCompare alone is lexicographic; Intl.Collator with
+  // numeric:true preserves visual ordering for the typical
+  // `<epic>-<story>-<slug>` shape we see across BMad projects.
+  const collator = new Intl.Collator('en', { numeric: true, sensitivity: 'base' });
+  const sorted = Array.from(byKey.values()).sort((x, y) => collator.compare(x.key, y.key));
   const body = sorted.map((s) => s.text).join('\n');
   return `${trimTrailingBlank(head)}\n${body}\n${tail.replace(/^\s+/, '')}`.replace(/\s+$/, '\n');
 }

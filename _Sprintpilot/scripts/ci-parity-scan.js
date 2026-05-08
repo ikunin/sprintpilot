@@ -198,37 +198,43 @@ function readConfig(projectRoot) {
     return null;
   }
   const out = { enabled: true, intentional: null, envDependent: null };
-  // Walk under `ci_parity:` block.
+  // Walk under the `ci_parity:` block. Track the indent of the header
+  // line so a sibling section at the same indent (e.g. `test_pitfalls:`
+  // appearing after `ci_parity:` under `autopilot:`) cleanly terminates
+  // the block instead of leaking siblings' `enabled:` keys into us.
   const lines = text.split(/\r?\n/);
-  let inBlock = false;
+  let blockIndent = -1;
   let inPatterns = false;
   for (const raw of lines) {
-    if (/^ci_parity:\s*$/.test(raw) || /^\s{2}ci_parity:\s*$/.test(raw)) {
-      inBlock = true;
+    const headerMatch = raw.match(/^(\s*)ci_parity:\s*$/);
+    if (headerMatch) {
+      blockIndent = headerMatch[1].length;
       inPatterns = false;
       continue;
     }
-    if (inBlock) {
-      if (/^\S/.test(raw) || /^\s{0,1}\S/.test(raw)) {
-        // Left the block.
-        inBlock = false;
-        continue;
-      }
-      const enabled = raw.match(/^\s+enabled:\s*(true|false)\s*$/);
-      if (enabled) {
-        out.enabled = enabled[1] === 'true';
-        continue;
-      }
-      if (/^\s+patterns:\s*$/.test(raw)) {
-        inPatterns = true;
-        continue;
-      }
-      if (inPatterns) {
-        const intMatch = raw.match(/^\s+intentional:\s*\[([^\]]*)\]/);
-        if (intMatch) out.intentional = parseFlowList(intMatch[1]);
-        const envMatch = raw.match(/^\s+env_dependent:\s*\[([^\]]*)\]/);
-        if (envMatch) out.envDependent = parseFlowList(envMatch[1]);
-      }
+    if (blockIndent < 0) continue;
+    if (raw.trim() === '') continue;
+    const lineIndent = (raw.match(/^\s*/) || [''])[0].length;
+    if (lineIndent <= blockIndent) {
+      // A non-blank line at the header's indent (or shallower) ends the
+      // block — sibling section, top-level key, or end of `autopilot:`.
+      blockIndent = -1;
+      continue;
+    }
+    const enabled = raw.match(/^\s+enabled:\s*(true|false)\s*$/);
+    if (enabled) {
+      out.enabled = enabled[1] === 'true';
+      continue;
+    }
+    if (/^\s+patterns:\s*$/.test(raw)) {
+      inPatterns = true;
+      continue;
+    }
+    if (inPatterns) {
+      const intMatch = raw.match(/^\s+intentional:\s*\[([^\]]*)\]/);
+      if (intMatch) out.intentional = parseFlowList(intMatch[1]);
+      const envMatch = raw.match(/^\s+env_dependent:\s*\[([^\]]*)\]/);
+      if (envMatch) out.envDependent = parseFlowList(envMatch[1]);
     }
   }
   return out;

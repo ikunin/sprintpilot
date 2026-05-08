@@ -76,16 +76,25 @@ async function extractOwnerRepo() {
 }
 
 // Strip Authorization header values and obvious token fields from a response
-// body before we echo it to the user's terminal or logs.
+// body before we echo it to the user's terminal or logs. Covers:
+//   - JSON-style "authorization": "..." / "token": "..." / "api_key": "..."
+//   - Bearer / token / Basic schemes in plain text (e.g. echoed request
+//     headers in error messages)
 function redactAuth(text) {
   if (!text) return text;
-  return String(text)
-    .replace(/("?authorization"?\s*:\s*")[^"]*(")/gi, '$1[REDACTED]$2')
-    .replace(/(bearer\s+)\S+/gi, '$1[REDACTED]')
-    .replace(
-      /("?(?:token|access_token|api_key|private_token)"?\s*[:=]\s*")[^"]*(")/gi,
-      '$1[REDACTED]$2',
-    );
+  return (
+    String(text)
+      .replace(/("?authorization"?\s*:\s*")[^"]*(")/gi, '$1[REDACTED]$2')
+      // Auth schemes in plain text. `token <value>` is Gitea's scheme;
+      // `Bearer` is GitHub/Bitbucket's; `Basic` covers older API endpoints.
+      // The `\b` lookbehind prevents matching `token-thing` mid-identifier
+      // (engines without lookbehind would still over-match — JS supports it).
+      .replace(/(?<=\b)(bearer|token|basic)(\s+)\S+/gi, '$1$2[REDACTED]')
+      .replace(
+        /("?(?:token|access_token|api_key|private_token)"?\s*[:=]\s*")[^"]*(")/gi,
+        '$1[REDACTED]$2',
+      )
+  );
 }
 
 const PLATFORMS = ['github', 'gitlab', 'bitbucket', 'gitea', 'git_only'];

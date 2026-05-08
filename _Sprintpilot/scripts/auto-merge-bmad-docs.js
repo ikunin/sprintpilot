@@ -92,10 +92,23 @@ function main() {
   // doesn't tell us which BMad file kind we're merging. Prefer %P; fall
   // back to %A so a caller invoking the script directly with a real
   // path (e.g. `sprintpilot resolve-docs` shells, tests) still works.
-  const merger = mergerForFilename(pPath || aPath);
+  const lookupPath = pPath || aPath;
+  const merger = mergerForFilename(lookupPath);
   if (!merger) {
-    // Unknown filename — refuse to touch it. Git falls back to default 3-way.
-    log.error(`auto-merge-bmad-docs: no merger registered for ${path.basename(aPath)}`);
+    // Distinguish two cases: (a) the file genuinely isn't one we manage,
+    // (b) git didn't pass %P and %A is a temp file we can't classify.
+    // The second case usually means an older git that doesn't substitute
+    // %P; surface a hint so the user can upgrade rather than guess.
+    const isTempFile = /^\.merge_file_/i.test(path.basename(aPath));
+    if (isTempFile && !pPath) {
+      log.error(
+        `auto-merge-bmad-docs: cannot identify file kind. %A is a git temp file (${path.basename(aPath)}) and %P was not passed. ` +
+          'Likely a git version that does not substitute %P (added in git 2.5). ' +
+          'Re-register the driver with %A %O %B %P or upgrade git.',
+      );
+    } else {
+      log.error(`auto-merge-bmad-docs: no merger registered for ${path.basename(lookupPath)}`);
+    }
     process.exit(1);
   }
 
