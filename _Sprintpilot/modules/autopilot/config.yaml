@@ -90,3 +90,37 @@ autopilot:
     # patterns:
     #   intentional: [slow, smoke, manual, wip, flaky, todo, pending]
     #   env_dependent: [postgres, database, redis, gpu, cuda, model file, hardware, network, docker]
+
+  # Merge strategy — controls what the autopilot does after `gh pr create`.
+  #
+  # - "manual" (default): autopilot opens PRs and stops; you review/merge
+  #   them when ready. Stories stack until you land them.
+  # - "land_as_you_go": after each PR is opened, the autopilot polls CI
+  #   for the configured timeout, merges the PR when CI is green, then
+  #   pulls the updated base branch before starting the next story. Each
+  #   story's worktree is cut from the freshly-updated base — no stack.
+  #
+  # land_as_you_go is opt-in because it costs the wall-clock time of one
+  # CI run per story. For projects with fast CI (<5 min), this is much
+  # cheaper than the integration cost of a deep stack at session end.
+  merge_strategy: manual
+
+  # Tunables for `merge_strategy: land_as_you_go`. Ignored when
+  # merge_strategy is "manual".
+  merge_strategy_options:
+    # merge | squash | rebase — passed through to the platform's merge API.
+    merge_method: merge
+    # Per-PR CI watch timeout (seconds). At expiry, behavior follows
+    # on_ci_failure (since "didn't go green in time" is functionally a
+    # red signal for forward progress).
+    wait_for_ci_timeout_seconds: 600
+    # Poll cadence for the CI watch loop (seconds).
+    poll_interval_seconds: 30
+    # halt | warn_and_continue. `halt` stops the session at the first
+    # failure so you can investigate. `warn_and_continue` falls back to
+    # manual-mode behavior for that one story (PR stays stacked) and
+    # moves on — useful when you trust the autopilot to keep working
+    # while you triage the CI red asynchronously.
+    on_ci_failure: halt
+    # Delete the source branch on the platform after a successful merge.
+    delete_branch_after_merge: true

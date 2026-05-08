@@ -177,7 +177,13 @@ async function mergeGitea(args) {
     return mergeGiteaRest(args);
   }
   if (await hasCli('tea')) {
-    const r = await tryRun('tea', ['pr', 'merge', String(args.pr)], { timeoutMs: 60_000 });
+    // tea takes `--style merge|squash|rebase|rebase-merge`. Without it,
+    // squash/rebase are silently downgraded to a plain merge — caller asked
+    // for X but got a merge-commit. Map our methods through.
+    const styleMap = { merge: 'merge', squash: 'squash', rebase: 'rebase' };
+    const style = styleMap[args.method] || 'merge';
+    const cliArgs = ['pr', 'merge', String(args.pr), '--style', style];
+    const r = await tryRun('tea', cliArgs, { timeoutMs: 60_000 });
     if (r.exitCode !== 0) {
       return {
         platform: 'gitea',
@@ -191,7 +197,7 @@ async function mergeGitea(args) {
       platform: 'gitea',
       pr: args.pr,
       merged: true,
-      method: 'merge',
+      method: args.method,
       // tea CLI doesn't expose branch-delete; caller handles that separately.
       branchDeleted: false,
     };
@@ -224,7 +230,11 @@ async function mergeBitbucket({ pr, method, deleteBranch, baseUrl, message }) {
   const res = await postJson(
     `${apiBase}/repositories/${ownerRepo}/pullrequests/${pr}/merge`,
     {
-      type: 'pullrequest_merge_parameters',
+      // Atlassian's documented body shape uses `type: 'pullrequest'`; the
+      // earlier `pullrequest_merge_parameters` we shipped is from older
+      // JIRA-style examples and is rejected by the current Bitbucket
+      // Cloud API.
+      type: 'pullrequest',
       merge_strategy: bbMethod,
       close_source_branch: !!deleteBranch,
       ...(message ? { message } : {}),

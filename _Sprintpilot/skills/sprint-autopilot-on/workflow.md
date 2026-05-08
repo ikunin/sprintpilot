@@ -1110,6 +1110,56 @@ Instruct: "Re-verify code review for story {{current_story}} — all patch findi
     <critical>**DO NOT merge** — a PR was created at {{pr_url}}. Merging requires PR approval. The branch will be merged through the PR workflow on the platform.</critical>
     <action>Set `{{merge_status}}` = "pr_pending"</action>
     <action>Log: "Story {{current_story}} pushed — PR awaiting review: {{pr_url}}"</action>
+
+    <!-- merge_strategy: land_as_you_go (RFC #3) — opt-in branch that
+         waits for CI green per story, merges, and advances base before
+         the next story. Default `manual` falls through unchanged. -->
+    <action>Run: `node {{project_root}}/_Sprintpilot/scripts/resolve-profile.js get autopilot.merge_strategy` — fall back to `manual` on non-zero exit. Set `{{merge_strategy}}`.</action>
+
+    <check if="{{merge_strategy}} == 'land_as_you_go'">
+      <action>Resolve options (each `resolve-profile.js get` falls back to its documented default):
+        `{{merge_method}}` = `autopilot.merge_strategy_options.merge_method` (default: `merge`),
+        `{{wait_timeout_sec}}` = `autopilot.merge_strategy_options.wait_for_ci_timeout_seconds` (default: `600`),
+        `{{poll_interval_sec}}` = `autopilot.merge_strategy_options.poll_interval_seconds` (default: `30`),
+        `{{on_ci_failure}}` = `autopilot.merge_strategy_options.on_ci_failure` (default: `halt`),
+        `{{delete_branch_after_merge}}` = `autopilot.merge_strategy_options.delete_branch_after_merge` (default: `true`).
+      </action>
+
+      <action>**Extract PR number** from `{{pr_url}}`. GitHub: trailing path segment after `/pull/`. GitLab: after `/-/merge_requests/`. Bitbucket: after `/pull-requests/`. Gitea: after `/pulls/`. Set `{{pr_number}}`. If extraction fails, leave `{{merge_status}}` = "pr_pending" and skip the rest of this branch.</action>
+
+      <action>**Watch CI** — run:
+      `node {{project_root}}/_Sprintpilot/scripts/pr-watch.js --platform {{platform}} --pr {{pr_number}} --timeout {{wait_timeout_sec}} --interval {{poll_interval_sec}}`
+      (add `--base-url {{base_url}}` for self-hosted Gitea/Bitbucket/GitLab.)
+      Capture stdout JSON. Read `state` (`success` | `failure` | `pending` | `unknown`) and `timed_out`.
+      </action>
+
+      <check if="state == 'success'">
+        <action>**Merge PR** — run:
+        `node {{project_root}}/_Sprintpilot/scripts/pr-merge.js --platform {{platform}} --pr {{pr_number}} --method {{merge_method}}{{#if delete_branch_after_merge}} --delete-branch{{/if}}`
+        Capture JSON. On `merged: true`: log "Story {{current_story}}: PR #{{pr_number}} merged ({{merge_method}})", set `{{merge_status}}` = "merged".
+        On `merged: false` (platform refused — required reviews, branch protection, etc.): leave `{{merge_status}}` = "pr_pending" with the platform's error message logged.
+        </action>
+        <check if="{{merge_status}} == 'merged'">
+          <action>**Update base** — pull the freshly-merged commit so the next story branches from updated main:
+          `git checkout {{base_branch}}` then `git pull origin {{base_branch}}` (skip pull when `{{has_origin}}` is false).
+          </action>
+        </check>
+      </check>
+
+      <check if="state == 'failure' OR timed_out == true">
+        <check if="{{on_ci_failure}} == 'halt'">
+          <critical>**HALT — CI did not go green for {{pr_url}}.** Reason: {{state}} (timed_out={{timed_out}}). Story {{current_story}} stays open; subsequent stories deferred. Investigate, push fixes, and re-run /sprint-autopilot-on to resume.</critical>
+          <action>Set `{{merge_status}}` = "ci_red", report to user, STOP this session.</action>
+        </check>
+        <check if="{{on_ci_failure}} == 'warn_and_continue'">
+          <action>Log warning: "Story {{current_story}}: CI {{state}} (timed_out={{timed_out}}); leaving PR stacked at {{pr_url}}." (`{{merge_status}}` already "pr_pending" from above.)</action>
+        </check>
+      </check>
+
+      <!-- state == 'unknown' or 'pending' without timeout → degrade to
+           manual stacking; no extra action needed because merge_status is
+           already "pr_pending". -->
+    </check>
   </check>
 
   <action>**Commit story artifacts to main** — keeps main in sync even when story code is on a PR branch.
