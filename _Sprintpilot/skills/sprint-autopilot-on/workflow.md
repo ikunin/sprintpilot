@@ -88,7 +88,7 @@ For everything else: decide, document briefly, continue.
 
 - **`log-timing.js` is fire-and-forget**: every `node …/log-timing.js …` invocation must never halt the autopilot on failure (treat exit codes as advisory).
 - **`resolve-profile.js get` falls back to documented default**: every `resolve-profile.js get <key>` call falls back to the documented default on non-zero exit; never halt.
-- **SYNC_STATUS_RULE**: `sync-status.js` does full block replacement. When updating an existing story entry in `{git_status_file}`, re-read its existing fields and pass ALL of them alongside the new values (branch, commit, patch_commits, push_status, pr_url, lint_result, test_pitfalls, ci_parity_uncertain, worktree, platform, base_branch, worktree_cleaned). For a brand-new entry, pass at minimum `--branch` and the targeted status field.
+- **SYNC_STATUS_RULE**: `sync-status.js` does full block replacement. When updating an existing story entry in `{git_status_file}`, re-read its existing fields and pass ALL of them alongside the new values (branch, commit, patch_commits, push_status, pr_url, lint_result, worktree, platform, base_branch, worktree_cleaned). For a brand-new entry, pass at minimum `--branch` and the targeted status field.
 - **`{{has_origin}}` is false**: when this flag is false, skip every `git fetch origin` and `git push origin` call below; substitute `origin/{{base_branch}}` → `{{base_branch}}` for read operations. Do NOT repeat this qualifier per site.
 - **FINALIZE_HANDOFF macro** (sprint-finalize-pending checkpoint): write `current_bmad_step = "sprint-finalize-pending"`, `current_story = null`, `next_skill = null`, `stories_remaining = []` to `{state_file}`; release the autopilot lock idempotently (`lock.js release`); report sprint-complete-with-handoff to user; HALT this session. The next `/sprint-autopilot-on` invocation enters via step 1, sees the pending state, and runs step 10 with a clean window.
 - **FLUSH_SHARDS macro** (when `{{coalesce_state_writes}}` is true): run `state-shard.js flush --story sprint --project-root "{{project_root}}"`, then `merge-shards.js --project-root "{{project_root}}"`. Both ignore failures.
@@ -816,8 +816,6 @@ Parse stdout as a single JSON object: `{"remaining":[...],"state":"..."}`.
     Set `{{lint_result}}` from the summary line.
     </action>
 
-    <action>**Post-GREEN advisory gates** — run `node {{project_root}}/_Sprintpilot/scripts/post-green-gates.js` (RFC #1 + #4: CI-parity + test-pitfalls). Capture JSON. Set `{{test_pitfalls_summary}}` = `.test_pitfalls`, `{{ci_parity_uncertain}}` = `.ci_parity_uncertain`. If `.ci_parity_warning` is non-empty, log it. Non-blocking — never halts.</action>
-
     <action>**Stage and commit** — resolve commit message placeholders using `commit_placeholder_resolution` chain from config:
     - `{story-key}` → from sprint-status.yaml development_status key (= `{{current_story}}`)
     - `{epic}` → from story file epic header, fallback to story-key prefix (e.g., "1" from "1-3")
@@ -1098,18 +1096,11 @@ Instruct: "Re-verify code review for story {{current_story}} — all patch findi
     <critical>**DO NOT merge** — a PR was created at {{pr_url}}. Merging requires PR approval. The branch will be merged through the PR workflow on the platform.</critical>
     <action>Set `{{merge_status}}` = "pr_pending"</action>
     <action>Log: "Story {{current_story}} pushed — PR awaiting review: {{pr_url}}"</action>
-
-    <!-- merge_strategy: land_as_you_go (RFC #3) — opt-in flow lives in
-         _Sprintpilot/scripts/land-this-pr.js so the workflow stays small.
-         Default `manual` skips entirely. -->
-    <check if="`resolve-profile.js get --default manual --enum manual,land_as_you_go autopilot.merge_strategy` is land_as_you_go">
-      <action>Run `node {{project_root}}/_Sprintpilot/scripts/land-this-pr.js --pr-url "{{pr_url}}" --platform {{platform}} --base-branch {{base_branch}} --has-origin {{has_origin}}` (it reads merge_strategy_options from config; pass `--base-url {{base_url}}` for self-hosted). Capture JSON; set `{{merge_status}}` = `.merge_status`. If `.halt` is true, log `.message` and STOP this session.</action>
-    </check>
   </check>
 
   <action>**Commit story artifacts to main** — keeps main in sync even when story code is on a PR branch.
   1. `git checkout -B {{base_branch}} origin/{{base_branch}}`
-  2. Write git-status.yaml (addon-owned — never touch sprint-status.yaml): `node {{project_root}}/_Sprintpilot/scripts/sync-status.js --story "{{current_story}}" --git-status-file "{{project_root}}/_bmad-output/implementation-artifacts/git-status.yaml" --branch "{{branch_prefix}}{{branch_name}}" --commit "{{story_commit}}" --patch-commits "{{patch_commits_csv}}" --push-status "{{push_status}}" --merge-status "{{merge_status}}" --pr-url "{{pr_url}}" --lint-result "{{lint_result}}" --test-pitfalls "{{test_pitfalls_summary}}" --ci-parity-uncertain "{{ci_parity_uncertain}}" --worktree "{{project_root}}/.worktrees/{{current_story}}" --platform "{{platform}}" --base-branch "{{base_branch}}"`
+  2. Write git-status.yaml (addon-owned — never touch sprint-status.yaml): `node {{project_root}}/_Sprintpilot/scripts/sync-status.js --story "{{current_story}}" --git-status-file "{{project_root}}/_bmad-output/implementation-artifacts/git-status.yaml" --branch "{{branch_prefix}}{{branch_name}}" --commit "{{story_commit}}" --patch-commits "{{patch_commits_csv}}" --push-status "{{push_status}}" --merge-status "{{merge_status}}" --pr-url "{{pr_url}}" --lint-result "{{lint_result}}" --worktree "{{project_root}}/.worktrees/{{current_story}}" --platform "{{platform}}" --base-branch "{{base_branch}}"`
   3. Stage artifacts (ignore errors for missing paths): `git add _bmad-output/implementation-artifacts/sprint-status.yaml _bmad-output/implementation-artifacts/git-status.yaml _bmad-output/implementation-artifacts/autopilot-state.yaml _bmad-output/implementation-artifacts/decision-log.yaml _bmad-output/stories/ _bmad-output/planning-artifacts/`
   4. If `git diff --cached --quiet` exits non-zero: `git commit -m "docs: story {{current_story}} done — {{test_count}} tests{{#if pr_url}}, PR: {{pr_url}}{{/if}}"` then `git push origin {{base_branch}}` (warn on push failure, do not halt).
   </action>
@@ -1226,11 +1217,6 @@ Instruct: "Re-verify code review for story {{current_story}} — all patch findi
   <action>Run: `node {{project_root}}/_Sprintpilot/scripts/merge-shards.js --project-root "{{project_root}}"`.</action>
 </check>
 
-<!-- Stack-health snapshot (RFC #5) — fire-and-forget. -->
-<check if="{{git_enabled}} AND {{platform}} != 'git_only'">
-  <action>Run `node {{project_root}}/_Sprintpilot/scripts/stack-snapshot.js --platform {{platform}} --branch-prefix {{branch_prefix}} --base-branch {{base_branch}} --git-status-file "{{project_root}}/_bmad-output/implementation-artifacts/git-status.yaml"` (ignore failures; surface `.snapshot.depth` + `.snapshot.recommendation` in checkpoint report).</action>
-</check>
-
 <!-- Phase-timing session snapshot (no-op if autopilot.phase_timings is false). -->
 <action>Run: `node {{project_root}}/_Sprintpilot/scripts/summarize-timings.js --session-only --format md --quiet --project-root "{{project_root}}"` — ignore failures. The stdout line is the artifact path; include it in the checkpoint report if non-empty.</action>
 
@@ -1247,7 +1233,6 @@ Git status:
 {{#each completed_stories_this_session}}
   - {{story-key}}: {{push_status}} {{pr_url}}
 {{/each}}
-{{#if stack_snapshot_depth > 0}}Stack: {{stack_snapshot_depth}} open PR(s); {{stack_snapshot_recommendation}}{{/if}}
 {{/if}}
 {{#if medium_high_decisions_count > 0}}
 
