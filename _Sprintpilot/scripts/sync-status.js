@@ -137,6 +137,11 @@ function main() {
   // so the YAML stays line-oriented; downstream readers parse it back.
   const testPitfalls = opts['test-pitfalls'];
 
+  // CI-parity uncertainty flag — set when env-dependent tests skipped
+  // locally would run in CI. The workflow surfaces it at session
+  // checkpoint so the dev sees what risk the green run was hiding.
+  const ciParityUncertain = opts['ci-parity-uncertain'];
+
   const fields = [
     { key: 'branch', value: branch },
     { key: 'worktree', value: worktree },
@@ -144,6 +149,7 @@ function main() {
     { key: 'patch_commits', value: patchCommits ? `[${patchCommits}]` : undefined, raw: true },
     { key: 'lint_result', value: lintResult },
     { key: 'test_pitfalls', value: testPitfalls },
+    { key: 'ci_parity_uncertain', value: ciParityUncertain },
     { key: 'push_status', value: pushStatus },
     { key: 'merge_status', value: mergeStatus },
     { key: 'pr_url', value: prUrl },

@@ -76,3 +76,17 @@ autopilot:
   test_pitfalls:
     enabled: true
     # config_path: _Sprintpilot/modules/autopilot/test-pitfalls.yaml
+
+  # CI-parity scan — surface "local green / CI red" risk by classifying
+  # skipped tests. Runs after bmad-dev-story GREEN. If env-dependent
+  # skips are present (postgres, GPU, model files, …), the workflow
+  # warns loudly and stashes ci_parity_uncertain: true into git-status
+  # so the session checkpoint flags it. NEVER halts.
+  #
+  # Pattern lists are case-insensitive substring checks against each
+  # skip's reason string. Skips with empty reasons land in `unknown`.
+  ci_parity:
+    enabled: true
+    # patterns:
+    #   intentional: [slow, smoke, manual, wip, flaky, todo, pending]
+    #   env_dependent: [postgres, database, redis, gpu, cuda, model file, hardware, network, docker]
