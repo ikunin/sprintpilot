@@ -816,19 +816,7 @@ Parse stdout as a single JSON object: `{"remaining":[...],"state":"..."}`.
     Set `{{lint_result}}` from the summary line.
     </action>
 
-    <action>**Lint test pitfalls** (RFC #4) — patterns that pass locally but fail in CI:
-    Read config: if `autopilot.test_pitfalls.enabled` (default true) is false in `_Sprintpilot/modules/autopilot/config.yaml`, skip this gate.
-    Run: `node {{project_root}}/_Sprintpilot/scripts/lint-test-pitfalls.js --format json` (executed from `{{project_root}}` so test-dir auto-discovery resolves correctly).
-    Parse the JSON; if `summary.total > 0`, log the per-file findings and set `{{test_pitfalls_summary}}` = `"<total> finding(s): <byLang summary>"`. Otherwise set `{{test_pitfalls_summary}}` = `"clean"`.
-    Non-blocking — never halts. Pass `--test-pitfalls "{{test_pitfalls_summary}}"` to the next sync-status.js call so the session checkpoint surfaces it.
-    </action>
-
-    <action>**CI-parity scan** (RFC #1) — flag local-green / CI-red risk:
-    Read config: if `autopilot.ci_parity.enabled` (default true) is false in `_Sprintpilot/modules/autopilot/config.yaml`, skip this gate.
-    Run: `node {{project_root}}/_Sprintpilot/scripts/ci-parity-scan.js` (cwd = `{{project_root}}`; outputs JSON).
-    Parse `summary.would_run_in_ci`: if true, log loudly — `"WARN: <env_dependent> tests skipped due to local env (matched: <byPattern keys>). These WILL execute in CI. Story may surface CI failures even though local tests are green."` — and set `{{ci_parity_uncertain}}` = `true`. Otherwise leave the variable unset (no field is written when absent).
-    Non-blocking — never halts. Pass `--ci-parity-uncertain "{{ci_parity_uncertain}}"` (when set) to the next sync-status.js call.
-    </action>
+    <action>**Post-GREEN advisory gates** — run `node {{project_root}}/_Sprintpilot/scripts/post-green-gates.js` (RFC #1 + #4: CI-parity + test-pitfalls). Capture JSON. Set `{{test_pitfalls_summary}}` = `.test_pitfalls`, `{{ci_parity_uncertain}}` = `.ci_parity_uncertain`. If `.ci_parity_warning` is non-empty, log it. Non-blocking — never halts.</action>
 
     <action>**Stage and commit** — resolve commit message placeholders using `commit_placeholder_resolution` chain from config:
     - `{story-key}` → from sprint-status.yaml development_status key (= `{{current_story}}`)
@@ -1111,38 +1099,11 @@ Instruct: "Re-verify code review for story {{current_story}} — all patch findi
     <action>Set `{{merge_status}}` = "pr_pending"</action>
     <action>Log: "Story {{current_story}} pushed — PR awaiting review: {{pr_url}}"</action>
 
-    <!-- merge_strategy: land_as_you_go (RFC #3) — opt-in branch that
-         waits for CI green per story, merges, and advances base. Default
-         `manual` falls through unchanged. resolve-profile.js validates
-         enum values and falls back to the default on unknown / missing. -->
-    <action>Set `{{merge_strategy}}` = `resolve-profile.js get --default manual --enum manual,land_as_you_go autopilot.merge_strategy`.</action>
-
-    <check if="{{merge_strategy}} == 'land_as_you_go'">
-      <action>Resolve options:
-        `{{merge_method}}` = `resolve-profile.js get --default merge --enum merge,squash,rebase autopilot.merge_strategy_options.merge_method`,
-        `{{wait_timeout_sec}}` = `resolve-profile.js get --default 600 autopilot.merge_strategy_options.wait_for_ci_timeout_seconds`,
-        `{{poll_interval_sec}}` = `resolve-profile.js get --default 30 autopilot.merge_strategy_options.poll_interval_seconds`,
-        `{{on_ci_failure}}` = `resolve-profile.js get --default halt --enum halt,warn_and_continue autopilot.merge_strategy_options.on_ci_failure`,
-        `{{delete_branch_after_merge}}` = `resolve-profile.js get --default true autopilot.merge_strategy_options.delete_branch_after_merge`.
-      </action>
-
-      <action>Set `{{pr_number}}` = `extract-pr-number.js --url "{{pr_url}}" --platform {{platform}}` (stdout). On non-zero exit, skip the rest of this branch — `{{merge_status}}` stays "pr_pending".</action>
-
-      <action>Run `pr-watch.js --platform {{platform}} --pr {{pr_number}} --timeout {{wait_timeout_sec}} --interval {{poll_interval_sec}}` (add `--base-url {{base_url}}` for self-hosted). Capture JSON; read `state` and `timed_out`.</action>
-
-      <check if="state == 'success'">
-        <action>Run `pr-merge.js --platform {{platform}} --pr {{pr_number}} --method {{merge_method}}{{#if delete_branch_after_merge}} --delete-branch{{/if}}`. On `merged: true`: set `{{merge_status}}` = "merged" and run `git checkout {{base_branch}} && git pull origin {{base_branch}}` (skip pull when `{{has_origin}}` is false). On `merged: false`: log the platform's error; `{{merge_status}}` stays "pr_pending".</action>
-      </check>
-
-      <check if="state == 'failure' OR timed_out == true">
-        <check if="{{on_ci_failure}} == 'halt'">
-          <critical>HALT — CI for {{pr_url}} ended state={{state}} timed_out={{timed_out}}. Story {{current_story}} stays open; subsequent stories deferred. Fix CI then re-run /sprint-autopilot-on.</critical>
-          <action>Set `{{merge_status}}` = "ci_red"; report to user; STOP this session.</action>
-        </check>
-        <action>(warn_and_continue) Log warning; `{{merge_status}}` stays "pr_pending".</action>
-      </check>
-      <!-- state ∈ {'unknown', 'pending'} without timeout: fall through to
-           manual stacking — `{{merge_status}}` is already "pr_pending". -->
+    <!-- merge_strategy: land_as_you_go (RFC #3) — opt-in flow lives in
+         _Sprintpilot/scripts/land-this-pr.js so the workflow stays small.
+         Default `manual` skips entirely. -->
+    <check if="`resolve-profile.js get --default manual --enum manual,land_as_you_go autopilot.merge_strategy` is land_as_you_go">
+      <action>Run `node {{project_root}}/_Sprintpilot/scripts/land-this-pr.js --pr-url "{{pr_url}}" --platform {{platform}} --base-branch {{base_branch}} --has-origin {{has_origin}}` (it reads merge_strategy_options from config; pass `--base-url {{base_url}}` for self-hosted). Capture JSON; set `{{merge_status}}` = `.merge_status`. If `.halt` is true, log `.message` and STOP this session.</action>
     </check>
   </check>
 
@@ -1265,11 +1226,9 @@ Instruct: "Re-verify code review for story {{current_story}} — all patch findi
   <action>Run: `node {{project_root}}/_Sprintpilot/scripts/merge-shards.js --project-root "{{project_root}}"`.</action>
 </check>
 
-<!-- Stack-health snapshot (RFC #5). Aggregates the open-PR stack into a
-     `stack:` block in git-status.yaml so this session and the next can
-     see depth + CI state + recommendation without manual `gh pr list`. -->
+<!-- Stack-health snapshot (RFC #5) — fire-and-forget. -->
 <check if="{{git_enabled}} AND {{platform}} != 'git_only'">
-  <action>Run: `node {{project_root}}/_Sprintpilot/scripts/stack-snapshot.js --platform {{platform}} --branch-prefix {{branch_prefix}} --base-branch {{base_branch}} --git-status-file "{{project_root}}/_bmad-output/implementation-artifacts/git-status.yaml" --merge-strategy {{merge_strategy|default("manual")}}`. Ignore failures (exit 2 = platform unavailable; degraded snapshot still written). Capture stdout JSON; surface `snapshot.depth`, `snapshot.ci_all_green`, `snapshot.conflicts_at_base`, and `snapshot.recommendation` in the checkpoint report below.</action>
+  <action>Run `node {{project_root}}/_Sprintpilot/scripts/stack-snapshot.js --platform {{platform}} --branch-prefix {{branch_prefix}} --base-branch {{base_branch}} --git-status-file "{{project_root}}/_bmad-output/implementation-artifacts/git-status.yaml"` (ignore failures; surface `.snapshot.depth` + `.snapshot.recommendation` in checkpoint report).</action>
 </check>
 
 <!-- Phase-timing session snapshot (no-op if autopilot.phase_timings is false). -->
@@ -1288,14 +1247,7 @@ Git status:
 {{#each completed_stories_this_session}}
   - {{story-key}}: {{push_status}} {{pr_url}}
 {{/each}}
-{{#if stack_snapshot_depth > 0}}
-
-Stack health:
-  Depth: {{stack_snapshot_depth}} open PR{{#if stack_snapshot_depth != 1}}s{{/if}}
-  CI all green: {{stack_snapshot_ci_all_green}}
-  Conflicts at base: {{stack_snapshot_conflicts_at_base}}
-  {{#if stack_snapshot_recommendation}}Recommendation: {{stack_snapshot_recommendation}}{{/if}}
-{{/if}}
+{{#if stack_snapshot_depth > 0}}Stack: {{stack_snapshot_depth}} open PR(s); {{stack_snapshot_recommendation}}{{/if}}
 {{/if}}
 {{#if medium_high_decisions_count > 0}}
 
