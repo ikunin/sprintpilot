@@ -8,6 +8,7 @@ const { runInstall } = require('../lib/commands/install');
 const { runUninstall } = require('../lib/commands/uninstall');
 const { runCheckUpdate } = require('../lib/commands/check-update');
 const { runResolveDocs } = require('../lib/commands/resolve-docs');
+const { runLandStack } = require('../lib/commands/land-stack');
 const { readAddonManifestVersion } = require('../lib/core/bmad-config');
 
 async function resolveVersion() {
@@ -105,6 +106,44 @@ async function main() {
     .action(async (paths, options) => {
       try {
         await runResolveDocs({ paths, dryRun: !!options.dryRun });
+      } catch (err) {
+        bail(err);
+      }
+    });
+
+  program
+    .command('land-stack')
+    .description(
+      'Bottom-up rescue for stacked PRs — fetches the open-PR stack, merges each, watches CI, and advances the base branch. Auto-resolves BMad state-file conflicts via the merge driver; surfaces real-code conflicts for manual resolution.',
+    )
+    .option('--platform <p>', 'Platform override: github|gitlab|bitbucket|gitea (default: detect)')
+    .option('--branch-prefix <p>', 'Branch prefix to filter open PRs (default: story/)')
+    .option('--base-branch <b>', 'Base branch (default: main)')
+    .option('--base-url <url>', 'API base URL for self-hosted Gitea/GitLab/Bitbucket')
+    .option('--method <m>', 'Merge method: merge|squash|rebase (default: merge)')
+    .option('--ci-timeout <sec>', 'Per-PR CI watch timeout in seconds (default: 600)')
+    .option('--poll-interval <sec>', 'CI poll interval in seconds (default: 30)')
+    .option('--no-delete-branch', 'Keep branches on the platform after merge')
+    .option('--on-ci-failure <m>', 'On CI failure: halt|warn_and_continue (default: halt)')
+    .option('--dry-run', 'Print the plan without executing')
+    .option('--force', 'Proceed even if working tree is not clean')
+    .option('--stack-from-file <path>', 'Read stack as JSON from file (testing hook)')
+    .action(async (options) => {
+      try {
+        await runLandStack({
+          platform: options.platform,
+          branchPrefix: options.branchPrefix,
+          baseBranch: options.baseBranch,
+          baseUrl: options.baseUrl,
+          method: options.method,
+          ciTimeout: options.ciTimeout,
+          pollInterval: options.pollInterval,
+          deleteBranch: options.deleteBranch !== false,
+          onCiFailure: options.onCiFailure,
+          dryRun: !!options.dryRun,
+          force: !!options.force,
+          stackFromFile: options.stackFromFile,
+        });
       } catch (err) {
         bail(err);
       }
