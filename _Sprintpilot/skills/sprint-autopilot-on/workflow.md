@@ -642,22 +642,12 @@ Parse stdout as a single JSON object: `{"remaining":[...],"state":"..."}`.
   </check>
 </check>
 
-<!-- Nano routing: when implementation_flow is 'quick', route bmad-dev-story
-     through bmad-quick-dev. Quick-dev runs Implement → Review → Classify →
-     Commit internally (BMad step-oneshot.md), so bmad-create-story /
-     bmad-check-readiness / bmad-code-review are not invoked in this flow. -->
-<check if="{{implementation_flow}} is quick AND {{next_skill}} is bmad-dev-story">
-  <action>Override `{{next_skill}}` = `bmad-quick-dev`</action>
-  <action>Log: "Routing {{current_story}} through bmad-quick-dev per nano profile (implementation_flow=quick)"</action>
-</check>
-<!-- Under quick flow, autopilot never invokes bmad-create-story or
-     bmad-check-implementation-readiness; quick-dev reads AC from
-     sprint-status.yaml directly. If bmad-help proposes these skills
-     while implementation_flow=quick, skip them and advance. -->
-<check if="{{implementation_flow}} is quick AND ({{next_skill}} is bmad-create-story OR {{next_skill}} is bmad-check-implementation-readiness)">
-  <action>Log: "Skipping {{next_skill}} under quick flow (nano profile) — quick-dev reads AC directly"</action>
-  <action>Set `{{next_skill}}` = `bmad-quick-dev`</action>
-</check>
+<!-- Profile-aware skill routing — deterministic via helper script so the
+     LLM doesn't have to evaluate multi-clause `<check if>` conditions
+     under prompt pressure. next-skill.js handles nano routing (quick
+     flow → bmad-quick-dev), profile-specific skill skipping, and any
+     future routing rules. The LLM just runs it and uses stdout. -->
+<action>Override `{{next_skill}}` = stdout of `node {{project_root}}/_Sprintpilot/scripts/next-skill.js --proposed {{next_skill}} --project-root "{{project_root}}"`. The script reads the active profile, applies routing rules, and returns the actual skill to invoke (e.g. routes bmad-dev-story → bmad-quick-dev under nano). Stderr is the routing rationale; log it if non-empty.</action>
 
 <action>Set `{{completed_skill}}` = `{{next_skill}}`</action>
 <action>Create task "{{next_skill}}" → mark `in_progress`</action>
