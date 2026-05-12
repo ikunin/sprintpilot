@@ -111,11 +111,26 @@ function seedStoryFile() {
       '- AC1',
       '- AC2',
       '',
+      '## Tasks',
+      '- [ ] write failing tests',
+      '- [ ] implement feature',
+      '',
     ].join('\n'),
     'utf8',
   );
   patchState({ current_story: 'S1', story_file_path: p });
   return p;
+}
+
+function markStoryTasksDone(p: string) {
+  const text = readFileSync(p, 'utf8');
+  writeFileSync(p, text.replace(/- \[ \]/g, '- [x]'), 'utf8');
+}
+
+function seedSprintStatusDone() {
+  const dir = join(projectRoot, '_bmad-output', 'implementation-artifacts');
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'sprint-status.yaml'), 'development_status:\n  S1: done\n', 'utf8');
 }
 
 function seedTestFiles(): string[] {
@@ -190,7 +205,10 @@ describe('Orchestrator end-to-end smoke (full story cycle)', () => {
     });
     expect(JSON.parse(r7.stdout).phase).toBe('story_done');
 
-    // 9. STORY_DONE — commit confirmed
+    // 9. STORY_DONE — BMad bookkeeping: tasks all checked, sprint-status
+    // shows the story as done. Without these, verify.js rejects.
+    markStoryTasksDone(storyPath);
+    seedSprintStatusDone();
     const r8 = record({
       status: 'success',
       output: { commit_sha: 'def456', branch: 'story/s1', story_key: 'S1' },

@@ -94,13 +94,25 @@ classify each finding:
 
 This is LLM intelligence the orchestrator routes on — you own the triage.
 
-## Verify trust boundary
+## BMad bookkeeping is enforced
 
-`verify.js` inspects the world after every `success` signal. If it
-disagrees with your `success` claim (test file not actually written,
-review artifact missing, etc.), the orchestrator treats the signal as a
-recoverable failure and re-emits the same action with the verifier's
-issues threaded into the template slot.
+`verify.js` checks more than artifact existence — it enforces the BMad
+bookkeeping you'd otherwise be tempted to skip:
+
+| Phase | Bookkeeping that MUST be true before you signal `success` |
+|---|---|
+| `create_story` | Story file has `## Acceptance Criteria` (≥1 bullet) AND a `## Tasks` (or `## Tasks/Subtasks`) section with at least one `[ ]` or `[x]` checkbox. |
+| `dev_red` / `dev_green` | Test files exist on disk; runner exit codes match the phase contract; `tests_run` matches the runner's count. |
+| `code_review` | `_bmad-output/reviews/<story_key>.md` exists; `findings[]` carries `{id, severity, category, action: 'block'\|'patch'\|'defer', rationale}` for every finding. |
+| `patch_apply` | Every `patch_finding` id present in `state.patch_findings` is included in `applied_finding_ids`. |
+| `story_done` (and `nano_quick_dev`) | sprint-status.yaml shows this story as `done` (under `development_status.<story_key>` or inline). Story file has zero remaining `[ ]` task boxes — dev-story is responsible for flipping them to `[x]`. `commit_sha` and `branch` reported; `story_key` matches. |
+| `retrospective` | `_bmad-output/retrospectives/<epic>.md` exists. |
+
+Skipping any of these — even when the code is "obviously done" — produces
+`verify_rejected` in the ledger and the orchestrator re-emits the same
+action with the verifier's issues threaded into the template slot. After
+the per-profile `verify_reject_budget` is exhausted, the session pauses
+for the user.
 
 If you're confident verify is wrong (e.g. you renamed a test file per a
 logged decision), emit `verify_override` with `evidence.expected_paths`

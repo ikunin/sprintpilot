@@ -121,7 +121,11 @@ describe('autopilot record', () => {
     const storyDir = join(projectRoot, '_bmad-output', 'stories');
     mkdirSync(storyDir, { recursive: true });
     const storyPath = join(storyDir, 'S1.md');
-    writeFileSync(storyPath, '---\nstory_key: S1\n---\n\n## Acceptance Criteria\n- AC1\n', 'utf8');
+    writeFileSync(
+      storyPath,
+      '---\nstory_key: S1\n---\n\n## Acceptance Criteria\n- AC1\n\n## Tasks\n- [ ] write tests\n',
+      'utf8',
+    );
     // Seed state.story_file_path so verify can find it.
     const statePath = join(
       projectRoot,

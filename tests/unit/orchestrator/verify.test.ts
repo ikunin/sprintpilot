@@ -50,8 +50,22 @@ function makeReviewFile(): string {
 }
 
 describe('verify CREATE_STORY', () => {
-  it('ok when story file exists with front-matter and AC bullets', () => {
-    const path = makeStoryFile(`---\nstory_key: S1\n---\n\n## Acceptance Criteria\n- AC1\n- AC2\n`);
+  it('ok when story file has front-matter, AC, and Tasks/Subtasks checkboxes', () => {
+    const path = makeStoryFile(
+      `---\nstory_key: S1\n---\n\n## Acceptance Criteria\n- AC1\n- AC2\n\n## Tasks\n- [ ] write tests\n- [ ] implement\n`,
+    );
+    const r = verify(
+      { phase: STATES.CREATE_STORY, story_key: 'S1', story_file_path: path },
+      {},
+      { projectRoot },
+    );
+    expect(r.ok).toBe(true);
+  });
+
+  it('accepts "Tasks/Subtasks" heading variant', () => {
+    const path = makeStoryFile(
+      `---\nstory_key: S1\n---\n\n## Acceptance Criteria\n- AC1\n\n## Tasks/Subtasks\n- [ ] do thing\n`,
+    );
     const r = verify(
       { phase: STATES.CREATE_STORY, story_key: 'S1', story_file_path: path },
       {},
@@ -70,7 +84,7 @@ describe('verify CREATE_STORY', () => {
   });
 
   it('fails when AC section is missing', () => {
-    const path = makeStoryFile(`---\nstory_key: S1\n---\n\nsome body\n`);
+    const path = makeStoryFile(`---\nstory_key: S1\n---\n\nsome body\n\n## Tasks\n- [ ] x\n`);
     const r = verify(
       { phase: STATES.CREATE_STORY, story_key: 'S1', story_file_path: path },
       {},
@@ -78,6 +92,30 @@ describe('verify CREATE_STORY', () => {
     );
     expect(r.ok).toBe(false);
     expect(r.issues.join(' ')).toContain('Acceptance Criteria');
+  });
+
+  it('fails when Tasks/Subtasks section is missing', () => {
+    const path = makeStoryFile(`---\nstory_key: S1\n---\n\n## Acceptance Criteria\n- AC1\n`);
+    const r = verify(
+      { phase: STATES.CREATE_STORY, story_key: 'S1', story_file_path: path },
+      {},
+      { projectRoot },
+    );
+    expect(r.ok).toBe(false);
+    expect(r.issues.join(' ')).toContain('Tasks');
+  });
+
+  it('fails when Tasks section has no checkboxes', () => {
+    const path = makeStoryFile(
+      `---\nstory_key: S1\n---\n\n## Acceptance Criteria\n- AC1\n\n## Tasks\n- write tests\n- implement\n`,
+    );
+    const r = verify(
+      { phase: STATES.CREATE_STORY, story_key: 'S1', story_file_path: path },
+      {},
+      { projectRoot },
+    );
+    expect(r.ok).toBe(false);
+    expect(r.issues.join(' ')).toContain('checkbox');
   });
 });
 
@@ -250,17 +288,96 @@ describe('verify PATCH_APPLY', () => {
   });
 });
 
+function seedSprintStatus(content: string) {
+  const dir = join(projectRoot, '_bmad-output', 'implementation-artifacts');
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'sprint-status.yaml'), content, 'utf8');
+}
+
+function seedStoryFileWithTasks(unchecked: number, checked: number): string {
+  const dir = join(projectRoot, '_bmad-output', 'stories');
+  mkdirSync(dir, { recursive: true });
+  const p = join(dir, 'S1.md');
+  const tasks = [
+    ...Array.from({ length: unchecked }, (_, i) => `- [ ] task ${i + 1}`),
+    ...Array.from({ length: checked }, (_, i) => `- [x] done ${i + 1}`),
+  ].join('\n');
+  writeFileSync(
+    p,
+    `---\nstory_key: S1\nreadiness: ready\n---\n\n## Acceptance Criteria\n- AC1\n\n## Tasks\n${tasks}\n`,
+    'utf8',
+  );
+  return p;
+}
+
 describe('verify STORY_DONE', () => {
-  it('ok with branch + commit_sha + matching story_key', () => {
+  it('ok with sprint-status done + no unchecked tasks + branch + commit_sha', () => {
+    seedSprintStatus('development_status:\n  S1:\n    status: done\n    title: x\n');
+    const storyPath = seedStoryFileWithTasks(0, 2);
     const r = verify(
-      { phase: STATES.STORY_DONE, story_key: 'S1' },
+      { phase: STATES.STORY_DONE, story_key: 'S1', story_file_path: storyPath },
       { commit_sha: 'abc', branch: 'story/S1', story_key: 'S1' },
       { projectRoot },
     );
     expect(r.ok).toBe(true);
   });
 
+  it('fails when sprint-status.yaml is missing', () => {
+    const r = verify(
+      { phase: STATES.STORY_DONE, story_key: 'S1' },
+      { commit_sha: 'abc', branch: 'story/S1' },
+      { projectRoot },
+    );
+    expect(r.ok).toBe(false);
+    expect(r.issues.join(' ')).toContain('sprint-status.yaml missing');
+  });
+
+  it("fails when sprint-status shows story as 'backlog' / 'in-progress'", () => {
+    seedSprintStatus('development_status:\n  S1:\n    status: backlog\n    title: x\n');
+    const r = verify(
+      { phase: STATES.STORY_DONE, story_key: 'S1' },
+      { commit_sha: 'abc', branch: 'story/S1' },
+      { projectRoot },
+    );
+    expect(r.ok).toBe(false);
+    expect(r.issues.join(' ')).toContain("expected 'done'");
+  });
+
+  it('fails when story has no entry in sprint-status', () => {
+    seedSprintStatus('development_status:\n  OTHER:\n    status: done\n');
+    const r = verify(
+      { phase: STATES.STORY_DONE, story_key: 'S1' },
+      { commit_sha: 'abc', branch: 'story/S1' },
+      { projectRoot },
+    );
+    expect(r.ok).toBe(false);
+    expect(r.issues.join(' ')).toContain('no entry for story S1');
+  });
+
+  it('fails when unchecked task boxes remain', () => {
+    seedSprintStatus('development_status:\n  S1:\n    status: done\n');
+    const storyPath = seedStoryFileWithTasks(2, 1);
+    const r = verify(
+      { phase: STATES.STORY_DONE, story_key: 'S1', story_file_path: storyPath },
+      { commit_sha: 'abc', branch: 'story/S1' },
+      { projectRoot },
+    );
+    expect(r.ok).toBe(false);
+    expect(r.issues.join(' ')).toContain('unchecked task box');
+  });
+
+  it('accepts inline-form sprint-status (key: done)', () => {
+    seedSprintStatus('development_status:\n  S1: done\n');
+    const r = verify(
+      { phase: STATES.STORY_DONE, story_key: 'S1' },
+      { commit_sha: 'abc', branch: 'story/S1' },
+      { projectRoot },
+    );
+    expect(r.ok).toBe(true);
+  });
+
   it('fails on story_key mismatch', () => {
+    seedSprintStatus('development_status:\n  S1:\n    status: done\n');
     const r = verify(
       { phase: STATES.STORY_DONE, story_key: 'S1' },
       { commit_sha: 'abc', branch: 'story/S2', story_key: 'S2' },
@@ -271,7 +388,8 @@ describe('verify STORY_DONE', () => {
 });
 
 describe('verify NANO_QUICK_DEV', () => {
-  it('ok with tests_run, tests_failed=0, commit_sha', () => {
+  it('ok with tests_run, tests_failed=0, commit_sha + sprint-status=done', () => {
+    seedSprintStatus('development_status:\n  S1: done\n');
     const r = verify(
       { phase: STATES.NANO_QUICK_DEV, story_key: 'S1' },
       { tests_run: 5, tests_failed: 0, commit_sha: 'abc' },
@@ -280,7 +398,8 @@ describe('verify NANO_QUICK_DEV', () => {
     expect(r.ok).toBe(true);
   });
 
-  it('ok with tests_failed > 0 — verify only checks structural completeness', () => {
+  it('ok with tests_failed > 0 — orchestrator escalates separately; verify only structural', () => {
+    seedSprintStatus('development_status:\n  S1: done\n');
     const r = verify(
       { phase: STATES.NANO_QUICK_DEV, story_key: 'S1' },
       { tests_run: 5, tests_failed: 2, commit_sha: 'abc' },
@@ -290,12 +409,24 @@ describe('verify NANO_QUICK_DEV', () => {
   });
 
   it('fails when commit_sha missing', () => {
+    seedSprintStatus('development_status:\n  S1: done\n');
     const r = verify(
       { phase: STATES.NANO_QUICK_DEV, story_key: 'S1' },
       { tests_run: 5, tests_failed: 0 },
       { projectRoot },
     );
     expect(r.ok).toBe(false);
+  });
+
+  it("fails when sprint-status still shows 'in-progress'", () => {
+    seedSprintStatus('development_status:\n  S1: in-progress\n');
+    const r = verify(
+      { phase: STATES.NANO_QUICK_DEV, story_key: 'S1' },
+      { tests_run: 5, tests_failed: 0, commit_sha: 'abc' },
+      { projectRoot },
+    );
+    expect(r.ok).toBe(false);
+    expect(r.issues.join(' ')).toContain("expected 'done'");
   });
 });
 

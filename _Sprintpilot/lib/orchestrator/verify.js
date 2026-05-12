@@ -50,6 +50,40 @@ function frontMatter(text) {
   return m ? m[1] : null;
 }
 
+function escapeRe(s) {
+  return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+// Extract a story's status from sprint-status.yaml without pulling in a
+// full YAML parser. Supports both inline form (`<key>: <status>`) and
+// block form (`<key>:\n  status: <status>\n  title: ...`).
+function storyStatusFromSprintStatus(text, storyKey) {
+  if (!text || !storyKey) return null;
+  const k = escapeRe(storyKey);
+  // Block form first — has a `status:` line inside the indented block.
+  const blockRe = new RegExp(`^(\\s+)${k}:\\s*\\n((?:\\1\\s+[^\\n]+\\n)+)`, 'm');
+  const bm = text.match(blockRe);
+  if (bm) {
+    const inner = bm[2];
+    const sm = inner.match(/^\s+status:\s*["']?([\w-]+)["']?/m);
+    if (sm) return sm[1];
+  }
+  // Inline form: `  story-key: done` (status as scalar value).
+  const inlineRe = new RegExp(`^\\s+${k}:\\s*["']?([\\w-]+)["']?\\s*$`, 'm');
+  const im = text.match(inlineRe);
+  return im ? im[1] : null;
+}
+
+function readSprintStatus(fs, projectRoot) {
+  const p = nodePath.join(
+    projectRoot,
+    '_bmad-output',
+    'implementation-artifacts',
+    'sprint-status.yaml',
+  );
+  return readFileSafe(fs, p);
+}
+
 // Per-phase verifiers. Each receives (state, signalOutput, context) and
 // returns { ok, issues[] }. `context` carries injected dependencies.
 const VERIFIERS = {
@@ -95,6 +129,15 @@ function verifyCreateStory(state, _out, ctx) {
     // AC presence — look for "## Acceptance Criteria" section with at least one bullet.
     if (text && !/##\s+Acceptance Criteria[\s\S]*?\n-\s+/.test(text)) {
       issues.push('Acceptance Criteria section missing or empty');
+    }
+    // Tasks/Subtasks section with at least one task checkbox — required by
+    // BMad bookkeeping. `bmad-create-story` produces unchecked `[ ]`
+    // entries; `bmad-dev-story` flips them to `[x]`. If neither is present,
+    // dev-story will have nothing to check off.
+    if (text && !/##\s+Tasks(?:\s*\/\s*Subtasks)?[\s\S]*?(?:\[ \]|\[x\])/i.test(text)) {
+      issues.push(
+        'Tasks (or Tasks/Subtasks) section with at least one `[ ]` or `[x]` checkbox missing',
+      );
     }
   }
   return { ok: issues.length === 0, issues };
@@ -223,12 +266,45 @@ function verifyPatchRetest(state, out, ctx) {
   return { ok: issues.length === 0, issues };
 }
 
-function verifyStoryDone(state, out, _ctx) {
+function verifyStoryDone(state, out, ctx) {
   const issues = [];
   if (!out.commit_sha) issues.push('commit_sha required');
   if (!out.branch) issues.push('branch required');
   if (out.story_key && state.story_key && out.story_key !== state.story_key) {
     issues.push(`commit story_key mismatch: ${out.story_key} vs ${state.story_key}`);
+  }
+  // BMad bookkeeping: sprint-status.yaml MUST record this story as `done`.
+  // Without this check, the LLM can claim STORY_DONE while sprint-status
+  // still shows the story as `backlog`/`in-progress`, which means the next
+  // story selection picks the wrong work item.
+  if (state.story_key) {
+    const sprintStatus = readSprintStatus(ctx.fs, ctx.projectRoot);
+    if (!sprintStatus) {
+      issues.push('sprint-status.yaml missing — required to mark story done');
+    } else {
+      const status = storyStatusFromSprintStatus(sprintStatus, state.story_key);
+      if (status === null) {
+        issues.push(
+          `sprint-status.yaml has no entry for story ${state.story_key} — did create-story register it?`,
+        );
+      } else if (status !== 'done') {
+        issues.push(
+          `sprint-status.yaml shows story ${state.story_key} as '${status}', expected 'done'`,
+        );
+      }
+    }
+  }
+  // BMad bookkeeping: story file's task checkboxes must all be checked.
+  if (state.story_file_path) {
+    const text = readFileSafe(ctx.fs, state.story_file_path);
+    if (text) {
+      const unchecked = (text.match(/\[ \]/g) || []).length;
+      if (unchecked > 0) {
+        issues.push(
+          `story file has ${unchecked} unchecked task box(es) remaining — dev-story should flip all to [x]`,
+        );
+      }
+    }
   }
   return { ok: issues.length === 0, issues };
 }
@@ -251,7 +327,7 @@ function verifyRetrospective(state, _out, ctx) {
   return { ok: issues.length === 0, issues };
 }
 
-function verifyNanoQuickDev(_state, out, ctx) {
+function verifyNanoQuickDev(state, out, ctx) {
   const issues = [];
   if (typeof out.tests_run !== 'number' || out.tests_run <= 0) {
     issues.push('tests_run must be a positive number');
@@ -260,6 +336,24 @@ function verifyNanoQuickDev(_state, out, ctx) {
     issues.push('tests_failed required (number; 0 for clean)');
   }
   if (!out.commit_sha) issues.push('commit_sha required');
+  // BMad bookkeeping (nano edition): sprint-status.yaml MUST record the
+  // story as `done` after a successful quick-dev cycle. Same enforcement
+  // as the full-flow STORY_DONE phase.
+  if (state.story_key) {
+    const sprintStatus = readSprintStatus(ctx.fs, ctx.projectRoot);
+    if (!sprintStatus) {
+      issues.push('sprint-status.yaml missing — required to mark story done');
+    } else {
+      const status = storyStatusFromSprintStatus(sprintStatus, state.story_key);
+      if (status === null) {
+        issues.push(`sprint-status.yaml has no entry for story ${state.story_key}`);
+      } else if (status !== 'done') {
+        issues.push(
+          `sprint-status.yaml shows story ${state.story_key} as '${status}', expected 'done'`,
+        );
+      }
+    }
+  }
   return { ok: issues.length === 0, issues };
 }
 
