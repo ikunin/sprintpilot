@@ -112,6 +112,50 @@ describe('flatToProfile', () => {
     expect(p.session_story_limit).toBe(7);
   });
 
+  it('reuse_user_branch defaults to false; reads from git.reuse_user_branch', () => {
+    expect(flatToProfile({}, 'medium').reuse_user_branch).toBe(false);
+    const on = flatToProfile({ git: { reuse_user_branch: true } }, 'medium');
+    expect(on.reuse_user_branch).toBe(true);
+  });
+
+  it('merge_strategy defaults to stacked; honors land_as_you_go', () => {
+    expect(flatToProfile({}, 'medium').merge_strategy).toBe('stacked');
+    const land = flatToProfile({ git: { merge_strategy: 'land_as_you_go' } }, 'medium');
+    expect(land.merge_strategy).toBe('land_as_you_go');
+  });
+
+  it('land_when defaults to ci_pass; honors no_wait and ci_and_review', () => {
+    expect(flatToProfile({}, 'medium').land_when).toBe('ci_pass');
+    expect(flatToProfile({ git: { land_when: 'no_wait' } }, 'medium').land_when).toBe('no_wait');
+    expect(flatToProfile({ git: { land_when: 'ci_and_review' } }, 'medium').land_when).toBe(
+      'ci_and_review',
+    );
+  });
+
+  it('rejects invalid merge_strategy / land_when values', () => {
+    const p = flatToProfile(
+      { git: { merge_strategy: 'mystery', land_when: 'whenever' } },
+      'medium',
+    );
+    expect(p.merge_strategy).toBe('stacked');
+    expect(p.land_when).toBe('ci_pass');
+  });
+
+  it('land_wait_minutes defaults to 30, coerces integers', () => {
+    expect(flatToProfile({}, 'medium').land_wait_minutes).toBe(30);
+    expect(flatToProfile({ git: { land_wait_minutes: 60 } }, 'medium').land_wait_minutes).toBe(60);
+    expect(flatToProfile({ git: { land_wait_minutes: '15' } }, 'medium').land_wait_minutes).toBe(
+      15,
+    );
+  });
+
+  it('base_branch defaults to main; reads from git.base_branch', () => {
+    expect(flatToProfile({}, 'medium').base_branch).toBe('main');
+    expect(flatToProfile({ git: { base_branch: 'develop' } }, 'medium').base_branch).toBe(
+      'develop',
+    );
+  });
+
   it('returns the documented retry/verify budgets per profile', () => {
     for (const name of Object.keys(ORCHESTRATOR_DEFAULTS_BY_PROFILE)) {
       const p = flatToProfile({}, name);

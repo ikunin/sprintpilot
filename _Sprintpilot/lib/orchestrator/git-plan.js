@@ -21,7 +21,13 @@ function sanitizeStoryKey(key) {
   return s;
 }
 
-function branchName(profile, storyKey, epicKey) {
+// branchName(profile, storyKey, epicKey, state?)
+//   When `state?.user_branch` is set (because git.reuse_user_branch=true and
+//   the user pre-created a working branch), every story commits to that
+//   single branch — per-story/per-epic branches are NOT created.
+//   Otherwise honor profile.granularity for story/epic per-unit branches.
+function branchName(profile, storyKey, epicKey, state) {
+  if (state && state.user_branch) return state.user_branch;
   const prefix = 'story/';
   // git.granularity: 'story' (default) or 'epic'. Nano + large can be epic.
   if (profile.granularity === 'epic' && epicKey) {
@@ -40,7 +46,7 @@ function plan(state, profile, action) {
     throw new Error('git-plan.plan: action.type must be git_op');
   }
   const op = action.op;
-  const branch = branchName(profile, state.story_key, state.current_epic);
+  const branch = branchName(profile, state.story_key, state.current_epic, state);
 
   switch (op) {
     case 'commit_and_push_story':
@@ -58,7 +64,20 @@ function plan(state, profile, action) {
   }
 }
 
-function planCreateBranch(_state, profile, branch) {
+function planCreateBranch(state, profile, branch) {
+  // Branch reuse: when the user pre-created the branch, do not create a
+  // new one. Just confirm HEAD is on the right branch (idempotent switch).
+  if (state && state.user_branch) {
+    return {
+      branch,
+      steps: [
+        {
+          args: ['git', 'switch', branch],
+          description: `switch to user branch ${branch} (reuse mode)`,
+        },
+      ],
+    };
+  }
   const baseBranch = profile.base_branch || 'main';
   return {
     branch,

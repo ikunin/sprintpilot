@@ -49,6 +49,11 @@ const STATES = Object.freeze({
   PATCH_APPLY: 'patch_apply',
   PATCH_RETEST: 'patch_retest',
   STORY_DONE: 'story_done',
+  // STORY_LAND — entered only when profile.merge_strategy === 'land_as_you_go'.
+  // Composes stack-snapshot.js + land-this-pr.js to merge the just-finished
+  // story's PR into base. Skipped (STORY_DONE → EPIC_BOUNDARY_CHECK directly)
+  // under the default 'stacked' strategy.
+  STORY_LAND: 'story_land',
   EPIC_BOUNDARY_CHECK: 'epic_boundary_check',
   RETROSPECTIVE: 'retrospective',
   SPRINT_FINALIZE_PENDING: 'sprint_finalize_pending',
@@ -70,14 +75,16 @@ const FULL_FLOW_SUCCESSORS = {
   [STATES.CODE_REVIEW]: [STATES.PATCH_APPLY, STATES.STORY_DONE], // conditional
   [STATES.PATCH_APPLY]: [STATES.PATCH_RETEST],
   [STATES.PATCH_RETEST]: [STATES.CODE_REVIEW, STATES.STORY_DONE], // conditional (re-review if still blocking)
-  [STATES.STORY_DONE]: [STATES.EPIC_BOUNDARY_CHECK],
+  [STATES.STORY_DONE]: [STATES.STORY_LAND, STATES.EPIC_BOUNDARY_CHECK], // STORY_LAND only under land_as_you_go
+  [STATES.STORY_LAND]: [STATES.EPIC_BOUNDARY_CHECK],
   [STATES.EPIC_BOUNDARY_CHECK]: [STATES.RETROSPECTIVE, STATES.CREATE_STORY, STATES.SPRINT_FINALIZE_PENDING],
   [STATES.RETROSPECTIVE]: [STATES.CREATE_STORY, STATES.SPRINT_FINALIZE_PENDING],
 };
 
 const NANO_FLOW_SUCCESSORS = {
   [STATES.NANO_QUICK_DEV]: [STATES.STORY_DONE],
-  [STATES.STORY_DONE]: [STATES.EPIC_BOUNDARY_CHECK],
+  [STATES.STORY_DONE]: [STATES.STORY_LAND, STATES.EPIC_BOUNDARY_CHECK],
+  [STATES.STORY_LAND]: [STATES.EPIC_BOUNDARY_CHECK],
   [STATES.EPIC_BOUNDARY_CHECK]: [STATES.RETROSPECTIVE, STATES.NANO_QUICK_DEV, STATES.SPRINT_FINALIZE_PENDING],
   [STATES.RETROSPECTIVE]: [STATES.NANO_QUICK_DEV, STATES.SPRINT_FINALIZE_PENDING],
 };
@@ -187,6 +194,25 @@ function nextAction(state, profile) {
         story_key: state.story_key,
         profile: profile.name,
       };
+    case STATES.STORY_LAND:
+      // Land-as-you-go: orchestrator plumbing emits a `run_script` that
+      // wraps the existing stack-snapshot.js + land-this-pr.js scripts.
+      // Honors land_when (no_wait | ci_pass | ci_and_review) and
+      // land_wait_minutes from the profile.
+      return {
+        type: 'run_script',
+        phase: state.phase,
+        op: 'land_story',
+        story_key: state.story_key,
+        profile: profile.name,
+        land_when: profile.land_when || 'ci_pass',
+        land_wait_minutes:
+          typeof profile.land_wait_minutes === 'number' ? profile.land_wait_minutes : 30,
+        squash_on_merge: !!profile.squash_on_merge,
+        // The CLI edge composes the actual argv via land.js#planLand; this
+        // action only declares intent so the harness/log can see it.
+        helper: 'lib/orchestrator/land.js',
+      };
     case STATES.EPIC_BOUNDARY_CHECK:
       return {
         type: 'noop',
@@ -288,7 +314,16 @@ function deterministicNext(state, profile, output) {
       const chosen = stillBlocking ? STATES.CODE_REVIEW : STATES.STORY_DONE;
       return { chosen, allValid: [STATES.CODE_REVIEW, STATES.STORY_DONE] };
     }
-    case STATES.STORY_DONE:
+    case STATES.STORY_DONE: {
+      // Land-as-you-go: route through STORY_LAND before EPIC_BOUNDARY_CHECK.
+      // The default 'stacked' strategy skips STORY_LAND entirely.
+      const goLand =
+        profile && profile.merge_strategy === 'land_as_you_go'
+          ? STATES.STORY_LAND
+          : STATES.EPIC_BOUNDARY_CHECK;
+      return { chosen: goLand, allValid: [STATES.STORY_LAND, STATES.EPIC_BOUNDARY_CHECK] };
+    }
+    case STATES.STORY_LAND:
       return { chosen: STATES.EPIC_BOUNDARY_CHECK, allValid: [STATES.EPIC_BOUNDARY_CHECK] };
     case STATES.EPIC_BOUNDARY_CHECK: {
       const remainingInEpic = state.remaining_stories_in_epic || 0;

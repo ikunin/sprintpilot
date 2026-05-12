@@ -107,15 +107,28 @@ describe.skipIf(!HAS_CLAUDE)('Nano profile (Claude Code)', () => {
       readFileSync(join(FIXTURES_DIR, 'prd.md'), 'utf-8'),
     );
 
-    // Force nano profile.
+    // Force nano profile. Write + verify the change actually stuck — the
+    // installer's seed sometimes lands a `complexity_profile: medium` line
+    // that a naive regex replace misses. After writing, read back and
+    // assert. If the assertion fails the test setup explodes loudly
+    // instead of silently running under the wrong profile.
     const autopilotCfg = join(project.dir, '_Sprintpilot/modules/autopilot/config.yaml');
     let body = existsSync(autopilotCfg) ? readFileSync(autopilotCfg, 'utf-8') : 'autopilot:\n';
-    if (/complexity_profile:/.test(body)) {
-      body = body.replace(/complexity_profile:\s*\w+/, 'complexity_profile: nano');
+    if (/^[ \t]*complexity_profile:/m.test(body)) {
+      body = body.replace(
+        /^([ \t]*)complexity_profile:[ \t]*[^\n]+$/m,
+        '$1complexity_profile: nano',
+      );
     } else {
       body = body.replace(/^autopilot:/m, 'autopilot:\n  complexity_profile: nano');
     }
     writeFileSync(autopilotCfg, body);
+    const verifyBody = readFileSync(autopilotCfg, 'utf-8');
+    if (!/^[ \t]*complexity_profile:[ \t]*nano\b/m.test(verifyBody)) {
+      throw new Error(
+        `[Nano setup] complexity_profile: nano did not stick in ${autopilotCfg}.\nGot:\n${verifyBody}`,
+      );
+    }
 
     console.log(`[Nano] Temp project: ${project.dir}`);
   });
@@ -251,10 +264,15 @@ describe.skipIf(!HAS_CLAUDE)('Nano profile (Claude Code)', () => {
     }
     const status = readYaml(statusPath) as Record<string, unknown>;
     const block = (status.development_status ?? status.stories) as
-      | Record<string, string>
+      | Record<string, string | { status?: string }>
       | undefined;
     if (!block) return;
-    const remaining = Object.entries(block).filter(([, v]) => v !== 'done');
+    // Sprint-status entries can be either inline `key: done` (string) or
+    // block-form `key:\n  status: done\n  title: ...` (object). Both mean done.
+    const remaining = Object.entries(block).filter(([, v]) => {
+      const statusStr = typeof v === 'string' ? v : v?.status;
+      return statusStr !== 'done';
+    });
     expect(remaining, `stories not done: ${JSON.stringify(remaining)}`).toEqual([]);
   });
 });

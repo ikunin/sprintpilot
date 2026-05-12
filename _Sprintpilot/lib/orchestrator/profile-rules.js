@@ -16,6 +16,8 @@ const VALID_PROFILE_NAMES = ['nano', 'small', 'medium', 'large', 'legacy'];
 const VALID_FLOWS = ['full', 'quick'];
 const VALID_RETRO_MODES = ['auto', 'stop', 'skip'];
 const VALID_GRANULARITIES = ['story', 'epic'];
+const VALID_MERGE_STRATEGIES = ['stacked', 'land_as_you_go'];
+const VALID_LAND_WHENS = ['no_wait', 'ci_pass', 'ci_and_review'];
 
 // Per-profile defaults for fields the orchestrator manages directly
 // (verify_reject_budget, retry_budget_per_action). These are orchestrator-
@@ -81,6 +83,18 @@ function flatToProfile(resolved, profileName) {
     granularity: coerceEnum(get(resolved, 'git.granularity'), VALID_GRANULARITIES, 'story'),
     worktree_enabled: coerceBool(get(resolved, 'git.worktree.enabled'), true),
     squash_on_merge: coerceBool(get(resolved, 'git.squash_on_merge'), false),
+    reuse_user_branch: coerceBool(get(resolved, 'git.reuse_user_branch'), false),
+    merge_strategy: coerceEnum(
+      get(resolved, 'git.merge_strategy'),
+      VALID_MERGE_STRATEGIES,
+      'stacked',
+    ),
+    land_when: coerceEnum(get(resolved, 'git.land_when'), VALID_LAND_WHENS, 'ci_pass'),
+    land_wait_minutes: coerceInt(get(resolved, 'git.land_wait_minutes'), 30),
+    base_branch:
+      typeof get(resolved, 'git.base_branch') === 'string'
+        ? get(resolved, 'git.base_branch')
+        : 'main',
     parallel_stories: coerceBool(get(resolved, 'ma.parallel_stories'), false),
     max_parallel_stories: coerceInt(get(resolved, 'ma.max_parallel_stories'), 2),
     fallback_on_tests_fail: coerceBool(
@@ -141,6 +155,8 @@ module.exports = {
   VALID_FLOWS,
   VALID_RETRO_MODES,
   VALID_GRANULARITIES,
+  VALID_MERGE_STRATEGIES,
+  VALID_LAND_WHENS,
   ORCHESTRATOR_DEFAULTS_BY_PROFILE,
   flatToProfile,
   escalateOnFailure,

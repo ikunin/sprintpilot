@@ -232,10 +232,38 @@ describe('nextStateAfterSuccess — deterministic transitions', () => {
     ).toBe(STATES.CODE_REVIEW);
   });
 
-  it('STORY_DONE → EPIC_BOUNDARY_CHECK', () => {
+  it('STORY_DONE → EPIC_BOUNDARY_CHECK (default stacked strategy)', () => {
     expect(nextStateAfterSuccess(baseState(STATES.STORY_DONE), p, { status: 'success' })).toBe(
       STATES.EPIC_BOUNDARY_CHECK,
     );
+  });
+
+  it('STORY_DONE → STORY_LAND when merge_strategy=land_as_you_go', () => {
+    const landProfile = { ...p, merge_strategy: 'land_as_you_go' } as Profile;
+    expect(
+      nextStateAfterSuccess(baseState(STATES.STORY_DONE), landProfile, { status: 'success' }),
+    ).toBe(STATES.STORY_LAND);
+  });
+
+  it('STORY_LAND → EPIC_BOUNDARY_CHECK', () => {
+    expect(nextStateAfterSuccess(baseState(STATES.STORY_LAND), p, { status: 'success' })).toBe(
+      STATES.EPIC_BOUNDARY_CHECK,
+    );
+  });
+
+  it('STORY_LAND emits run_script action with land_when forwarded', () => {
+    const landProfile = {
+      ...p,
+      merge_strategy: 'land_as_you_go',
+      land_when: 'no_wait',
+      land_wait_minutes: 10,
+    } as Profile;
+    const action = nextAction(baseState(STATES.STORY_LAND), landProfile);
+    expect(action.type).toBe('run_script');
+    expect(action.op).toBe('land_story');
+    expect(action.land_when).toBe('no_wait');
+    expect(action.land_wait_minutes).toBe(10);
+    expect(action.helper).toBe('lib/orchestrator/land.js');
   });
 
   it('EPIC_BOUNDARY_CHECK end-of-epic → RETROSPECTIVE (mode auto)', () => {

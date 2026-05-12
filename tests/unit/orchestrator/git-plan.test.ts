@@ -136,6 +136,66 @@ describe('plan: create_branch', () => {
     expect(r.steps[0].args[1]).toBe('switch');
     expect(r.steps[0].args[2]).toBe('-c');
   });
+
+  it('reuse_user_branch + state.user_branch: skips -c, just switches', () => {
+    const state = story({ user_branch: 'feature/auth-rewrite' });
+    const r = plan(
+      state,
+      { ...flatToProfile({}, 'medium'), reuse_user_branch: true },
+      { type: 'git_op', op: 'create_branch' },
+    );
+    expect(r.branch).toBe('feature/auth-rewrite');
+    expect(r.steps).toHaveLength(1);
+    expect(r.steps[0].args).toEqual(['git', 'switch', 'feature/auth-rewrite']);
+    expect(r.steps[0].args).not.toContain('-c');
+  });
+});
+
+describe('branch reuse: single user branch carries every story', () => {
+  it('commit_and_push targets the user branch (not story/<key>)', () => {
+    const state = story({ user_branch: 'feature/auth-rewrite' });
+    const r = plan(state, flatToProfile({}, 'medium'), {
+      type: 'git_op',
+      op: 'commit_and_push_story',
+    });
+    expect(r.branch).toBe('feature/auth-rewrite');
+    // Push step targets the user branch.
+    const push = r.steps.find((s) => s.args.includes('push'));
+    expect(push?.args).toContain('feature/auth-rewrite');
+  });
+
+  it('reuse overrides epic granularity', () => {
+    const state = story({ user_branch: 'feature/multi-epic' });
+    const p = {
+      ...flatToProfile({ git: { granularity: 'epic' } }, 'nano'),
+      reuse_user_branch: true,
+    };
+    const r = plan(state, p, { type: 'git_op', op: 'commit_and_push_story' });
+    expect(r.branch).toBe('feature/multi-epic');
+    // Branch should NOT match the epic/<key> pattern.
+    expect(r.branch).not.toMatch(/^epic\//);
+  });
+
+  it('no story branch created when reusing — security invariant holds (no shell chars)', () => {
+    const state = story({ user_branch: 'feature/x-y_z.0' });
+    const r = plan(state, flatToProfile({}, 'medium'), {
+      type: 'git_op',
+      op: 'commit_and_push_story',
+    });
+    for (const s of r.steps) {
+      for (const a of s.args) {
+        expect(a).not.toMatch(/[$`;&|<>]/);
+      }
+    }
+  });
+
+  it('without user_branch in state, falls back to story/<key>', () => {
+    const r = plan(story(), flatToProfile({}, 'medium'), {
+      type: 'git_op',
+      op: 'commit_and_push_story',
+    });
+    expect(r.branch).toBe('story/s1.2');
+  });
 });
 
 describe('plan: fetch / push', () => {

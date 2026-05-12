@@ -34,7 +34,7 @@ orchestrator emits it.
 
 | `action.type`     | What you do                                                                                      |
 |-------------------|--------------------------------------------------------------------------------------------------|
-| `invoke_skill`    | Run the named BMad skill. Pass `action.template_slots` as context — DO read `prior_diagnosis`, `relevant_decisions`, and `prior_signals_summary`. |
+| `invoke_skill`    | Run the named BMad skill **verbatim from its own body** (e.g. `bmad-create-story`, `bmad-quick-dev`, `bmad-code-review`). `action.template_slots` is a parameter bag (story_key, prior_diagnosis, relevant_decisions, prior_signals_summary, …) — it's input context for BMad's skill, NOT a replacement for the skill's instructions. When `implementation_flow=quick`, you'll receive `invoke_skill: bmad-quick-dev` per story — follow BMad's `step-oneshot.md`. |
 | `run_script`      | Execute `action.command` via the host's shell-equivalent. Argv-only — no shell interpolation.    |
 | `git_op`          | Perform `action.op` (commit_and_push_story, merge, etc.) per `action.profile`'s git policy.      |
 | `parallel_batch`  | Dispatch each child action concurrently (M6+ hosts only — fall back to sequential otherwise).    |
@@ -68,20 +68,12 @@ Plus recoverable kinds the orchestrator handles deterministically:
 ## Decision audit channel
 
 Include `decisions[]` on ANY signal to log small judgment calls without
-round-tripping through `propose_alternative`. Each decision:
-
-```json
-{
-  "category": "test-strategy",        // architecture | test-strategy | dependency | review-triage | review-accept | halt-recovery | scope | workaround
-  "impact": "low",                    // low | medium | high
-  "phase": "dev-story:RED",
-  "decision": "use vitest for new tests",
-  "rationale": "matches repo convention"
-}
-```
-
-The orchestrator stamps id + timestamp + story automatically and appends
-to `_bmad-output/implementation-artifacts/decision-log.yaml`.
+round-tripping through `propose_alternative`. Each entry has
+`category` (one of: architecture, test-strategy, dependency,
+review-triage, review-accept, halt-recovery, scope, workaround), `impact`
+(low/medium/high), `phase` (e.g. `dev-story:RED`), `decision`, and
+`rationale`. The orchestrator stamps id + timestamp + story
+automatically and appends to `decision-log.yaml`.
 
 ## Code-review triage
 
@@ -122,6 +114,26 @@ expectations.
 After N consecutive verify rejections on the same state (profile-
 configured budget), the orchestrator escalates to `user_prompt`.
 
+## Git workflow knobs
+
+These knobs in `_Sprintpilot/modules/git/config.yaml` change what the
+orchestrator emits as `git_op` / `run_script` actions. Always read them
+from the action payload — do NOT improvise.
+
+| Knob | Values | Behavior |
+|---|---|---|
+| `granularity` | `story` (default) / `epic` | Per-unit branch creation (default). Suppressed when `reuse_user_branch=true`. |
+| `reuse_user_branch` | `false` (default) / `true` | If `true`, autopilot detects the current non-base branch on boot and commits **every** story onto it. No `story/*` or `epic/*` branches are created. PR is opened from this branch at sprint-end. |
+| `merge_strategy` | `stacked` (default) / `land_as_you_go` | `stacked` keeps every story-branch open until sprint-end. `land_as_you_go` runs the new `STORY_LAND` state right after STORY_DONE to merge the PR immediately. |
+| `land_when` | `no_wait` / `ci_pass` (default) / `ci_and_review` | Under `land_as_you_go`, when to merge: synchronously, after CI is green, or after CI + an approved review. |
+| `land_wait_minutes` | int (default 30) | Max wait for CI / review under `land_as_you_go`. After this the orchestrator halts and prompts. |
+
+On `STORY_LAND` rebase conflicts (base moved during the story), the
+orchestrator auto-rebases the story branch onto latest base. If the
+rebase has conflicts, the orchestrator halts with a `user_prompt`. You
+resolve conflicts manually, then resume autopilot — it retries the
+land step from `state.land_pending`.
+
 ## Resume
 
 On the next `autopilot start`, the orchestrator fingerprints
@@ -133,12 +145,7 @@ the user; let them resolve via `user_input` (`force_continue` or
 
 ## What you must NEVER do
 
-- Decide the next BMad step yourself.
-- Skip BMad steps. Step 6 patch loop is a first-class state pair; never
-  inlined into `bmad-code-review`.
-- Auto-accept a `propose_alternative` you submitted. Orchestrator decides.
-- Write `_Sprintpilot/manifest.yaml`, `autopilot-state.yaml`, or
-  `ledger.jsonl` directly. Route writes through the CLI.
-- Commit secrets, skip `git push` retries, or use `--no-verify`.
-- Drift from the typed Signal schema. The orchestrator validates every
-  field; malformed signals exit non-zero.
+- Decide the next BMad step yourself; skip step-6 patch loop; auto-accept
+  your own `propose_alternative`; write `autopilot-state.yaml` /
+  `ledger.jsonl` directly; commit secrets; use `git push --no-verify`;
+  drift from the typed Signal schema.

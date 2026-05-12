@@ -623,3 +623,47 @@ describe('code_review blocking findings — bypasses successor', () => {
     expect((r.nextAction as Record<string, unknown>).findings).toHaveLength(1);
   });
 });
+
+// ---------------------------------------------------------------- land_as_you_go routing
+
+describe('merge_strategy: land_as_you_go routes STORY_DONE → STORY_LAND', () => {
+  const LAND_MEDIUM = () => ({ ...MEDIUM(), merge_strategy: 'land_as_you_go' });
+  const STACKED_MEDIUM = () => ({ ...MEDIUM(), merge_strategy: 'stacked' });
+
+  it('stacked strategy: STORY_DONE → EPIC_BOUNDARY_CHECK', () => {
+    const r = interpretSignal(st(STATES.STORY_DONE), { status: 'success' }, STACKED_MEDIUM());
+    expect(r.newState.phase).toBe(STATES.EPIC_BOUNDARY_CHECK);
+  });
+
+  it('land_as_you_go: STORY_DONE → STORY_LAND', () => {
+    const r = interpretSignal(st(STATES.STORY_DONE), { status: 'success' }, LAND_MEDIUM());
+    expect(r.newState.phase).toBe(STATES.STORY_LAND);
+  });
+
+  it('STORY_LAND → EPIC_BOUNDARY_CHECK on success', () => {
+    const r = interpretSignal(st(STATES.STORY_LAND), { status: 'success' }, LAND_MEDIUM());
+    expect(r.newState.phase).toBe(STATES.EPIC_BOUNDARY_CHECK);
+  });
+
+  it('STORY_LAND emits run_script with land_when forwarded', () => {
+    const prof = { ...LAND_MEDIUM(), land_when: 'no_wait', land_wait_minutes: 5 };
+    const r = interpretSignal(st(STATES.STORY_DONE), { status: 'success' }, prof);
+    expect(r.newState.phase).toBe(STATES.STORY_LAND);
+    expect((r.nextAction as Record<string, unknown>).type).toBe('run_script');
+    expect((r.nextAction as Record<string, unknown>).land_when).toBe('no_wait');
+  });
+
+  it('STORY_LAND failure with rebase_conflict diagnosis → retry (orchestrator halts via halt action)', () => {
+    const r = interpretSignal(
+      st(STATES.STORY_LAND),
+      {
+        status: 'failure',
+        reason: 'rebase_conflict',
+        diagnosis: 'CONFLICT (content): Merge conflict in src/app.ts',
+        recoverable: true,
+      },
+      { ...LAND_MEDIUM(), retry_budget_per_action: 0 },
+    );
+    expect(r.verdict).toBe('prompted');
+  });
+});

@@ -4,10 +4,23 @@
 
 **Orchestrator-driven autopilot is now the default.** Flow control moves out of the 1,388-line prose workflow.md and into a deterministic Node.js state machine at `_Sprintpilot/bin/autopilot.js`. The LLM keeps in-skill execution, diagnosis, triage, and small-judgment decisions; the orchestrator owns sequencing and BMad-step enforcement.
 
-### Added
+**The orchestrator delegates to BMad skills as-is — it does NOT invent workflows or templates.** BMad owns every skill body and template (`bmad-create-story`, `bmad-quick-dev`, `bmad-code-review`, etc.). The orchestrator's `template_slots` payload is just input parameters for those skills, not a competing prose template.
+
+### Added (this release)
+- **Branch reuse: `git.reuse_user_branch: false` (default)**. When `true`, autopilot detects the current non-base branch on boot and commits **every** story onto it. No per-story or per-epic branches are created. One PR opens at sprint-end. Useful for feature-branch workflows.
+- **Land-as-you-go: `git.merge_strategy: stacked | land_as_you_go`**. Under `land_as_you_go`, the orchestrator runs a new `STORY_LAND` state right after `STORY_DONE` to merge the PR immediately instead of accumulating a stack. `git.land_when: no_wait | ci_pass | ci_and_review` (default `ci_pass`) controls when. `git.land_wait_minutes: 30` caps CI/review wait time.
+- **Rebase-on-merge-conflict recovery.** When `STORY_LAND` can't fast-forward because base moved, the orchestrator runs `git rebase origin/<base>`. On rebase conflicts the orchestrator halts with `user_prompt`; resume reads `state.land_pending` and retries.
+- **Orchestrator emits skill timing events** (`skill.<name>` start/end) into `.timings/<story>.jsonl` automatically on every `invoke_skill` action. No more LLM-driven timing calls. Makes `observedParallelism()` work for orchestrator-mode sessions. Honors `autopilot.phase_timings: false`.
+- **BMad-quick-dev via orchestrator on any profile** when `autopilot.implementation_flow: quick`. Previously nano-only.
+- **Brownfield e2e self-skips when git can't sign**. Probes a sign-less `git commit` in `beforeAll`; if rejected (e.g. sandbox environments with a code-signing hook), the whole suite skips with a clear message instead of erroring mid-setup.
+- **Nano e2e config seeding hardened**: the `complexity_profile: nano` write is verified after writing; failure to stick raises a loud setup error instead of silently running under the wrong profile.
+- **Nano sprint-status filter accepts block-form** `{ status: 'done', ... }` entries (was inline-string-only).
+
+### Added (foundation, prior commits)
+
 - **`autopilot.execution_mode: orchestrator | legacy`** in `_Sprintpilot/modules/autopilot/config.yaml`. Default flipped to `orchestrator`. Set to `legacy` to rollback to v2.0.x behavior byte-for-byte while you adapt custom skills.
 - **`_Sprintpilot/bin/autopilot.js`** CLI: `start | next | record | state | report | validate-config | status`. Emits typed Actions (`invoke_skill | run_script | git_op | parallel_batch | user_prompt | halt | noop`); consumes typed Signals (`success | failure | blocked | propose_alternative | user_input | verify_override`). Drives the 7-step BMad cycle as an explicit state machine, with step-6 (patch_apply + patch_retest) as a first-class state pair so "tests still green after patches" is enforceable.
-- **`_Sprintpilot/lib/orchestrator/`** — 14 pure modules (state-machine, adapt, profile-rules, verify, impact-classifier, decision-log, state-store, action-ledger, divergence, user-commands, user-command-applier, parallel-batch, git-plan, report) + structured-content instruction templates for the LLM.
+- **`_Sprintpilot/lib/orchestrator/`** — 15 pure modules (state-machine, adapt, profile-rules, verify, impact-classifier, decision-log, state-store, action-ledger, divergence, user-commands, user-command-applier, parallel-batch, git-plan, report, land). All BMad skills invoked as-is; no Sprintpilot-side skill templates.
 - **`_Sprintpilot/scripts/lint-test-pitfalls.js`** + **`post-green-gates.js`** — post-GREEN quality pipeline (lint-changed + test-pitfall scan + ci-parity).
 - **`_Sprintpilot/scripts/stack-snapshot.js`**, **`land-this-pr.js`**, **`auto-merge-bmad-docs.js`** — stacked-PR primitives.
 - **`_Sprintpilot/skills/sprint-autopilot-on/workflow.orchestrator.md`** — 132-line workflow consulted when `execution_mode: orchestrator`. The legacy `workflow.md` remains the source of truth for `execution_mode: legacy`; it is scheduled for removal after one release cycle.

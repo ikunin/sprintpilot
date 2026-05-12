@@ -14,6 +14,32 @@ git:
   #           story commit. Set on nano profile by default.
   granularity: story
 
+  # Reuse a user-created branch instead of auto-creating per-story or
+  # per-epic branches. When `true`, autopilot detects the current branch
+  # on boot (must NOT be base_branch) and commits every story directly
+  # onto it. Per-story / per-epic branch creation is suppressed; one PR
+  # is opened at sprint-end. Useful for feature-branch workflows where
+  # the user already has the branch they want to work on.
+  reuse_user_branch: false
+
+  # Merge strategy.
+  #   stacked        — every story branch lives until sprint completes,
+  #                    PRs are stacked (default; existing behavior).
+  #   land_as_you_go — merge each story's PR immediately after STORY_DONE
+  #                    to avoid PR pile-up. `land_when` controls when.
+  merge_strategy: stacked
+
+  # When to merge under merge_strategy: land_as_you_go.
+  #   no_wait        — merge synchronously after STORY_DONE, no CI wait.
+  #   ci_pass        — wait for `gh pr checks` (or platform equivalent)
+  #                    to report all checks green, then merge.
+  #   ci_and_review  — also wait for an `approved` PR review.
+  land_when: ci_pass
+
+  # Max minutes to wait for CI / review under land_as_you_go. After this
+  # the orchestrator halts and prompts the user.
+  land_wait_minutes: 30
+
   # Branch naming
   branch_prefix: "story/" # prefix for story branches (e.g., story/1-2-user-auth)
   max_branch_length: 60 # truncate + 6-char hash if longer

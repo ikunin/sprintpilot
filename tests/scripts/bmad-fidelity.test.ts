@@ -363,3 +363,41 @@ describe('Decision-log audit channel is honored across the full BMad cycle', () 
     }
   });
 });
+
+describe('Land-as-you-go: BMad-faithful merge integration', () => {
+  const LAND_PROFILE = () => ({ ...MEDIUM(), merge_strategy: 'land_as_you_go' });
+
+  it('default (stacked) does NOT enter STORY_LAND', () => {
+    const r = interpretSignal(st(STATES.STORY_DONE), { status: 'success' }, MEDIUM());
+    expect(r.newState.phase).toBe(STATES.EPIC_BOUNDARY_CHECK);
+  });
+
+  it('land_as_you_go threads STORY_DONE → STORY_LAND → EPIC_BOUNDARY_CHECK', () => {
+    const r1 = interpretSignal(st(STATES.STORY_DONE), { status: 'success' }, LAND_PROFILE());
+    expect(r1.newState.phase).toBe(STATES.STORY_LAND);
+    const r2 = interpretSignal(st(STATES.STORY_LAND), { status: 'success' }, LAND_PROFILE());
+    expect(r2.newState.phase).toBe(STATES.EPIC_BOUNDARY_CHECK);
+  });
+
+  it('rebase-conflict halt: failure(recoverable=true) past budget → user_prompt', () => {
+    const r = interpretSignal(
+      st(STATES.STORY_LAND, { retry_count_this_phase: 99 }),
+      {
+        status: 'failure',
+        reason: 'rebase_conflict',
+        diagnosis: 'CONFLICT (content): src/app.ts',
+        recoverable: true,
+      },
+      LAND_PROFILE(),
+    );
+    expect(r.verdict).toBe('prompted');
+    expect(r.newState.prior_diagnosis).toContain('CONFLICT');
+  });
+
+  it('rebase-conflict halt is resumable: subsequent success advances to EPIC_BOUNDARY_CHECK', () => {
+    // After user resolves, autopilot resumes STORY_LAND with a fresh success.
+    const r = interpretSignal(st(STATES.STORY_LAND), { status: 'success' }, LAND_PROFILE());
+    expect(r.newState.phase).toBe(STATES.EPIC_BOUNDARY_CHECK);
+    expect(r.verdict).toBe('advanced');
+  });
+});
