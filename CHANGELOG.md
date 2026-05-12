@@ -1,5 +1,27 @@
 # Changelog
 
+## [Unreleased]
+
+**Orchestrator-driven autopilot is now the default.** Flow control moves out of the 1,388-line prose workflow.md and into a deterministic Node.js state machine at `_Sprintpilot/bin/autopilot.js`. The LLM keeps in-skill execution, diagnosis, triage, and small-judgment decisions; the orchestrator owns sequencing and BMad-step enforcement.
+
+### Added
+- **`autopilot.execution_mode: orchestrator | legacy`** in `_Sprintpilot/modules/autopilot/config.yaml`. Default flipped to `orchestrator`. Set to `legacy` to rollback to v2.0.x behavior byte-for-byte while you adapt custom skills.
+- **`_Sprintpilot/bin/autopilot.js`** CLI: `start | next | record | state | report | validate-config | status`. Emits typed Actions (`invoke_skill | run_script | git_op | parallel_batch | user_prompt | halt | noop`); consumes typed Signals (`success | failure | blocked | propose_alternative | user_input | verify_override`). Drives the 7-step BMad cycle as an explicit state machine, with step-6 (patch_apply + patch_retest) as a first-class state pair so "tests still green after patches" is enforceable.
+- **`_Sprintpilot/lib/orchestrator/`** — 14 pure modules (state-machine, adapt, profile-rules, verify, impact-classifier, decision-log, state-store, action-ledger, divergence, user-commands, user-command-applier, parallel-batch, git-plan, report) + structured-content instruction templates for the LLM.
+- **`_Sprintpilot/scripts/lint-test-pitfalls.js`** + **`post-green-gates.js`** — post-GREEN quality pipeline (lint-changed + test-pitfall scan + ci-parity).
+- **`_Sprintpilot/scripts/stack-snapshot.js`**, **`land-this-pr.js`**, **`auto-merge-bmad-docs.js`** — stacked-PR primitives.
+- **`_Sprintpilot/skills/sprint-autopilot-on/workflow.orchestrator.md`** — 132-line workflow consulted when `execution_mode: orchestrator`. The legacy `workflow.md` remains the source of truth for `execution_mode: legacy`; it is scheduled for removal after one release cycle.
+- **`tests/scripts/autopilot-harness.test.ts`** (108 signal-state cross-product rows) and **`bmad-fidelity.test.ts`** (23 BMad-invariant scenarios) — the determinism gate.
+- **Windows + macOS** added to the CI matrix.
+
+### Preserved
+- The full BMad 7-step sequence remains mandatory. Nano profile still routes through `bmad-quick-dev` and now escalates to `small` session-scoped on `tests_failed > 0` or `severity: high` (never written to config).
+- The fresh-context sprint-finalize handoff (commit `b1b6251`) is preserved verbatim as state 10.
+- `coalesce_state_writes`, `conditional_boot_work`, `retrospective_mode`, and all other profile knobs are honored.
+
+### Rollback
+- `execution_mode: legacy` reverts byte-for-byte to v2.0.x autopilot behavior. Please open an issue if you hit an orchestrator-mode regression so it can be fixed before legacy is removed.
+
 ## [2.0.10] - 2026-04-28
 
 **Brownfield analysis now respects ignore files.** Previously, the codebase analysis skills walked the entire tree without consulting `.gitignore` or `.aiexclude`, sweeping in build artifacts, vendored code, and proprietary paths the user had explicitly hidden from AI tooling.
