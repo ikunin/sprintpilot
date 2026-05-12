@@ -81,6 +81,60 @@ function resolveProfile(projectRoot, explicit) {
   return { resolved: r.resolved, typed, source: r.source };
 }
 
+// Read autopilot.execution_mode from a resolved config tree. Default
+// 'orchestrator' (matches the current shipping default).
+function executionModeOf(resolved) {
+  if (!resolved || typeof resolved !== 'object') return 'orchestrator';
+  const m = resolved.autopilot && resolved.autopilot.execution_mode;
+  if (m === 'legacy' || m === 'orchestrator') return m;
+  return 'orchestrator';
+}
+
+// Lockdown: when execution_mode=orchestrator, the legacy 1,388-line
+// `workflow.md` is moved aside so the LLM cannot fall back to it. The
+// orchestrator-mode workflow at `workflow.orchestrator.md` is the only
+// path SKILL.md can dispatch to in practice. Idempotent — if the
+// backup already exists, just remove the live workflow.md.
+//
+// When execution_mode=legacy, the inverse: if a backup exists from a
+// prior orchestrator session, restore it; otherwise no-op.
+function lockdownLegacyWorkflow(projectRoot, mode) {
+  // Candidate skill dirs. We check both the user's `.claude/skills/`
+  // install location AND the addon source tree under `_Sprintpilot/`.
+  const candidates = [
+    path.join(projectRoot, '.claude', 'skills', 'sprint-autopilot-on'),
+    path.join(projectRoot, '_Sprintpilot', 'skills', 'sprint-autopilot-on'),
+  ];
+  const results = [];
+  for (const dir of candidates) {
+    if (!fs.existsSync(dir)) continue;
+    const live = path.join(dir, 'workflow.md');
+    const backup = path.join(dir, 'workflow.legacy.md.bak');
+    try {
+      if (mode === 'orchestrator') {
+        if (fs.existsSync(live)) {
+          if (fs.existsSync(backup)) {
+            // Backup already present — just remove the live copy.
+            fs.unlinkSync(live);
+          } else {
+            fs.renameSync(live, backup);
+          }
+          results.push({ dir, action: 'moved_aside' });
+        }
+      } else {
+        // legacy mode: restore if needed.
+        if (fs.existsSync(backup) && !fs.existsSync(live)) {
+          fs.renameSync(backup, live);
+          results.push({ dir, action: 'restored' });
+        }
+      }
+    } catch (e) {
+      results.push({ dir, action: 'error', message: e.message });
+    }
+  }
+  return results;
+}
+
 function loadState(projectRoot) {
   return stateStore.read({ projectRoot });
 }
@@ -276,8 +330,24 @@ function applySideEffects(sideEffects, runtime, profile, projectRoot) {
 
 function cmdStart(opts) {
   const projectRoot = resolveProjectRoot(opts);
-  const { typed: profile } = resolveProfile(projectRoot, opts.profile);
+  const { typed: profile, resolved } = resolveProfile(projectRoot, opts.profile);
   const persisted = loadState(projectRoot);
+
+  // Lockdown: when execution_mode=orchestrator (the v2.1+ default), move
+  // the legacy `workflow.md` aside so the LLM under `/sprint-autopilot-on`
+  // has only `workflow.orchestrator.md` available. This was the missing
+  // piece from the prior iteration — live-LLM runs were silently falling
+  // back to the legacy workflow even with execution_mode=orchestrator set.
+  const mode = executionModeOf(resolved);
+  const lockResults = lockdownLegacyWorkflow(projectRoot, mode);
+  for (const r of lockResults) {
+    if (r.action !== 'error') {
+      ledger.append(
+        { kind: 'state_transition', detail: { legacy_workflow: r.action, dir: r.dir, mode } },
+        { projectRoot },
+      );
+    }
+  }
 
   // Resume detection: if a prior session left a fingerprint, diff.
   const lastHalt = ledger.last({ projectRoot }, 'halt');
