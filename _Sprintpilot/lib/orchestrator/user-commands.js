@@ -1,0 +1,115 @@
+// user-commands.js — validate UserCommand payloads emitted via `user_input` signals.
+//
+// The LLM watches the host chat for user interjections and translates them
+// into structured UserCommand objects. The orchestrator validates and
+// applies them.
+//
+// Pure module. No I/O.
+//
+// Command kinds (initial set; new kinds added via additive PR):
+//   skip_story        { story_key: string, reason?: string }
+//   abort_sprint      { reason?: string }
+//   force_continue    { reason?: string }
+//   override_decision { decision_id: string, new_value: string }
+//   change_profile    { profile: 'nano'|'small'|'medium'|'large'|'legacy' }
+//   pause             { reason?: string }
+//
+// Validation returns { ok: true, command } | { ok: false, errors: string[] }.
+
+'use strict';
+
+const VALID_PROFILE_NAMES = ['nano', 'small', 'medium', 'large', 'legacy'];
+
+const COMMAND_KINDS = [
+  'skip_story',
+  'abort_sprint',
+  'force_continue',
+  'override_decision',
+  'change_profile',
+  'pause',
+];
+
+const STORY_KEY_RE = /^[A-Za-z0-9._-]{1,64}$/;
+const DECISION_ID_RE = /^[A-Za-z0-9._-]{1,64}$/;
+
+function isPlainObject(v) {
+  return typeof v === 'object' && v !== null && !Array.isArray(v);
+}
+
+function nonEmptyString(v) {
+  return typeof v === 'string' && v.length > 0;
+}
+
+function validateOne(cmd) {
+  const errors = [];
+  if (!isPlainObject(cmd)) {
+    return { ok: false, errors: ['command is not an object'] };
+  }
+  if (!nonEmptyString(cmd.kind)) {
+    errors.push('missing kind');
+    return { ok: false, errors };
+  }
+  if (!COMMAND_KINDS.includes(cmd.kind)) {
+    errors.push(`unknown kind: ${cmd.kind}`);
+    return { ok: false, errors };
+  }
+
+  switch (cmd.kind) {
+    case 'skip_story': {
+      if (!nonEmptyString(cmd.story_key)) errors.push('skip_story.story_key required');
+      else if (!STORY_KEY_RE.test(cmd.story_key))
+        errors.push('skip_story.story_key must match [A-Za-z0-9._-]{1,64}');
+      if ('reason' in cmd && cmd.reason !== undefined && typeof cmd.reason !== 'string')
+        errors.push('skip_story.reason must be string when present');
+      break;
+    }
+    case 'abort_sprint':
+    case 'force_continue':
+    case 'pause': {
+      if ('reason' in cmd && cmd.reason !== undefined && typeof cmd.reason !== 'string')
+        errors.push(`${cmd.kind}.reason must be string when present`);
+      break;
+    }
+    case 'override_decision': {
+      if (!nonEmptyString(cmd.decision_id)) errors.push('override_decision.decision_id required');
+      else if (!DECISION_ID_RE.test(cmd.decision_id))
+        errors.push('override_decision.decision_id must match [A-Za-z0-9._-]{1,64}');
+      if (!nonEmptyString(cmd.new_value)) errors.push('override_decision.new_value required');
+      break;
+    }
+    case 'change_profile': {
+      if (!nonEmptyString(cmd.profile)) errors.push('change_profile.profile required');
+      else if (!VALID_PROFILE_NAMES.includes(cmd.profile))
+        errors.push(`change_profile.profile must be one of ${VALID_PROFILE_NAMES.join(',')}`);
+      break;
+    }
+    default:
+      errors.push(`unhandled kind: ${cmd.kind}`);
+  }
+
+  if (errors.length > 0) return { ok: false, errors };
+  return { ok: true, command: cmd };
+}
+
+// validate(commands) — accepts a single command or an array. Returns:
+//   { ok: true, commands: UserCommand[] } when every command validates
+//   { ok: false, errors: { index, errors: string[] }[] } otherwise
+function validate(input) {
+  const list = Array.isArray(input) ? input : [input];
+  const valid = [];
+  const errors = [];
+  for (let i = 0; i < list.length; i += 1) {
+    const r = validateOne(list[i]);
+    if (r.ok) valid.push(r.command);
+    else errors.push({ index: i, errors: r.errors });
+  }
+  if (errors.length > 0) return { ok: false, errors };
+  return { ok: true, commands: valid };
+}
+
+module.exports = {
+  COMMAND_KINDS,
+  VALID_PROFILE_NAMES,
+  validate,
+  validateOne,
+};
