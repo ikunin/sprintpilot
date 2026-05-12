@@ -25,6 +25,7 @@ This fixture verifies:
 
 ## Files
 
-- `product-brief.md` — 2 epics × 2 stories each. Story dependencies
-  laid out so stories within an epic are independent (can run in
-  parallel) but the second epic depends on the first being done.
+- `prd.md` — the PRD (mandatory BMad authoring artifact). 2 epics × 2
+  stories each. Story dependencies laid out so stories within an epic are
+  independent (can run in parallel) but the second epic depends on the
+  first being done.

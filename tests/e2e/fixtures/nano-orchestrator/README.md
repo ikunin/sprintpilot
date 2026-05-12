@@ -25,5 +25,7 @@ Phase 2 ships the fixture skeleton; the live-LLM driver is Phase 7.
 
 ## Files
 
-- `product-brief.md` — single epic, three stories. Trivial logic so the
-  LLM's choices don't dominate runtime variance.
+- `prd.md` — the PRD (mandatory BMad authoring artifact). Single epic with
+  three stories. `bmad-create-architecture` and `bmad-create-epics-and-stories`
+  consume this; `bmad-create-story` derives per-story files from the epics.
+  Trivial logic so the LLM's choices don't dominate runtime variance.

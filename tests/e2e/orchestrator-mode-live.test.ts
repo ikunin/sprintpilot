@@ -65,22 +65,30 @@ describe.skipIf(!HAS_CLAUDE)('Orchestrator mode (live LLM)', () => {
     }
     writeFileSync(cfgPath, body);
 
-    // Trivial product brief so the LLM doesn't have to think hard.
-    const briefDir = join(project.dir, '_bmad-output/planning-artifacts');
-    mkdirSync(briefDir, { recursive: true });
+    // Seed the PRD (the mandatory BMad authoring artifact). The product
+    // brief is optional discovery and not what bmad-create-story consumes
+    // — epics derived from the PRD are. Trivial product so the LLM
+    // doesn't have to think hard.
+    const planningDir = join(project.dir, '_bmad-output/planning-artifacts');
+    mkdirSync(planningDir, { recursive: true });
     writeFileSync(
-      join(briefDir, 'product-brief.md'),
+      join(planningDir, 'prd.md'),
       [
-        '# Number Echo',
+        '# PRD — Number Echo',
         '',
-        'CLI that reads a number from stdin and prints it back.',
+        '## Problem',
+        'A CLI that reads a number from stdin and prints it back.',
         '',
-        '## Epic 1 — echo',
-        '- S1.1 read a positive integer from stdin; print it.',
+        '## Functional requirements',
+        '- Input 5 (followed by newline) → stdout "5", exit 0.',
+        '- Empty stdin → stderr "expected integer", exit 1.',
         '',
-        '## Acceptance Criteria',
-        '- Input 5 → output "5"',
-        '- Empty input → exit code 1',
+        '## Epic 1 — Echo',
+        '- **S1.1** read a positive integer from stdin; print it.',
+        '',
+        '## Non-functional requirements',
+        '- Single-file implementation, ≤30 LOC.',
+        '- Vitest tests.',
       ].join('\n'),
     );
 
