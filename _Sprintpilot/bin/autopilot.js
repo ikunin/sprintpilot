@@ -37,6 +37,7 @@ const ledger = require('../lib/orchestrator/action-ledger');
 const decisionLog = require('../lib/orchestrator/decision-log');
 const userCommands = require('../lib/orchestrator/user-commands');
 const divergence = require('../lib/orchestrator/divergence');
+const reportRenderer = require('../lib/orchestrator/report');
 
 const { STATES } = stateMachine;
 
@@ -350,23 +351,10 @@ function cmdState(opts) {
 
 function cmdReport(opts) {
   const projectRoot = resolveProjectRoot(opts);
+  const { typed: profile } = resolveProfile(projectRoot, opts.profile);
   const persisted = loadState(projectRoot);
   const entries = ledger.read({ projectRoot });
-  const counts = {};
-  for (const e of entries) counts[e.kind] = (counts[e.kind] || 0) + 1;
-  const out = [
-    '# Autopilot Session Report',
-    '',
-    `current_story: ${persisted.current_story || '(none)'}`,
-    `current_bmad_step: ${persisted.current_bmad_step || '(none)'}`,
-    `sprint_is_complete: ${!!persisted.sprint_is_complete}`,
-    '',
-    '## Ledger summary',
-    ...Object.keys(counts)
-      .sort()
-      .map((k) => `- ${k}: ${counts[k]}`),
-  ].join('\n');
-  process.stdout.write(`${out}\n`);
+  process.stdout.write(`${reportRenderer.render(persisted, entries, profile)}\n`);
   return 0;
 }
 
