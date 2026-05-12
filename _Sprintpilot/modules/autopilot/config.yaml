@@ -58,3 +58,16 @@ autopilot:
   # which exhausts the token/memory budget. That's why "auto" generates
   # the artifact inline instead of invoking the external skill.
   retrospective_mode: auto
+
+  # Execution mode for the autopilot loop.
+  #
+  # - "legacy"       (default) — drives via the 1,388-line prose workflow.md.
+  #                   Same byte-for-byte behavior as v2.0.x.
+  # - "orchestrator" — drives via _Sprintpilot/bin/autopilot.js with a
+  #                   typed Action/Signal protocol. The LLM owns in-skill
+  #                   execution; flow control is deterministic. See
+  #                   skills/sprint-autopilot-on/workflow.orchestrator.md.
+  #
+  # The orchestrator path is shipped behind this flag in v2.1+ so users can
+  # opt in per project before it becomes the default in a later release.
+  execution_mode: legacy
