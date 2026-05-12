@@ -7,24 +7,24 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 // @ts-expect-error — CommonJS module
 import adapterMod from '../../_Sprintpilot/scripts/agent-adapter.js';
 
-const {
-  HOSTS,
-  detect,
-  detectFromEnv,
-  detectFromFilesystem,
-  parsePsOutput,
-  parseTasklistOutput,
-} = adapterMod as {
-  HOSTS: Record<string, { supports_parallel: boolean }>;
-  detect: (opts: {
-    env?: Record<string, string | undefined>;
-    projectRoot?: string;
-  }) => { host: string; supports_parallel: boolean; detection_reason: string; confidence: string };
-  detectFromEnv: (env: Record<string, string | undefined>) => { host: string; confidence: string } | null;
-  detectFromFilesystem: (root: string) => { host: string; confidence: string; detection_reason: string } | null;
-  parsePsOutput: (raw: string) => string | null;
-  parseTasklistOutput: (raw: string) => string | null;
-};
+const { HOSTS, detect, detectFromEnv, detectFromFilesystem, parsePsOutput, parseTasklistOutput } =
+  adapterMod as {
+    HOSTS: Record<string, { supports_parallel: boolean }>;
+    detect: (opts: { env?: Record<string, string | undefined>; projectRoot?: string }) => {
+      host: string;
+      supports_parallel: boolean;
+      detection_reason: string;
+      confidence: string;
+    };
+    detectFromEnv: (
+      env: Record<string, string | undefined>,
+    ) => { host: string; confidence: string } | null;
+    detectFromFilesystem: (
+      root: string,
+    ) => { host: string; confidence: string; detection_reason: string } | null;
+    parsePsOutput: (raw: string) => string | null;
+    parseTasklistOutput: (raw: string) => string | null;
+  };
 
 const REPO_ROOT = join(__dirname, '..', '..');
 const SCRIPT = join(REPO_ROOT, '_Sprintpilot', 'scripts', 'agent-adapter.js');
@@ -40,7 +40,9 @@ afterEach(() => {
 
 describe('host capability table', () => {
   it('claude-code is the only supports_parallel=true host today', () => {
-    const parallel = Object.entries(HOSTS).filter(([, v]) => v.supports_parallel).map(([k]) => k);
+    const parallel = Object.entries(HOSTS)
+      .filter(([, v]) => v.supports_parallel)
+      .map(([k]) => k);
     expect(parallel).toEqual(['claude-code']);
   });
 });
@@ -167,7 +169,9 @@ describe('parseTasklistOutput (Windows)', () => {
     expect(parseTasklistOutput(row)).toBe('node');
   });
   it('returns null when tasklist reports no matching task', () => {
-    expect(parseTasklistOutput('INFO: No tasks are running which match the specified criteria.')).toBeNull();
+    expect(
+      parseTasklistOutput('INFO: No tasks are running which match the specified criteria.'),
+    ).toBeNull();
   });
   it('returns null on empty input', () => {
     expect(parseTasklistOutput('')).toBeNull();

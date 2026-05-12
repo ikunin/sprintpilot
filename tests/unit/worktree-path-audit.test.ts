@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
@@ -64,7 +64,9 @@ describe('PR 10 worktree-path audit', () => {
   it('workflow.md contains no worktree-context access that treats .git as a directory', () => {
     const body = readFileSync(WORKFLOW_MD, 'utf8');
     const hits = scanForBadPatterns(body);
-    expect(hits, `workflow.md contains worktree-unsafe .git paths:\n${hits.join('\n')}`).toEqual([]);
+    expect(hits, `workflow.md contains worktree-unsafe .git paths:\n${hits.join('\n')}`).toEqual(
+      [],
+    );
   });
 
   it('no Sprintpilot script treats a worktree .git as a directory', () => {

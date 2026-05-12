@@ -196,7 +196,8 @@ function main() {
     process.exit(1);
   }
   const projectRoot = opts['project-root'] || process.cwd();
-  const branchPrefix = opts['branch-prefix'] !== undefined ? String(opts['branch-prefix']) : 'story/';
+  const branchPrefix =
+    opts['branch-prefix'] !== undefined ? String(opts['branch-prefix']) : 'story/';
   const timeout = opts['lock-timeout-sec']
     ? Number.parseInt(String(opts['lock-timeout-sec']), 10)
     : DEFAULT_LOCK_TIMEOUT_SEC;

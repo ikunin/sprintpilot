@@ -249,9 +249,10 @@ function main() {
     const headerRe = /^(#{2,})\s+(tasks|subtasks)(\s*\/\s*(tasks|subtasks))?\s*$/i;
     for (let i = 0; i < lines.length; i++) {
       if (headerRe.test(lines[i])) {
-        const injection = entries.length === 0
-          ? ['', '- [ ] Implement story per Acceptance Criteria', '']
-          : ['', ...entries.map((e) => `- [ ] ${e}`), ''];
+        const injection =
+          entries.length === 0
+            ? ['', '- [ ] Implement story per Acceptance Criteria', '']
+            : ['', ...entries.map((e) => `- [ ] ${e}`), ''];
         lines.splice(i + 1, 0, ...injection);
         break;
       }

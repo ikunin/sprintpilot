@@ -115,7 +115,9 @@ function acquireMergeLock(projectRoot) {
         try {
           const st = fs.statSync(file);
           if (Date.now() - st.mtimeMs > STALE_LOCK_AGE_MS) {
-            log.warn(`merge-shards: removing stale lock ${file} (older than ${STALE_LOCK_AGE_MS}ms)`);
+            log.warn(
+              `merge-shards: removing stale lock ${file} (older than ${STALE_LOCK_AGE_MS}ms)`,
+            );
             fs.unlinkSync(file);
             continue;
           }
@@ -201,11 +203,7 @@ function shardUnchanged(file, snapshot) {
   if (!snapshot) return false;
   try {
     const st = fs.statSync(file);
-    return (
-      st.mtimeMs === snapshot.mtime &&
-      st.size === snapshot.size &&
-      st.ino === snapshot.ino
-    );
+    return st.mtimeMs === snapshot.mtime && st.size === snapshot.size && st.ino === snapshot.ino;
   } catch {
     return false;
   }
@@ -421,7 +419,11 @@ function composeStateYaml(stateMerge) {
   if (stateMerge.corrupt.length + stateMerge.invalid.length > 0) {
     doc.shard_problems = [
       ...stateMerge.corrupt.map((c) => ({ story: c.story, kind: 'parse-error', detail: c.error })),
-      ...stateMerge.invalid.map((c) => ({ story: c.story, kind: 'invalid-shape', detail: c.reason })),
+      ...stateMerge.invalid.map((c) => ({
+        story: c.story,
+        kind: 'invalid-shape',
+        detail: c.reason,
+      })),
     ];
   }
   return `${yamlDump(doc)}\n`;
@@ -435,8 +437,16 @@ function composeDecisionYaml(decisionMerge) {
   };
   if (decisionMerge.corrupt.length + decisionMerge.invalid.length > 0) {
     doc.shard_problems = [
-      ...decisionMerge.corrupt.map((c) => ({ story: c.story, kind: 'parse-error', detail: c.error })),
-      ...decisionMerge.invalid.map((c) => ({ story: c.story, kind: 'invalid-shape', detail: c.reason })),
+      ...decisionMerge.corrupt.map((c) => ({
+        story: c.story,
+        kind: 'parse-error',
+        detail: c.error,
+      })),
+      ...decisionMerge.invalid.map((c) => ({
+        story: c.story,
+        kind: 'invalid-shape',
+        detail: c.reason,
+      })),
     ];
   }
   return `${yamlDump(doc)}\n`;
@@ -460,7 +470,13 @@ function merge(projectRoot, { layerId, archive, dryRun } = {}) {
         archivedCorrupt.push({ kind: 'state', story: c.story, ...arch });
       }
       for (const c of decisions.corrupt.concat(decisions.invalid)) {
-        const arch = archiveCorrupt(projectRoot, 'decision-log', c.story, c.file, c.error || c.reason);
+        const arch = archiveCorrupt(
+          projectRoot,
+          'decision-log',
+          c.story,
+          c.file,
+          c.error || c.reason,
+        );
         archivedCorrupt.push({ kind: 'decision-log', story: c.story, ...arch });
       }
     }
@@ -468,8 +484,12 @@ function merge(projectRoot, { layerId, archive, dryRun } = {}) {
     const stateBody = composeStateYaml(state);
     const decisionBody = composeDecisionYaml(decisions);
 
-    const stateWrite = writeAuthoritative(projectRoot, 'autopilot-state.yaml', stateBody, { dryRun });
-    const decisionWrite = writeAuthoritative(projectRoot, 'decision-log.yaml', decisionBody, { dryRun });
+    const stateWrite = writeAuthoritative(projectRoot, 'autopilot-state.yaml', stateBody, {
+      dryRun,
+    });
+    const decisionWrite = writeAuthoritative(projectRoot, 'decision-log.yaml', decisionBody, {
+      dryRun,
+    });
 
     let archiveDir = null;
     let archiveSkipped = [];

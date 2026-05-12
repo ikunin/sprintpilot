@@ -204,7 +204,15 @@ describe('appendLine + buildEntry', () => {
   it('throws when a single line would exceed PIPE_BUF (atomicity guard)', () => {
     tmpRoot = mkdtempSync(join(tmpdir(), 'sp-append-big-'));
     const huge = { blob: 'x'.repeat(LINE_MAX_BYTES + 100) };
-    expect(() => appendLine(tmpRoot, 'big', { event: 'once', story: 'big', phase: 'p', ts: '2026-01-01T00:00:00.000Z', meta: huge })).toThrow(/exceeds/);
+    expect(() =>
+      appendLine(tmpRoot, 'big', {
+        event: 'once',
+        story: 'big',
+        phase: 'p',
+        ts: '2026-01-01T00:00:00.000Z',
+        meta: huge,
+      }),
+    ).toThrow(/exceeds/);
     rmSync(tmpRoot, { recursive: true, force: true });
     tmpRoot = '';
   });
@@ -224,7 +232,16 @@ describe('CLI integration', () => {
     tmpRoot = seedProjectRoot({ phaseTimings: false, profile: 'medium' });
     const res = spawnSync(
       process.execPath,
-      [SCRIPT, 'start', '--story', '1-1', '--phase', 'skill.bmad-dev-story', '--project-root', tmpRoot],
+      [
+        SCRIPT,
+        'start',
+        '--story',
+        '1-1',
+        '--phase',
+        'skill.bmad-dev-story',
+        '--project-root',
+        tmpRoot,
+      ],
       { encoding: 'utf8' },
     );
     expect(res.status).toBe(0);
@@ -239,7 +256,16 @@ describe('CLI integration', () => {
     tmpRoot = seedProjectRoot({ phaseTimings: true, profile: 'medium' });
     execFileSync(
       process.execPath,
-      [SCRIPT, 'start', '--story', '2-1-foo', '--phase', 'skill.bmad-dev-story', '--project-root', tmpRoot],
+      [
+        SCRIPT,
+        'start',
+        '--story',
+        '2-1-foo',
+        '--phase',
+        'skill.bmad-dev-story',
+        '--project-root',
+        tmpRoot,
+      ],
       { encoding: 'utf8' },
     );
     const file = join(timingsDir(tmpRoot), '2-1-foo.jsonl');
@@ -254,7 +280,16 @@ describe('CLI integration', () => {
     tmpRoot = seedProjectRoot({ phaseTimings: true });
     const res = spawnSync(
       process.execPath,
-      [SCRIPT, 'start', '--story', '../etc/passwd', '--phase', 'skill.bmad-dev-story', '--project-root', tmpRoot],
+      [
+        SCRIPT,
+        'start',
+        '--story',
+        '../etc/passwd',
+        '--phase',
+        'skill.bmad-dev-story',
+        '--project-root',
+        tmpRoot,
+      ],
       { encoding: 'utf8' },
     );
     expect(res.status).toBe(1);
@@ -410,7 +445,11 @@ describe('markPhase', () => {
         let stderr = '';
         const timer = setTimeout(() => {
           child.kill('SIGKILL');
-          reject(new Error(`spawnAsync(${story}) timed out after ${timeoutMs}ms; stderr so far: ${stderr}`));
+          reject(
+            new Error(
+              `spawnAsync(${story}) timed out after ${timeoutMs}ms; stderr so far: ${stderr}`,
+            ),
+          );
         }, timeoutMs);
         child.stdout?.on('data', (d) => {
           stdout += d.toString();
@@ -436,8 +475,12 @@ describe('markPhase', () => {
     expect(foo.status, `foo stderr: ${foo.stderr}`).toBe(0);
     expect(bar.status, `bar stderr: ${bar.stderr}`).toBe(0);
 
-    const fooLines = readFileSync(join(timingsDir(tmpRoot), '1-1-foo.jsonl'), 'utf8').trim().split('\n');
-    const barLines = readFileSync(join(timingsDir(tmpRoot), '1-2-bar.jsonl'), 'utf8').trim().split('\n');
+    const fooLines = readFileSync(join(timingsDir(tmpRoot), '1-1-foo.jsonl'), 'utf8')
+      .trim()
+      .split('\n');
+    const barLines = readFileSync(join(timingsDir(tmpRoot), '1-2-bar.jsonl'), 'utf8')
+      .trim()
+      .split('\n');
     expect(fooLines.length).toBe(1);
     expect(barLines.length).toBe(1);
     const fooEntry = JSON.parse(fooLines[0]);

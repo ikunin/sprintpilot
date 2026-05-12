@@ -77,13 +77,7 @@ describe('markAllTasksChecked', () => {
   });
 
   it('preserves `- [ ]` inside triple-tilde fenced code blocks', () => {
-    const body = [
-      '- [ ] outside',
-      '~~~md',
-      '- [ ] inside',
-      '~~~',
-      '- [ ] outside2',
-    ].join('\n');
+    const body = ['- [ ] outside', '~~~md', '- [ ] inside', '~~~', '- [ ] outside2'].join('\n');
     const out = markAllTasksChecked(body);
     expect(out).toContain('- [x] outside');
     expect(out).toContain('- [x] outside2');
@@ -91,13 +85,9 @@ describe('markAllTasksChecked', () => {
   });
 
   it('handles info strings after the fence opener', () => {
-    const body = [
-      '- [ ] before',
-      '```typescript',
-      '- [ ] inside-ts',
-      '```',
-      '- [ ] after',
-    ].join('\n');
+    const body = ['- [ ] before', '```typescript', '- [ ] inside-ts', '```', '- [ ] after'].join(
+      '\n',
+    );
     const out = markAllTasksChecked(body);
     expect(out).toContain('- [x] before');
     expect(out).toContain('- [ ] inside-ts');
@@ -157,14 +147,8 @@ describe('CLI integration', () => {
       join(implDir, 'sprint-status.yaml'),
       `development_status:\n  1-1-done-story:\n    status: done\n  1-2-todo:\n    status: ready-for-dev\n`,
     );
-    writeFileSync(
-      join(implDir, 'story-1-1-done-story.md'),
-      `# Done\n- [ ] task 1\n- [ ] task 2\n`,
-    );
-    writeFileSync(
-      join(implDir, 'story-1-2-todo.md'),
-      `# Todo\n- [ ] unfinished\n`,
-    );
+    writeFileSync(join(implDir, 'story-1-1-done-story.md'), `# Done\n- [ ] task 1\n- [ ] task 2\n`);
+    writeFileSync(join(implDir, 'story-1-2-todo.md'), `# Todo\n- [ ] unfinished\n`);
 
     const out = execFileSync(process.execPath, [
       SCRIPT,

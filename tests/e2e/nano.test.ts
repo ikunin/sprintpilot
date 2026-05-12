@@ -15,7 +15,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
@@ -215,7 +215,10 @@ describe.skipIf(!HAS_CLAUDE)('Nano profile (Claude Code)', () => {
       .filter((b) => b && !/\/epic-/.test(b));
     console.log(`[Branches] epic=${epicBranches.length} perStory=${perStory.length}`);
     expect(epicBranches.length).toBeGreaterThan(0);
-    expect(perStory.length, `per-story branches should not exist under nano: ${perStory.join(', ')}`).toBe(0);
+    expect(
+      perStory.length,
+      `per-story branches should not exist under nano: ${perStory.join(', ')}`,
+    ).toBe(0);
   });
 
   it('no worktrees were created under nano (worktree.enabled=false)', () => {
@@ -231,19 +234,25 @@ describe.skipIf(!HAS_CLAUDE)('Nano profile (Claude Code)', () => {
     const retroDir = join(project.dir, '_bmad-output/implementation-artifacts/retrospectives');
     if (!existsSync(retroDir)) return;
     const entries = readdirSync(retroDir).filter((f) => f.startsWith('epic-'));
-    expect(entries, `nano profile should not generate retrospectives: ${entries.join(', ')}`).toEqual(
-      [],
-    );
+    expect(
+      entries,
+      `nano profile should not generate retrospectives: ${entries.join(', ')}`,
+    ).toEqual([]);
   });
 
   it('sprint-status shows all stories done', () => {
-    const statusPath = join(project.dir, '_bmad-output/implementation-artifacts/sprint-status.yaml');
+    const statusPath = join(
+      project.dir,
+      '_bmad-output/implementation-artifacts/sprint-status.yaml',
+    );
     if (!existsSync(statusPath)) {
       console.warn('[Result] sprint-status.yaml missing — autopilot may have halted');
       return;
     }
     const status = readYaml(statusPath) as Record<string, unknown>;
-    const block = (status.development_status ?? status.stories) as Record<string, string> | undefined;
+    const block = (status.development_status ?? status.stories) as
+      | Record<string, string>
+      | undefined;
     if (!block) return;
     const remaining = Object.entries(block).filter(([, v]) => v !== 'done');
     expect(remaining, `stories not done: ${JSON.stringify(remaining)}`).toEqual([]);

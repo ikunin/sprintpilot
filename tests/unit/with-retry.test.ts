@@ -59,9 +59,9 @@ describe('constants + helpers', () => {
   it('DEFAULT_REF_LOCK_PATTERN matches known git ref-lock messages', () => {
     const msgs = [
       "fatal: cannot lock ref 'refs/heads/foo': Unable to create '.git/refs/heads/foo.lock': File exists",
-      "error: Reference already exists",
-      "error: failed to lock refs/heads/topic",
-      "warning: unable to unlink lock.ref",
+      'error: Reference already exists',
+      'error: failed to lock refs/heads/topic',
+      'warning: unable to unlink lock.ref',
     ];
     for (const m of msgs) {
       expect(shouldRetry(m, DEFAULT_REF_LOCK_PATTERN)).toBe(true);

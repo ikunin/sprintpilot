@@ -24,12 +24,17 @@ const {
   edgesFromOrdering: (nodes: string[]) => Array<[string, string]>;
   applyForceIndependent: (edges: Array<[string, string]>, doc: unknown) => Array<[string, string]>;
   buildEdges: (strats: string[], nodes: string[], doc: unknown) => Array<[string, string]>;
-  topoLayers: (nodes: string[], edges: Array<[string, string]>) => { layers: string[][]; cycle: string[] };
-  buildDag: (opts: {
-    projectRoot: string;
-    epic: string | null;
-    strategies: string[];
-  }) => { nodes: string[]; edges: Array<[string, string]>; layers: string[][]; width: number; cycle: string[] };
+  topoLayers: (
+    nodes: string[],
+    edges: Array<[string, string]>,
+  ) => { layers: string[][]; cycle: string[] };
+  buildDag: (opts: { projectRoot: string; epic: string | null; strategies: string[] }) => {
+    nodes: string[];
+    edges: Array<[string, string]>;
+    layers: string[][];
+    width: number;
+    cycle: string[];
+  };
   scaffoldDependenciesYaml: (
     root: string,
     epic: string,
@@ -44,7 +49,10 @@ let tmpRoot = '';
 
 function seed(projectRoot: string, status: string, deps?: string) {
   mkdirSync(join(projectRoot, '_bmad-output', 'implementation-artifacts'), { recursive: true });
-  writeFileSync(join(projectRoot, '_bmad-output', 'implementation-artifacts', 'sprint-status.yaml'), status);
+  writeFileSync(
+    join(projectRoot, '_bmad-output', 'implementation-artifacts', 'sprint-status.yaml'),
+    status,
+  );
   if (deps !== undefined) {
     mkdirSync(join(projectRoot, '_Sprintpilot', 'sprints'), { recursive: true });
     writeFileSync(join(projectRoot, '_Sprintpilot', 'sprints', 'dependencies.yaml'), deps);
@@ -112,7 +120,10 @@ epics:
 
   it('handles flow-form arrays on the value side', () => {
     const doc = parseDependenciesYaml(`stories:\n  a:\n    depends_on: ["x","y"]\n`);
-    expect((doc.stories as Record<string, { depends_on: string[] }>).a.depends_on).toEqual(['x', 'y']);
+    expect((doc.stories as Record<string, { depends_on: string[] }>).a.depends_on).toEqual([
+      'x',
+      'y',
+    ]);
   });
 
   it('strips trailing comments', () => {
@@ -126,8 +137,8 @@ describe('edgesFromExplicit', () => {
   it('emits edges dep → key for every declared depends_on', () => {
     const doc = {
       stories: {
-        'b': { depends_on: ['a'] },
-        'c': { depends_on: ['a', 'b'] },
+        b: { depends_on: ['a'] },
+        c: { depends_on: ['a', 'b'] },
       },
     };
     const edges = edgesFromExplicit(doc, ['a', 'b', 'c']);
@@ -149,7 +160,10 @@ describe('edgesFromExplicit', () => {
   it('honors overrides.force_sequential', () => {
     const doc = { overrides: [{ force_sequential: ['a', 'b', 'c'] }] };
     const edges = edgesFromExplicit(doc, ['a', 'b', 'c']);
-    expect(edges).toEqual([['a', 'b'], ['b', 'c']]);
+    expect(edges).toEqual([
+      ['a', 'b'],
+      ['b', 'c'],
+    ]);
   });
 });
 
@@ -233,7 +247,10 @@ describe('buildEdges', () => {
 
 describe('buildDag — full pipeline', () => {
   it('missing sidecar → linear chain from sprint-status order', () => {
-    seed(tmpRoot, 'development_status:\n  1-1-a: ready-for-dev\n  1-2-b: backlog\n  1-3-c: backlog\n');
+    seed(
+      tmpRoot,
+      'development_status:\n  1-1-a: ready-for-dev\n  1-2-b: backlog\n  1-3-c: backlog\n',
+    );
     const dag = buildDag({ projectRoot: tmpRoot, epic: '1', strategies: ['explicit', 'ordering'] });
     expect(dag.nodes).toEqual(['1-1-a', '1-2-b', '1-3-c']);
     expect(dag.layers).toEqual([['1-1-a'], ['1-2-b'], ['1-3-c']]);
@@ -268,7 +285,11 @@ describe('buildDag — full pipeline', () => {
       tmpRoot,
       'development_status:\n  auth-1-login: ready-for-dev\n  auth-2-logout: backlog\n  infra-1-bootstrap: backlog\n',
     );
-    const dag = buildDag({ projectRoot: tmpRoot, epic: 'auth', strategies: ['explicit', 'ordering'] });
+    const dag = buildDag({
+      projectRoot: tmpRoot,
+      epic: 'auth',
+      strategies: ['explicit', 'ordering'],
+    });
     expect(dag.nodes).toEqual(['auth-1-login', 'auth-2-logout']);
   });
 
@@ -276,19 +297,13 @@ describe('buildDag — full pipeline', () => {
     // Pre-2.0.8: a 4-space-indented file silently produced zero stories
     // because the regex hardcoded a 2-space match. Now the first key's
     // indent is auto-detected per block.
-    seed(
-      tmpRoot,
-      'development_status:\n    1-1-a: ready-for-dev\n    1-2-b: backlog\n',
-    );
+    seed(tmpRoot, 'development_status:\n    1-1-a: ready-for-dev\n    1-2-b: backlog\n');
     const dag = buildDag({ projectRoot: tmpRoot, epic: '1', strategies: ['explicit', 'ordering'] });
     expect(dag.nodes).toEqual(['1-1-a', '1-2-b']);
   });
 
   it('reads stories from a tab-indented sprint-status file', () => {
-    seed(
-      tmpRoot,
-      'development_status:\n\t1-1-a: ready-for-dev\n\t1-2-b: backlog\n',
-    );
+    seed(tmpRoot, 'development_status:\n\t1-1-a: ready-for-dev\n\t1-2-b: backlog\n');
     const dag = buildDag({ projectRoot: tmpRoot, epic: '1', strategies: ['explicit', 'ordering'] });
     expect(dag.nodes).toEqual(['1-1-a', '1-2-b']);
   });
@@ -371,9 +386,13 @@ describe('CLI integration', () => {
       'development_status:\n  1-1-a: backlog\n  1-2-b: backlog\n',
       'version: 1\nstories:\n  1-1-a:\n    depends_on:\n      - 1-2-b\n  1-2-b:\n    depends_on:\n      - 1-1-a\n',
     );
-    const res = spawnSync(process.execPath, [SCRIPT, 'layers', '--epic', '1', '--project-root', tmpRoot], {
-      encoding: 'utf8',
-    });
+    const res = spawnSync(
+      process.execPath,
+      [SCRIPT, 'layers', '--epic', '1', '--project-root', tmpRoot],
+      {
+        encoding: 'utf8',
+      },
+    );
     expect(res.status).toBe(1);
     expect(res.stderr).toMatch(/cycle detected/);
   });

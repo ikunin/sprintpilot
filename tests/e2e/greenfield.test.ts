@@ -161,9 +161,7 @@ function isGameComplete(dir: string): boolean {
       .replace(/`(?:\\.|[^`\\])*`/g, '``');
   }
 
-  const code = srcFiles
-    .map((f) => stripCommentsAndStrings(readFileSync(f, 'utf-8')))
-    .join('\n');
+  const code = srcFiles.map((f) => stripCommentsAndStrings(readFileSync(f, 'utf-8'))).join('\n');
 
   // Require an actual identifier used as a function/const/method/class —
   // e.g. `function checkWin`, `checkWin(`, `const winner =`, `class Board`.
@@ -187,8 +185,7 @@ function isGameComplete(dir: string): boolean {
       identifierRe('board').test(code) ||
       identifierRe('grid').test(code),
     hasMoveLogic:
-      identifierRe('(make|place|apply|do)?move').test(code) ||
-      identifierRe('placemark').test(code),
+      identifierRe('(make|place|apply|do)?move').test(code) || identifierRe('placemark').test(code),
   };
 
   const complete = Object.values(features).every(Boolean);
@@ -320,7 +317,12 @@ describe('Greenfield: Tic Tac Toe via Sprintpilot', () => {
           // OR current_bmad_step == sprint-complete (step 10 set this).
           // A released lock with sprint-finalize-pending is the midway
           // checkpoint — we must loop and run the fresh finalize session.
-          if (!lockHeld && !finalizePending && savedStep !== 'sprint-complete' && !existsSync(stateFilePath)) {
+          if (
+            !lockHeld &&
+            !finalizePending &&
+            savedStep !== 'sprint-complete' &&
+            !existsSync(stateFilePath)
+          ) {
             console.log(`[Session ${session}] Sprint finalization complete (state cleaned) — done`);
             break;
           }
@@ -386,7 +388,9 @@ describe('Greenfield: Tic Tac Toe via Sprintpilot', () => {
         // run is debuggable without keepOnFail. This exits its OK-path too.
         if (result.json?.result) {
           const msg = result.json.result.replace(/\s+/g, ' ').slice(0, 400);
-          console.log(`[Session ${session}] LLM final: ${msg}${result.json.result.length > 400 ? '…' : ''}`);
+          console.log(
+            `[Session ${session}] LLM final: ${msg}${result.json.result.length > 400 ? '…' : ''}`,
+          );
         }
         // Also dump the full transcript to a per-session file next to the
         // project dir (preserved across cleanup unless we delete it).
@@ -395,7 +399,10 @@ describe('Greenfield: Tic Tac Toe via Sprintpilot', () => {
           const { writeFileSync: writeDbg } = require('node:fs') as typeof import('node:fs');
           const { tmpdir: dbgTmp } = require('node:os') as typeof import('node:os');
           const dbgPath = join(dbgTmp(), `sp-greenfield-session-${session}.json`);
-          writeDbg(dbgPath, JSON.stringify(result.json ?? { stdout: result.stdout.slice(0, 8000) }, null, 2));
+          writeDbg(
+            dbgPath,
+            JSON.stringify(result.json ?? { stdout: result.stdout.slice(0, 8000) }, null, 2),
+          );
           console.log(`[Session ${session}] Dump: ${dbgPath}`);
         } catch {
           /* debug-only — never block */

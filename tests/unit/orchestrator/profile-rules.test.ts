@@ -9,7 +9,10 @@ const { flatToProfile, escalateOnFailure, ORCHESTRATOR_DEFAULTS_BY_PROFILE } = p
     profile: Record<string, unknown>,
     signalOutput: unknown,
   ) => Record<string, unknown>;
-  ORCHESTRATOR_DEFAULTS_BY_PROFILE: Record<string, { retry_budget_per_action: number; verify_reject_budget: number }>;
+  ORCHESTRATOR_DEFAULTS_BY_PROFILE: Record<
+    string,
+    { retry_budget_per_action: number; verify_reject_budget: number }
+  >;
 };
 
 describe('flatToProfile', () => {
@@ -112,8 +115,12 @@ describe('flatToProfile', () => {
   it('returns the documented retry/verify budgets per profile', () => {
     for (const name of Object.keys(ORCHESTRATOR_DEFAULTS_BY_PROFILE)) {
       const p = flatToProfile({}, name);
-      expect(p.retry_budget_per_action).toBe(ORCHESTRATOR_DEFAULTS_BY_PROFILE[name].retry_budget_per_action);
-      expect(p.verify_reject_budget).toBe(ORCHESTRATOR_DEFAULTS_BY_PROFILE[name].verify_reject_budget);
+      expect(p.retry_budget_per_action).toBe(
+        ORCHESTRATOR_DEFAULTS_BY_PROFILE[name].retry_budget_per_action,
+      );
+      expect(p.verify_reject_budget).toBe(
+        ORCHESTRATOR_DEFAULTS_BY_PROFILE[name].verify_reject_budget,
+      );
     }
   });
 });
@@ -143,10 +150,7 @@ describe('escalateOnFailure', () => {
   });
 
   it('escalates nano to fallback_target on severity=high', () => {
-    const p = flatToProfile(
-      { autopilot: { nano: { fallback_target: 'large' } } },
-      'nano',
-    );
+    const p = flatToProfile({ autopilot: { nano: { fallback_target: 'large' } } }, 'nano');
     const next = escalateOnFailure(p, { severity: 'high' });
     expect(next.name).toBe('large');
     expect(next.implementation_flow).toBe('full');
@@ -155,10 +159,7 @@ describe('escalateOnFailure', () => {
   });
 
   it('does not escalate when the relevant fallback flag is disabled', () => {
-    const p = flatToProfile(
-      { autopilot: { nano: { fallback_on_tests_fail: false } } },
-      'nano',
-    );
+    const p = flatToProfile({ autopilot: { nano: { fallback_on_tests_fail: false } } }, 'nano');
     expect(escalateOnFailure(p, { tests_failed: 5 })).toBe(p);
   });
 

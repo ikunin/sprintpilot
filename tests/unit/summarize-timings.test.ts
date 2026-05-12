@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -21,14 +21,25 @@ const {
   timingsDir: (root: string) => string;
   readShards: (root: string) => Array<Record<string, unknown>>;
   pairEvents: (events: unknown[]) => {
-    stories: Record<string, { first: number | null; last: number | null; phases: Record<string, number[]> }>;
+    stories: Record<
+      string,
+      { first: number | null; last: number | null; phases: Record<string, number[]> }
+    >;
     phaseAgg: Record<string, number[]>;
     onceCount: Record<string, number>;
     orphans: Array<{ story: string; phase: string }>;
   };
   aggregate: (paired: ReturnType<typeof pairEvents>) => {
     total_paired_ms: number;
-    phases: Array<{ phase: string; count: number; sum_ms: number; p50_ms: number; p95_ms: number; max_ms: number; pct_of_total: number }>;
+    phases: Array<{
+      phase: string;
+      count: number;
+      sum_ms: number;
+      p50_ms: number;
+      p95_ms: number;
+      max_ms: number;
+      pct_of_total: number;
+    }>;
     hotspots: Array<{ phase: string; pct_of_total: number }>;
     stories: Array<{ story: string; wall_ms: number }>;
     once_markers: Record<string, number>;
@@ -143,7 +154,14 @@ describe('pairEvents', () => {
     const events = [
       { event: 'duration', story: 's', phase: 'p', duration_ms: 100, _ms: 1000 },
       { event: 'duration', story: 's', phase: 'p', duration_ms: 0, clock_skew: true, _ms: 2000 },
-      { event: 'duration', story: 's', phase: 'p', duration_ms: 0, over_threshold: true, _ms: 3000 },
+      {
+        event: 'duration',
+        story: 's',
+        phase: 'p',
+        duration_ms: 0,
+        over_threshold: true,
+        _ms: 3000,
+      },
       { event: 'duration', story: 's', phase: 'p', duration_ms: 200, _ms: 4000 },
     ];
     const p = pairEvents(events);
@@ -208,8 +226,22 @@ describe('pairEvents', () => {
     // defensive validation. `=== true` strict comparison would silently
     // let the malformed record poison p50/p95/max.
     const events = [
-      { event: 'duration', story: 's', phase: 'p', duration_ms: 9_999_999, clock_skew: 1, _ms: 1000 },
-      { event: 'duration', story: 's', phase: 'p', duration_ms: 9_999_999, over_threshold: 'yes', _ms: 2000 },
+      {
+        event: 'duration',
+        story: 's',
+        phase: 'p',
+        duration_ms: 9_999_999,
+        clock_skew: 1,
+        _ms: 1000,
+      },
+      {
+        event: 'duration',
+        story: 's',
+        phase: 'p',
+        duration_ms: 9_999_999,
+        over_threshold: 'yes',
+        _ms: 2000,
+      },
       { event: 'duration', story: 's', phase: 'p', duration_ms: 100, _ms: 3000 }, // valid baseline
     ];
     const p = pairEvents(events);
@@ -312,7 +344,14 @@ describe('renderers', () => {
     const pairedAnomaly = pairEvents([
       { event: 'duration', story: 's', phase: 'p', duration_ms: 100, _ms: 1000 },
       { event: 'duration', story: 's', phase: 'p', duration_ms: 0, clock_skew: true, _ms: 2000 },
-      { event: 'duration', story: 's', phase: 'p', duration_ms: 0, over_threshold: true, _ms: 3000 },
+      {
+        event: 'duration',
+        story: 's',
+        phase: 'p',
+        duration_ms: 0,
+        over_threshold: true,
+        _ms: 3000,
+      },
     ]);
     const reportAnomaly = aggregate(pairedAnomaly);
     const text = renderText(reportAnomaly);

@@ -34,12 +34,7 @@ export function gitSafe(args: string[], dir: string): string {
  * intentionally minimal — we only need keys, not statuses.
  */
 export function readSprintStoryKeys(projectRoot: string): Set<string> {
-  const file = join(
-    projectRoot,
-    '_bmad-output',
-    'implementation-artifacts',
-    'sprint-status.yaml',
-  );
+  const file = join(projectRoot, '_bmad-output', 'implementation-artifacts', 'sprint-status.yaml');
   if (!existsSync(file)) return new Set();
   const raw = readFileSync(file, 'utf-8');
   const keys = new Set<string>();
@@ -68,12 +63,12 @@ export function readSprintStoryKeys(projectRoot: string): Set<string> {
     if (itemIndent < 0) itemIndent = indent;
     if (indent !== itemIndent) continue;
     // Capture key — handles `key:`, `"key":`, `'key':`, `- id: key`.
-    const list = content.match(/^-\s+(?:id|key|name)\s*:\s*["']?([A-Za-z0-9][A-Za-z0-9_.\-]*)["']?/);
+    const list = content.match(/^-\s+(?:id|key|name)\s*:\s*["']?([A-Za-z0-9][A-Za-z0-9_.-]*)["']?/);
     if (list) {
       keys.add(list[1]);
       continue;
     }
-    const dict = content.match(/^["']?([A-Za-z0-9][A-Za-z0-9_.\-]*)["']?\s*:/);
+    const dict = content.match(/^["']?([A-Za-z0-9][A-Za-z0-9_.-]*)["']?\s*:/);
     if (dict) keys.add(dict[1]);
   }
   return keys;

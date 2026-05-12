@@ -3,9 +3,9 @@ import { describe, expect, it } from 'vitest';
 // @ts-expect-error — CommonJS module
 import adapt from '../../../_Sprintpilot/lib/orchestrator/adapt.js';
 // @ts-expect-error — CommonJS module
-import sm from '../../../_Sprintpilot/lib/orchestrator/state-machine.js';
-// @ts-expect-error — CommonJS module
 import profileRules from '../../../_Sprintpilot/lib/orchestrator/profile-rules.js';
+// @ts-expect-error — CommonJS module
+import sm from '../../../_Sprintpilot/lib/orchestrator/state-machine.js';
 
 type Action = Record<string, unknown>;
 type SideEffect = Record<string, unknown>;
@@ -86,13 +86,18 @@ describe('success — happy path', () => {
       medium(),
     );
     expect(r.newState.phase).toBe(STATES.PATCH_APPLY);
-    expect(r.newState.patch_findings).toEqual([{ id: 'F1', action: 'patch', rationale: 'fix lint' }]);
+    expect(r.newState.patch_findings).toEqual([
+      { id: 'F1', action: 'patch', rationale: 'fix lint' },
+    ]);
   });
 
   it('CODE_REVIEW with blocking finding → user_prompt', () => {
     const r = interpretSignal(
       st(STATES.CODE_REVIEW),
-      { status: 'success', output: { findings: [{ id: 'B1', action: 'block', rationale: 'arch decision' }] } },
+      {
+        status: 'success',
+        output: { findings: [{ id: 'B1', action: 'block', rationale: 'arch decision' }] },
+      },
       medium(),
     );
     expect(r.verdict).toBe('prompted');
@@ -103,12 +108,10 @@ describe('success — happy path', () => {
 
 describe('success — verify.js trust boundary', () => {
   it('rejects success when verify.js fails; retries within budget', () => {
-    const r = interpretSignal(
-      st(STATES.DEV_RED),
-      { status: 'success' },
-      medium(),
-      { ok: false, issues: ['no failing tests'] },
-    );
+    const r = interpretSignal(st(STATES.DEV_RED), { status: 'success' }, medium(), {
+      ok: false,
+      issues: ['no failing tests'],
+    });
     expect(r.verdict).toBe('retry');
     expect(r.newState.verify_reject_count).toBe(1);
     expect(r.newState.phase).toBe(STATES.DEV_RED); // same phase
@@ -331,13 +334,18 @@ describe('verify_override', () => {
   it('accepted override → treats as success', () => {
     const r = interpretSignal(
       st(STATES.DEV_RED),
-      { status: 'verify_override', evidence: { decision_log_ref: 'DEC-007', explanation: 'renamed' } },
+      {
+        status: 'verify_override',
+        evidence: { decision_log_ref: 'DEC-007', explanation: 'renamed' },
+      },
       medium(),
       { ok: true },
     );
     expect(r.verdict).toBe('advanced');
     expect(r.newState.phase).toBe(STATES.DEV_GREEN);
-    expect(r.sideEffects).toContainEqual(expect.objectContaining({ kind: 'log_verify_override', accepted: true }));
+    expect(r.sideEffects).toContainEqual(
+      expect.objectContaining({ kind: 'log_verify_override', accepted: true }),
+    );
   });
 
   it('rejected override → falls back to failure(recoverable=true)', () => {
@@ -392,8 +400,6 @@ describe('input validation', () => {
   });
 
   it('throws on unknown signal status', () => {
-    expect(() =>
-      interpretSignal(st(STATES.DEV_RED), { status: 'mystery' }, medium()),
-    ).toThrow();
+    expect(() => interpretSignal(st(STATES.DEV_RED), { status: 'mystery' }, medium())).toThrow();
   });
 });

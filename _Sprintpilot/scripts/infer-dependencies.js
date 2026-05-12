@@ -137,7 +137,11 @@ function validateEnvelope(envelope, { projectRoot, epic }) {
     return { valid: false, errors };
   }
   if (envelope.version !== 1) {
-    push({ code: 'schema', field: 'version', message: `expected version === 1, got ${JSON.stringify(envelope.version)}` });
+    push({
+      code: 'schema',
+      field: 'version',
+      message: `expected version === 1, got ${JSON.stringify(envelope.version)}`,
+    });
   }
   if (typeof envelope.epic !== 'string' || envelope.epic !== String(epic)) {
     push({
@@ -149,10 +153,23 @@ function validateEnvelope(envelope, { projectRoot, epic }) {
   const deps = envelope.dependencies;
   const rationale = envelope.rationale;
   if (deps === undefined || deps === null || typeof deps !== 'object' || Array.isArray(deps)) {
-    push({ code: 'schema', field: 'dependencies', message: 'must be an object of { storyKey: [depKey, ...] }' });
+    push({
+      code: 'schema',
+      field: 'dependencies',
+      message: 'must be an object of { storyKey: [depKey, ...] }',
+    });
   }
-  if (rationale === undefined || rationale === null || typeof rationale !== 'object' || Array.isArray(rationale)) {
-    push({ code: 'schema', field: 'rationale', message: 'must be an object of { storyKey: "string" }' });
+  if (
+    rationale === undefined ||
+    rationale === null ||
+    typeof rationale !== 'object' ||
+    Array.isArray(rationale)
+  ) {
+    push({
+      code: 'schema',
+      field: 'rationale',
+      message: 'must be an object of { storyKey: "string" }',
+    });
   }
   // Stop here on root-level shape failures — the per-key checks below assume valid containers.
   if (errors.length > 0) return { valid: false, errors };
@@ -163,15 +180,27 @@ function validateEnvelope(envelope, { projectRoot, epic }) {
   for (const key of Object.keys(deps)) {
     const arr = deps[key];
     if (!Array.isArray(arr)) {
-      push({ code: 'schema', field: `dependencies.${key}`, message: 'must be an array of story keys' });
+      push({
+        code: 'schema',
+        field: `dependencies.${key}`,
+        message: 'must be an array of story keys',
+      });
       continue;
     }
     if (!validKeys.has(key)) {
-      push({ code: 'unknown-key', key, message: `story "${key}" not present in sprint-status.yaml for epic ${epic}` });
+      push({
+        code: 'unknown-key',
+        key,
+        message: `story "${key}" not present in sprint-status.yaml for epic ${epic}`,
+      });
     }
     for (const dep of arr) {
       if (typeof dep !== 'string') {
-        push({ code: 'schema', field: `dependencies.${key}[]`, message: `dep entries must be strings, got ${JSON.stringify(dep)}` });
+        push({
+          code: 'schema',
+          field: `dependencies.${key}[]`,
+          message: `dep entries must be strings, got ${JSON.stringify(dep)}`,
+        });
         continue;
       }
       if (dep === key) {
@@ -189,13 +218,21 @@ function validateEnvelope(envelope, { projectRoot, epic }) {
         continue;
       }
       if (!validKeys.has(dep)) {
-        push({ code: 'unknown-key', key: dep, message: `dependency "${dep}" of "${key}" not in sprint-status.yaml` });
+        push({
+          code: 'unknown-key',
+          key: dep,
+          message: `dependency "${dep}" of "${key}" not in sprint-status.yaml`,
+        });
       }
     }
     // Rationale required for every declared key.
     const r = rationale[key];
     if (typeof r !== 'string' || r.trim() === '') {
-      push({ code: 'schema', field: `rationale.${key}`, message: 'rationale required for every key in dependencies (non-empty string)' });
+      push({
+        code: 'schema',
+        field: `rationale.${key}`,
+        message: 'rationale required for every key in dependencies (non-empty string)',
+      });
     }
   }
 
@@ -218,7 +255,11 @@ function validateEnvelope(envelope, { projectRoot, epic }) {
     }
     const { cycle } = topoLayers(allKeys, edges);
     if (cycle.length > 0) {
-      push({ code: 'cycle', nodes: cycle.slice().sort(), message: `cyclic dependency among: ${cycle.slice().sort().join(', ')}` });
+      push({
+        code: 'cycle',
+        nodes: cycle.slice().sort(),
+        message: `cyclic dependency among: ${cycle.slice().sort().join(', ')}`,
+      });
     }
   }
 
@@ -255,10 +296,16 @@ function mergeDoc(envelope, existing) {
     };
   }
   // overrides + epics: preserved from existing if present, else empty defaults.
-  const overrides = existing && existing.doc && Array.isArray(existing.doc.overrides) ? existing.doc.overrides : [];
-  const epics = existing && existing.doc && existing.doc.epics && typeof existing.doc.epics === 'object' && !Array.isArray(existing.doc.epics)
-    ? existing.doc.epics
-    : {};
+  const overrides =
+    existing && existing.doc && Array.isArray(existing.doc.overrides) ? existing.doc.overrides : [];
+  const epics =
+    existing &&
+    existing.doc &&
+    existing.doc.epics &&
+    typeof existing.doc.epics === 'object' &&
+    !Array.isArray(existing.doc.epics)
+      ? existing.doc.epics
+      : {};
   return { version: 1, stories, overrides, epics };
 }
 
@@ -342,16 +389,17 @@ function renderYaml(doc, hash) {
       }
       const first = ovKeys[0];
       const firstVal = ov[first];
-      if (Array.isArray(firstVal) || (typeof firstVal !== 'object' || firstVal === null)) {
+      if (Array.isArray(firstVal) || typeof firstVal !== 'object' || firstVal === null) {
         lines.push(`  - ${first}: ${inlineScalar(firstVal)}`);
       } else {
         lines.push(`  - ${first}:`);
-        for (const sk of Object.keys(firstVal)) lines.push(`      ${sk}: ${inlineScalar(firstVal[sk])}`);
+        for (const sk of Object.keys(firstVal))
+          lines.push(`      ${sk}: ${inlineScalar(firstVal[sk])}`);
       }
       for (let i = 1; i < ovKeys.length; i++) {
         const k = ovKeys[i];
         const v = ov[k];
-        if (Array.isArray(v) || (typeof v !== 'object' || v === null)) {
+        if (Array.isArray(v) || typeof v !== 'object' || v === null) {
           lines.push(`    ${k}: ${inlineScalar(v)}`);
         } else {
           lines.push(`    ${k}:`);
@@ -465,7 +513,10 @@ async function runDryRun(projectRoot, epic) {
     envelope = JSON.parse(stdin);
   } catch (e) {
     process.stdout.write(
-      JSON.stringify({ valid: false, errors: [{ code: 'schema', field: 'root', message: `invalid JSON: ${e.message}` }] }) + '\n',
+      JSON.stringify({
+        valid: false,
+        errors: [{ code: 'schema', field: 'root', message: `invalid JSON: ${e.message}` }],
+      }) + '\n',
     );
     return 1;
   }
@@ -477,7 +528,9 @@ async function runDryRun(projectRoot, epic) {
   const existing = readExisting(projectRoot);
   const merged = mergeDoc(envelope, existing);
   const diff = diffCounts(existing.doc, merged);
-  process.stdout.write(JSON.stringify({ valid: true, errors: [], merged_doc: merged, diff }) + '\n');
+  process.stdout.write(
+    JSON.stringify({ valid: true, errors: [], merged_doc: merged, diff }) + '\n',
+  );
   return 0;
 }
 
@@ -502,7 +555,10 @@ async function runWrite(projectRoot, epic, { force }) {
     envelope = JSON.parse(stdin);
   } catch (e) {
     process.stdout.write(
-      JSON.stringify({ valid: false, errors: [{ code: 'schema', field: 'root', message: `invalid JSON: ${e.message}` }] }) + '\n',
+      JSON.stringify({
+        valid: false,
+        errors: [{ code: 'schema', field: 'root', message: `invalid JSON: ${e.message}` }],
+      }) + '\n',
     );
     return 1;
   }
@@ -569,7 +625,8 @@ async function main() {
   try {
     if (command === 'scaffold-prompt') process.exit(await runScaffoldPrompt(projectRoot, epic));
     if (command === 'dry-run') process.exit(await runDryRun(projectRoot, epic));
-    if (command === 'write') process.exit(await runWrite(projectRoot, epic, { force: opts.force === true }));
+    if (command === 'write')
+      process.exit(await runWrite(projectRoot, epic, { force: opts.force === true }));
   } catch (e) {
     log.error(`unexpected error: ${e.stack || e.message}`);
     process.exit(1);

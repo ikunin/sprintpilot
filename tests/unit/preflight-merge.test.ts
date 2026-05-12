@@ -16,7 +16,11 @@ const { parseEpics, pairs, preflight, PREFLIGHT_BRANCH } = preflightMod as {
     base: string;
     branchPrefix: string;
     lockTimeoutSec: number;
-  }) => { safe_pairs: Array<[string, string]>; conflict_pairs: Array<[string, string]>; checked: number };
+  }) => {
+    safe_pairs: Array<[string, string]>;
+    conflict_pairs: Array<[string, string]>;
+    checked: number;
+  };
   PREFLIGHT_BRANCH: string;
 };
 
@@ -165,8 +169,12 @@ describe('preflight — safe vs conflict pairs', () => {
       lockTimeoutSec: 5,
     });
     expect(r.checked).toBe(3);
-    expect(r.conflict_pairs.some(([a, b]) => (a === '1' && b === '3') || (a === '3' && b === '1'))).toBe(true);
-    expect(r.safe_pairs.some(([a, b]) => (a === '1' && b === '2') || (a === '2' && b === '3'))).toBe(true);
+    expect(
+      r.conflict_pairs.some(([a, b]) => (a === '1' && b === '3') || (a === '3' && b === '1')),
+    ).toBe(true);
+    expect(
+      r.safe_pairs.some(([a, b]) => (a === '1' && b === '2') || (a === '2' && b === '3')),
+    ).toBe(true);
   });
 });
 

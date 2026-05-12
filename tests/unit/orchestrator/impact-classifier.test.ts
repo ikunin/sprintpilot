@@ -32,7 +32,11 @@ describe('classifyImpact', () => {
   });
 
   it('classifies whitelist-only arg diff as low', () => {
-    const planned = { type: 'invoke_skill', skill: 'x', args: { story_key: 'S1', retry_budget: 2 } };
+    const planned = {
+      type: 'invoke_skill',
+      skill: 'x',
+      args: { story_key: 'S1', retry_budget: 2 },
+    };
     const alt = { type: 'invoke_skill', skill: 'x', args: { story_key: 'S1', retry_budget: 3 } };
     expect(classifyImpact(planned, alt)).toBe('low');
   });

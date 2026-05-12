@@ -9,7 +9,11 @@ import portable from '../../_Sprintpilot/scripts/git-portable.js';
 
 const { countWorktrees, configGet, commonDir, safeAdd } = portable as {
   countWorktrees: (root: string) => number;
-  configGet: (root: string, key: string, opts: { defaultValue: string; scope: string | null }) => string;
+  configGet: (
+    root: string,
+    key: string,
+    opts: { defaultValue: string; scope: string | null },
+  ) => string;
   commonDir: (root: string) => { ok: boolean; value?: string; error?: string };
   safeAdd: (root: string, paths: string[]) => { added: string[]; skipped: string[] };
 };
@@ -212,11 +216,9 @@ describe('CLI', () => {
   it('common-dir exits 1 on non-repo', () => {
     const nonRepo = mkdtempSync(join(tmpdir(), 'sp-non-repo-'));
     try {
-      const res = spawnSync(
-        process.execPath,
-        [SCRIPT, 'common-dir', '--project-root', nonRepo],
-        { encoding: 'utf8' },
-      );
+      const res = spawnSync(process.execPath, [SCRIPT, 'common-dir', '--project-root', nonRepo], {
+        encoding: 'utf8',
+      });
       expect(res.status).toBe(1);
     } finally {
       rmSync(nonRepo, { recursive: true, force: true });

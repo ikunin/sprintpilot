@@ -575,7 +575,14 @@ function deepAssign(target, source) {
   for (const k of Object.keys(source)) {
     const sv = source[k];
     const tv = out[k];
-    if (sv && typeof sv === 'object' && !Array.isArray(sv) && tv && typeof tv === 'object' && !Array.isArray(tv)) {
+    if (
+      sv &&
+      typeof sv === 'object' &&
+      !Array.isArray(sv) &&
+      tv &&
+      typeof tv === 'object' &&
+      !Array.isArray(tv)
+    ) {
       out[k] = deepAssign(tv, sv);
     } else {
       out[k] = sv;

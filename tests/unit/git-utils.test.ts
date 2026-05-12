@@ -4,10 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import {
-  getLatestStoryBranch,
-  readSprintStoryKeys,
-} from '../e2e/harness/git-utils.js';
+import { getLatestStoryBranch, readSprintStoryKeys } from '../e2e/harness/git-utils.js';
 
 let tmpRoot = '';
 
@@ -72,7 +69,9 @@ development_status:
   });
 
   it('extracts list-form keys (- id: <key>)', () => {
-    seedSprintStatus(`development_status:\n  - id: "1-1-foo"\n    status: ready-for-dev\n  - id: "1-2-bar"\n    status: backlog\n`);
+    seedSprintStatus(
+      `development_status:\n  - id: "1-1-foo"\n    status: ready-for-dev\n  - id: "1-2-bar"\n    status: backlog\n`,
+    );
     expect(readSprintStoryKeys(tmpRoot)).toEqual(new Set(['1-1-foo', '1-2-bar']));
   });
 
@@ -98,7 +97,9 @@ describe('getLatestStoryBranch', () => {
     // story/1-2-cli-interface-and-game-flow on the local repo with a
     // very recent commit. This sprint's story-status only mentions
     // sudoku stories; the leftover must NOT win the sort.
-    seedSprintStatus(`development_status:\n  2-1-board-renderer:\n    status: ready-for-dev\n  2-2-input-handler:\n    status: backlog\n`);
+    seedSprintStatus(
+      `development_status:\n  2-1-board-renderer:\n    status: ready-for-dev\n  2-2-input-handler:\n    status: backlog\n`,
+    );
     makeBranchWithCommit('story/1-2-cli-interface-and-game-flow'); // older
     makeBranchWithCommit('story/2-1-board-renderer'); // current sprint
     // Leftover from a prior run, latest commit overall

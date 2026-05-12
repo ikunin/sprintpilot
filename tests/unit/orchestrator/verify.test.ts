@@ -2,11 +2,10 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-
-// @ts-expect-error — CommonJS module
-import verifyMod from '../../../_Sprintpilot/lib/orchestrator/verify.js';
 // @ts-expect-error — CommonJS module
 import sm from '../../../_Sprintpilot/lib/orchestrator/state-machine.js';
+// @ts-expect-error — CommonJS module
+import verifyMod from '../../../_Sprintpilot/lib/orchestrator/verify.js';
 
 const { verify, verifyWithOverride } = verifyMod as {
   verify: (
@@ -53,7 +52,11 @@ function makeReviewFile(): string {
 describe('verify CREATE_STORY', () => {
   it('ok when story file exists with front-matter and AC bullets', () => {
     const path = makeStoryFile(`---\nstory_key: S1\n---\n\n## Acceptance Criteria\n- AC1\n- AC2\n`);
-    const r = verify({ phase: STATES.CREATE_STORY, story_key: 'S1', story_file_path: path }, {}, { projectRoot });
+    const r = verify(
+      { phase: STATES.CREATE_STORY, story_key: 'S1', story_file_path: path },
+      {},
+      { projectRoot },
+    );
     expect(r.ok).toBe(true);
   });
 
@@ -68,7 +71,11 @@ describe('verify CREATE_STORY', () => {
 
   it('fails when AC section is missing', () => {
     const path = makeStoryFile(`---\nstory_key: S1\n---\n\nsome body\n`);
-    const r = verify({ phase: STATES.CREATE_STORY, story_key: 'S1', story_file_path: path }, {}, { projectRoot });
+    const r = verify(
+      { phase: STATES.CREATE_STORY, story_key: 'S1', story_file_path: path },
+      {},
+      { projectRoot },
+    );
     expect(r.ok).toBe(false);
     expect(r.issues.join(' ')).toContain('Acceptance Criteria');
   });
@@ -124,7 +131,11 @@ describe('verify DEV_RED', () => {
   });
 
   it('fails when test_files missing', () => {
-    const r = verify({ phase: STATES.DEV_RED }, {}, { projectRoot, runner: () => ({ exit_code: 1 }) });
+    const r = verify(
+      { phase: STATES.DEV_RED },
+      {},
+      { projectRoot, runner: () => ({ exit_code: 1 }) },
+    );
     expect(r.ok).toBe(false);
   });
 });
@@ -158,7 +169,11 @@ describe('verify DEV_GREEN', () => {
   });
 
   it('fails when tests_run is missing or zero', () => {
-    const r1 = verify({ phase: STATES.DEV_GREEN }, {}, { projectRoot, runner: () => ({ exit_code: 0 }) });
+    const r1 = verify(
+      { phase: STATES.DEV_GREEN },
+      {},
+      { projectRoot, runner: () => ({ exit_code: 0 }) },
+    );
     expect(r1.ok).toBe(false);
     const r2 = verify(
       { phase: STATES.DEV_GREEN },
@@ -289,20 +304,12 @@ describe('verify RETROSPECTIVE', () => {
     const dir = join(projectRoot, '_bmad-output', 'retrospectives');
     mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, 'E1.md'), 'retro', 'utf8');
-    const r = verify(
-      { phase: STATES.RETROSPECTIVE, current_epic: 'E1' },
-      {},
-      { projectRoot },
-    );
+    const r = verify({ phase: STATES.RETROSPECTIVE, current_epic: 'E1' }, {}, { projectRoot });
     expect(r.ok).toBe(true);
   });
 
   it('fails when retro artifact missing', () => {
-    const r = verify(
-      { phase: STATES.RETROSPECTIVE, current_epic: 'E1' },
-      {},
-      { projectRoot },
-    );
+    const r = verify({ phase: STATES.RETROSPECTIVE, current_epic: 'E1' }, {}, { projectRoot });
     expect(r.ok).toBe(false);
   });
 });

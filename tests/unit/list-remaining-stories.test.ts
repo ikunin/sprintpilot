@@ -245,7 +245,9 @@ describe('CLI integration', () => {
   });
 
   it('exits 2 when the status file is missing (pre-planning signal)', () => {
-    const res = spawnSync(process.execPath, [SCRIPT, '--status-file', tmpFile], { encoding: 'utf8' });
+    const res = spawnSync(process.execPath, [SCRIPT, '--status-file', tmpFile], {
+      encoding: 'utf8',
+    });
     expect(res.status).toBe(2);
     expect(res.stdout.trim()).toBe('[]');
   });
@@ -283,10 +285,7 @@ describe('CLI integration', () => {
   });
 
   it('envelope: state=sprint-complete when everything is done', () => {
-    writeFileSync(
-      tmpFile,
-      `development_status:\n  1-1-a:\n    status: done\n  1-2-b: Done\n`,
-    );
+    writeFileSync(tmpFile, `development_status:\n  1-1-a:\n    status: done\n  1-2-b: Done\n`);
     const out = execFileSync(process.execPath, [
       SCRIPT,
       '--status-file',

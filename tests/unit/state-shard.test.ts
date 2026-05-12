@@ -40,8 +40,17 @@ const {
   shardPath: (root: string, story: string, kind: string) => string;
   shardDir: (root: string, kind: string) => string;
   readShard: (root: string, story: string, kind: string) => Record<string, unknown> | null;
-  writeShardAtomic: (root: string, story: string, kind: string, obj: Record<string, unknown>) => string;
-  appendToListAtPath: (o: Record<string, unknown>, p: string, e: unknown) => Record<string, unknown>;
+  writeShardAtomic: (
+    root: string,
+    story: string,
+    kind: string,
+    obj: Record<string, unknown>,
+  ) => string;
+  appendToListAtPath: (
+    o: Record<string, unknown>,
+    p: string,
+    e: unknown,
+  ) => Record<string, unknown>;
   listShardStories: (root: string, kind: string) => string[];
   stripTrailingComment: (s: string) => string;
   firstTopLevelColon: (s: string) => number;
@@ -179,7 +188,10 @@ describe('writeShardAtomic + readShard', () => {
     expect(loaded).not.toBeNull();
     expect(loaded!.story).toBe('1-1-foo');
     expect(loaded!.schema_version).toBe(1);
-    expect(loaded!.updated_at).toMatchObject({ wall: expect.any(String), monotonic: expect.any(String) });
+    expect(loaded!.updated_at).toMatchObject({
+      wall: expect.any(String),
+      monotonic: expect.any(String),
+    });
     expect(loaded!.status).toBe('in-progress');
     expect(loaded!.files).toEqual(['a.ts']);
   });

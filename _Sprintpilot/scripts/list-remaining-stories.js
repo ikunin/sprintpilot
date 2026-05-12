@@ -83,7 +83,7 @@ function leadingIndent(line) {
 // {key, value} or null. Handles trailing `# comment`.
 function parseKV(content) {
   const m = content.match(
-    /^["']?([A-Za-z0-9][A-Za-z0-9_.\-]*)["']?\s*:\s*(\S[^#]*?)?(?:\s*#.*)?\s*$/,
+    /^["']?([A-Za-z0-9][A-Za-z0-9_.-]*)["']?\s*:\s*(\S[^#]*?)?(?:\s*#.*)?\s*$/,
   );
   if (!m) return null;
   return { key: m[1], value: m[2] ? stripQuotes(m[2].trim()) : '' };

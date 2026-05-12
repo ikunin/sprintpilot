@@ -9,7 +9,9 @@ import decisionLog from '../../../_Sprintpilot/lib/orchestrator/decision-log.js'
 const { validateOne, validateMany, append, nextSeq, VALID_CATEGORIES, VALID_IMPACTS } =
   decisionLog as {
     validateOne: (d: unknown) => { ok: true; decision: unknown } | { ok: false; errors: string[] };
-    validateMany: (ds: unknown) =>
+    validateMany: (
+      ds: unknown,
+    ) =>
       | { ok: true; decisions: unknown[] }
       | { ok: false; errors: { index: number; errors: string[] }[]; valid: unknown[] };
     append: (

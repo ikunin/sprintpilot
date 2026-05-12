@@ -568,7 +568,9 @@ function main() {
   }
 
   if (command === 'graph') {
-    process.stdout.write(`${JSON.stringify({ nodes: dag.nodes, edges: dag.edges, epic: dag.epic })}\n`);
+    process.stdout.write(
+      `${JSON.stringify({ nodes: dag.nodes, edges: dag.edges, epic: dag.epic })}\n`,
+    );
     return;
   }
   if (command === 'layers') {

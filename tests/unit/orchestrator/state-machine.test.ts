@@ -1,9 +1,8 @@
 import { describe, expect, it } from 'vitest';
-
-// @ts-expect-error — CommonJS module
-import sm from '../../../_Sprintpilot/lib/orchestrator/state-machine.js';
 // @ts-expect-error — CommonJS module
 import profileRules from '../../../_Sprintpilot/lib/orchestrator/profile-rules.js';
+// @ts-expect-error — CommonJS module
+import sm from '../../../_Sprintpilot/lib/orchestrator/state-machine.js';
 
 type Profile = Record<string, unknown>;
 type State = Record<string, unknown>;
@@ -12,7 +11,11 @@ type Action = Record<string, unknown>;
 const { STATES, nextAction, nextStateAfterSuccess, nextStoryStart, HINT_TO_PHASE } = sm as {
   STATES: Record<string, string>;
   nextAction: (state: State, profile: Profile) => Action;
-  nextStateAfterSuccess: (state: State, profile: Profile, signal: Record<string, unknown>) => string | null;
+  nextStateAfterSuccess: (
+    state: State,
+    profile: Profile,
+    signal: Record<string, unknown>,
+  ) => string | null;
   nextStoryStart: (profile: Profile) => string;
   HINT_TO_PHASE: Record<string, string>;
 };
@@ -270,18 +273,16 @@ describe('nextStateAfterSuccess — deterministic transitions', () => {
   });
 
   it('RETROSPECTIVE → next story start when sprint not complete', () => {
-    expect(
-      nextStateAfterSuccess(baseState(STATES.RETROSPECTIVE), p, { status: 'success' }),
-    ).toBe(STATES.CREATE_STORY);
+    expect(nextStateAfterSuccess(baseState(STATES.RETROSPECTIVE), p, { status: 'success' })).toBe(
+      STATES.CREATE_STORY,
+    );
   });
 
   it('RETROSPECTIVE → SPRINT_FINALIZE_PENDING when sprint complete', () => {
     expect(
-      nextStateAfterSuccess(
-        baseState(STATES.RETROSPECTIVE, { sprint_is_complete: true }),
-        p,
-        { status: 'success' },
-      ),
+      nextStateAfterSuccess(baseState(STATES.RETROSPECTIVE, { sprint_is_complete: true }), p, {
+        status: 'success',
+      }),
     ).toBe(STATES.SPRINT_FINALIZE_PENDING);
   });
 

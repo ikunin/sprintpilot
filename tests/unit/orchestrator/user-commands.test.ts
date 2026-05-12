@@ -40,7 +40,11 @@ describe('validateOne', () => {
   });
 
   it('accepts override_decision with decision_id + new_value', () => {
-    const r = validateOne({ kind: 'override_decision', decision_id: 'DEC-007', new_value: 'use vitest' });
+    const r = validateOne({
+      kind: 'override_decision',
+      decision_id: 'DEC-007',
+      new_value: 'use vitest',
+    });
     expect(r.ok).toBe(true);
   });
 

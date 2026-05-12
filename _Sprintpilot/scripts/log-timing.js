@@ -103,7 +103,10 @@ function validatePhase(s) {
 
 function validateAction(a) {
   if (!VALID_ACTIONS.includes(a)) {
-    return { ok: false, error: `invalid action '${a}': must be one of ${VALID_ACTIONS.join(', ')}` };
+    return {
+      ok: false,
+      error: `invalid action '${a}': must be one of ${VALID_ACTIONS.join(', ')}`,
+    };
   }
   return { ok: true, value: a };
 }
@@ -430,10 +433,16 @@ function main() {
       const r = markPhase(projectRoot, story.value, phase.value, meta.value);
       // Emit a brief JSON line so callers can log the duration if useful.
       // Stdout is intentionally separate from the per-story shard.
-      process.stdout.write(`${JSON.stringify({ marked: phase.value, prev_phase: r.prev_phase, duration_ms: r.duration_ms })}\n`);
+      process.stdout.write(
+        `${JSON.stringify({ marked: phase.value, prev_phase: r.prev_phase, duration_ms: r.duration_ms })}\n`,
+      );
       return;
     }
-    appendLine(projectRoot, story.value, buildEntry(action.value, story.value, phase.value, meta.value));
+    appendLine(
+      projectRoot,
+      story.value,
+      buildEntry(action.value, story.value, phase.value, meta.value),
+    );
   } catch (e) {
     log.error(`timing write failed: ${e.message}`);
     process.exit(1);

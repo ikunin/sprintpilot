@@ -7,14 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 // @ts-expect-error — CommonJS module
 import cacheMod from '../../_Sprintpilot/scripts/cached-read.js';
 
-const {
-  DEFAULT_TTL_MS,
-  cacheEntryPath,
-  readThrough,
-  invalidate,
-  clearAll,
-  stats,
-} = cacheMod as {
+const { DEFAULT_TTL_MS, cacheEntryPath, readThrough, invalidate, clearAll, stats } = cacheMod as {
   DEFAULT_TTL_MS: number;
   cacheEntryPath: (root: string, file: string) => string;
   readThrough: (
@@ -24,7 +17,11 @@ const {
   ) => { body: string | null; hit: boolean; source: string; reason?: string };
   invalidate: (root: string, file: string) => { cleared: boolean };
   clearAll: (root: string) => { cleared: number };
-  stats: (root: string) => { entries: number; oldest_age_ms: number | null; newest_age_ms: number | null };
+  stats: (root: string) => {
+    entries: number;
+    oldest_age_ms: number | null;
+    newest_age_ms: number | null;
+  };
 };
 
 const REPO_ROOT = join(__dirname, '..', '..');

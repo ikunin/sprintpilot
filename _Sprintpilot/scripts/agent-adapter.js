@@ -119,11 +119,10 @@ function parentProcessName() {
   try {
     const pid = process.ppid;
     if (process.platform === 'win32') {
-      const res = spawnSync(
-        'tasklist',
-        ['/FI', `PID eq ${pid}`, '/FO', 'CSV', '/NH'],
-        { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] },
-      );
+      const res = spawnSync('tasklist', ['/FI', `PID eq ${pid}`, '/FO', 'CSV', '/NH'], {
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+      });
       if (res.status !== 0) return null;
       return parseTasklistOutput(res.stdout || '');
     }

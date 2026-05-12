@@ -30,17 +30,13 @@
  *      npx vitest run tests/e2e/sudoku.test.ts
  */
 
-import {
-  execFileSync,
-  spawn,
-  type ChildProcess,
-} from 'node:child_process';
+import { type ChildProcess, execFileSync, spawn } from 'node:child_process';
 import {
   existsSync,
   mkdirSync,
   openSync,
-  readFileSync,
   readdirSync,
+  readFileSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
@@ -146,9 +142,7 @@ function observedParallelism(dir: string): { max: number; examples: string[] } {
     if (ev.event === 'start') {
       open.set(key, ev);
       const active = new Set(
-        [...open.values()]
-          .filter((o) => PARALLEL_RELEVANT_PHASES.has(o.phase))
-          .map((o) => o.story),
+        [...open.values()].filter((o) => PARALLEL_RELEVANT_PHASES.has(o.phase)).map((o) => o.story),
       );
       if (active.size > max) {
         max = active.size;
@@ -362,7 +356,9 @@ describe.skipIf(!HAS_CLAUDE)('Sudoku web game (parallel dispatch)', () => {
         );
         if (result.json?.result) {
           const msg = result.json.result.replace(/\s+/g, ' ').slice(0, 400);
-          console.log(`[Session ${session}] LLM final: ${msg}${result.json.result.length > 400 ? '…' : ''}`);
+          console.log(
+            `[Session ${session}] LLM final: ${msg}${result.json.result.length > 400 ? '…' : ''}`,
+          );
         }
 
         if (result.json?.is_error) {
@@ -371,7 +367,9 @@ describe.skipIf(!HAS_CLAUDE)('Sudoku web game (parallel dispatch)', () => {
         }
       }
 
-      console.log(`\n[Sudoku] Autopilot loop done after ${session} sessions, $${totalCost.toFixed(4)}`);
+      console.log(
+        `\n[Sudoku] Autopilot loop done after ${session} sessions, $${totalCost.toFixed(4)}`,
+      );
     },
     MAX_SESSIONS * (TIMEOUT_PER_SESSION + 120_000),
   );
@@ -384,7 +382,9 @@ describe.skipIf(!HAS_CLAUDE)('Sudoku web game (parallel dispatch)', () => {
       );
     }
     const body = readFileSync(depsPath, 'utf-8');
-    expect(body.split('\n')[0].trim()).toBe('# AUTO-INFERRED — regenerate via infer-dependencies.js');
+    expect(body.split('\n')[0].trim()).toBe(
+      '# AUTO-INFERRED — regenerate via infer-dependencies.js',
+    );
     expect(body).toMatch(/^# Hash: [0-9a-f]{12}$/m);
     expect(body).toMatch(/depends_on: \[".*"\]/);
   });
@@ -408,54 +408,54 @@ describe.skipIf(!HAS_CLAUDE)('Sudoku web game (parallel dispatch)', () => {
     expect(remaining, `stories not done: ${JSON.stringify(remaining)}`).toEqual([]);
   });
 
-  it(
-    'starts dev server and prints URL — game is ready for manual play',
-    async () => {
-      const codeDir = findCodeDir(project.dir);
-      console.log(`[Sudoku] Code directory: ${codeDir}`);
+  it('starts dev server and prints URL — game is ready for manual play', async () => {
+    const codeDir = findCodeDir(project.dir);
+    console.log(`[Sudoku] Code directory: ${codeDir}`);
 
-      const pkgPath = join(codeDir, 'package.json');
-      if (!existsSync(pkgPath)) {
-        throw new Error(`No package.json at ${codeDir} — autopilot may not have produced a buildable project`);
-      }
+    const pkgPath = join(codeDir, 'package.json');
+    if (!existsSync(pkgPath)) {
+      throw new Error(
+        `No package.json at ${codeDir} — autopilot may not have produced a buildable project`,
+      );
+    }
 
-      // Install deps if needed (npm install with no user-provided arguments — safe).
-      if (!existsSync(join(codeDir, 'node_modules'))) {
-        console.log('[Sudoku] Installing dependencies (npm install)...');
-        execFileSync('npm', ['install'], { cwd: codeDir, timeout: 180_000, stdio: 'inherit' });
-      }
+    // Install deps if needed (npm install with no user-provided arguments — safe).
+    if (!existsSync(join(codeDir, 'node_modules'))) {
+      console.log('[Sudoku] Installing dependencies (npm install)...');
+      execFileSync('npm', ['install'], { cwd: codeDir, timeout: 180_000, stdio: 'inherit' });
+    }
 
-      // Start the dev server detached so it survives the test exiting.
-      const logDir = join(tmpdir(), `sudoku-dev-${Date.now()}`);
-      mkdirSync(logDir, { recursive: true });
-      const logPath = join(logDir, 'dev.log');
-      const errPath = join(logDir, 'dev.err');
-      devServerLogPath = logPath;
+    // Start the dev server detached so it survives the test exiting.
+    const logDir = join(tmpdir(), `sudoku-dev-${Date.now()}`);
+    mkdirSync(logDir, { recursive: true });
+    const logPath = join(logDir, 'dev.log');
+    const errPath = join(logDir, 'dev.err');
+    devServerLogPath = logPath;
 
-      console.log('[Sudoku] Starting dev server (detached)...');
-      const child = spawn('npm', ['run', 'dev'], {
-        cwd: codeDir,
-        detached: true,
-        stdio: ['ignore', openSync(logPath, 'w'), openSync(errPath, 'w')],
-      });
-      child.unref();
-      devServer = child;
+    console.log('[Sudoku] Starting dev server (detached)...');
+    const child = spawn('npm', ['run', 'dev'], {
+      cwd: codeDir,
+      detached: true,
+      stdio: ['ignore', openSync(logPath, 'w'), openSync(errPath, 'w')],
+    });
+    child.unref();
+    devServer = child;
 
-      try {
-        devServerUrl = await waitForDevUrl(logPath, 30_000);
-      } catch (err) {
-        const errBody = existsSync(errPath) ? readFileSync(errPath, 'utf-8').slice(0, 1500) : '';
-        const logBody = existsSync(logPath) ? readFileSync(logPath, 'utf-8').slice(0, 1500) : '';
-        throw new Error(
-          `dev server failed to start.\nstdout:\n${logBody}\nstderr:\n${errBody}\noriginal: ${(err as Error).message}`,
-        );
-      }
+    try {
+      devServerUrl = await waitForDevUrl(logPath, 30_000);
+    } catch (err) {
+      const errBody = existsSync(errPath) ? readFileSync(errPath, 'utf-8').slice(0, 1500) : '';
+      const logBody = existsSync(logPath) ? readFileSync(logPath, 'utf-8').slice(0, 1500) : '';
+      throw new Error(
+        `dev server failed to start.\nstdout:\n${logBody}\nstderr:\n${errBody}\noriginal: ${(err as Error).message}`,
+      );
+    }
 
-      const sourcesDir = join(codeDir, 'src');
-      const artifactsDir = join(project.dir, '_bmad-output');
+    const sourcesDir = join(codeDir, 'src');
+    const artifactsDir = join(project.dir, '_bmad-output');
 
-      const banner = '═'.repeat(75);
-      console.log(`
+    const banner = '═'.repeat(75);
+    console.log(`
 ${banner}
 SUDOKU GAME READY — open the URL in your browser
 ${banner}
@@ -478,26 +478,24 @@ When you're done testing, run BOTH commands manually:
 ${banner}
       `);
 
-      // Sanity-check: the game's own test suite runs (advisory only).
-      try {
-        const testOut = execFileSync('npx', ['vitest', 'run'], {
-          cwd: codeDir,
-          encoding: 'utf-8',
-          timeout: 60_000,
-          stdio: ['ignore', 'pipe', 'pipe'],
-        });
-        const testsMatch = testOut.match(/Tests\s+(\d+)\s+passed/);
-        if (testsMatch) {
-          console.log(`[Sudoku] In-project test suite: ${testsMatch[1]} passed`);
-        }
-      } catch (err) {
-        console.warn(
-          `[Sudoku] In-project test suite did NOT pass cleanly: ${(err as Error).message?.slice(0, 200)}`,
-        );
+    // Sanity-check: the game's own test suite runs (advisory only).
+    try {
+      const testOut = execFileSync('npx', ['vitest', 'run'], {
+        cwd: codeDir,
+        encoding: 'utf-8',
+        timeout: 60_000,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      const testsMatch = testOut.match(/Tests\s+(\d+)\s+passed/);
+      if (testsMatch) {
+        console.log(`[Sudoku] In-project test suite: ${testsMatch[1]} passed`);
       }
-    },
-    600_000,
-  );
+    } catch (err) {
+      console.warn(
+        `[Sudoku] In-project test suite did NOT pass cleanly: ${(err as Error).message?.slice(0, 200)}`,
+      );
+    }
+  }, 600_000);
 
   it('logs parallel-dispatch evidence (advisory)', () => {
     const par = observedParallelism(project.dir);

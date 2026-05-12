@@ -173,10 +173,7 @@ describe('CLI integration', () => {
 
   it('adds checkboxes inside an existing empty Tasks section', () => {
     const f = join(tmpRoot, 'story.md');
-    writeFileSync(
-      f,
-      `# Story\n\n## Acceptance Criteria\n\n1. Alpha.\n\n## Tasks\n\n(TBD)\n`,
-    );
+    writeFileSync(f, `# Story\n\n## Acceptance Criteria\n\n1. Alpha.\n\n## Tasks\n\n(TBD)\n`);
     const out = execFileSync(process.execPath, [SCRIPT, '--story-file', f]).toString();
     expect(JSON.parse(out).action).toBe('checkboxes-added');
     expect(readFileSync(f, 'utf-8')).toContain('- [ ] Alpha.');

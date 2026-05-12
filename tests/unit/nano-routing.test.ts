@@ -52,14 +52,16 @@ describe('PR 4 — nano routing', () => {
     expect(getByDottedKey(resolved, 'autopilot.implementation_flow')).toBe('quick');
   });
 
-  it.each(['small', 'medium', 'large', 'legacy'])(
-    'non-nano profile %s resolves implementation_flow to full',
-    (profile) => {
-      tmpRoot = seedProjectRoot(profile);
-      const { resolved } = resolveProfile(tmpRoot);
-      expect(getByDottedKey(resolved, 'autopilot.implementation_flow')).toBe('full');
-    },
-  );
+  it.each([
+    'small',
+    'medium',
+    'large',
+    'legacy',
+  ])('non-nano profile %s resolves implementation_flow to full', (profile) => {
+    tmpRoot = seedProjectRoot(profile);
+    const { resolved } = resolveProfile(tmpRoot);
+    expect(getByDottedKey(resolved, 'autopilot.implementation_flow')).toBe('full');
+  });
 
   it('nano profile exposes the escalation safety-net config', () => {
     tmpRoot = seedProjectRoot('nano');

@@ -6,22 +6,23 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 // @ts-expect-error — CommonJS module
 import store from '../../../_Sprintpilot/lib/orchestrator/state-store.js';
 
-const { write, flush, read, peekPending, resetPending, resolveStatePath, CRITICAL_KEYS } = store as {
-  write: (
-    updates: Record<string, unknown>,
-    profile: Record<string, unknown>,
-    context: { projectRoot: string; story?: string },
-  ) => { mode: string; flushed: boolean };
-  flush: (
-    profile: Record<string, unknown>,
-    context: { projectRoot: string; story?: string },
-  ) => { mode: string; flushed: boolean };
-  read: (context: { projectRoot: string }) => Record<string, unknown>;
-  peekPending: (story?: string) => Record<string, unknown> | null;
-  resetPending: () => void;
-  resolveStatePath: (projectRoot: string) => string;
-  CRITICAL_KEYS: string[];
-};
+const { write, flush, read, peekPending, resetPending, resolveStatePath, CRITICAL_KEYS } =
+  store as {
+    write: (
+      updates: Record<string, unknown>,
+      profile: Record<string, unknown>,
+      context: { projectRoot: string; story?: string },
+    ) => { mode: string; flushed: boolean };
+    flush: (
+      profile: Record<string, unknown>,
+      context: { projectRoot: string; story?: string },
+    ) => { mode: string; flushed: boolean };
+    read: (context: { projectRoot: string }) => Record<string, unknown>;
+    peekPending: (story?: string) => Record<string, unknown> | null;
+    resetPending: () => void;
+    resolveStatePath: (projectRoot: string) => string;
+    CRITICAL_KEYS: string[];
+  };
 
 const NO_COALESCE = { coalesce_state_writes: false } as Record<string, unknown>;
 const COALESCE = { coalesce_state_writes: true } as Record<string, unknown>;
@@ -119,11 +120,7 @@ describe('write (coalesce path)', () => {
   });
 
   it('mixed critical + non-critical in one call writes both atomically', () => {
-    const r = write(
-      { current_story: 'S1', foo: 'bar' },
-      COALESCE,
-      { projectRoot, story: 'S1' },
-    );
+    const r = write({ current_story: 'S1', foo: 'bar' }, COALESCE, { projectRoot, story: 'S1' });
     expect(r.mode).toBe('critical');
     const state = read({ projectRoot });
     expect(state.current_story).toBe('S1');
@@ -157,8 +154,6 @@ describe('input validation', () => {
   });
 
   it('throws on missing profile', () => {
-    expect(() =>
-      write({}, null as unknown as Record<string, unknown>, { projectRoot }),
-    ).toThrow();
+    expect(() => write({}, null as unknown as Record<string, unknown>, { projectRoot })).toThrow();
   });
 });

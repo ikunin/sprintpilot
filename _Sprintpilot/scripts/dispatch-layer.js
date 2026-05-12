@@ -51,7 +51,10 @@ function help() {
 
 function parseLayer(raw) {
   if (!raw) return { ok: false, error: '--layer is required' };
-  const keys = String(raw).split(',').map((s) => s.trim()).filter(Boolean);
+  const keys = String(raw)
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
   for (const k of keys) {
     if (!STORY_RE.test(k)) {
       return { ok: false, error: `invalid story key '${k}': must match ${STORY_RE}` };
@@ -133,11 +136,10 @@ function createWorktree({ projectRoot, worktree, branch, baseBranch }) {
       stderr: first.stderr || '',
     };
   }
-  const second = spawnSync(
-    'git',
-    ['-C', projectRoot, 'worktree', 'add', worktree, branch],
-    { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] },
-  );
+  const second = spawnSync('git', ['-C', projectRoot, 'worktree', 'add', worktree, branch], {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
   return {
     created: second.status === 0,
     retried: true,
@@ -260,13 +262,15 @@ function main() {
     log.error(layer.error);
     process.exit(1);
   }
-  const maxParallel = opts['max-parallel'] !== undefined ? Number.parseInt(String(opts['max-parallel']), 10) : 2;
+  const maxParallel =
+    opts['max-parallel'] !== undefined ? Number.parseInt(String(opts['max-parallel']), 10) : 2;
   if (Number.isNaN(maxParallel) || maxParallel < 1) {
     log.error(`invalid --max-parallel '${opts['max-parallel']}': must be a positive integer`);
     process.exit(1);
   }
   const projectRoot = opts['project-root'] || process.cwd();
-  const branchPrefix = opts['branch-prefix'] !== undefined ? String(opts['branch-prefix']) : 'story/';
+  const branchPrefix =
+    opts['branch-prefix'] !== undefined ? String(opts['branch-prefix']) : 'story/';
   const baseBranch = opts['base-branch'] !== undefined ? String(opts['base-branch']) : 'main';
   const dryRun = opts['dry-run'] === true;
 

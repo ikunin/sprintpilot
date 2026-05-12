@@ -176,7 +176,12 @@ function pairEvents(events) {
   for (const key of Object.keys(openByStoryPhase)) {
     const [story, phase] = key.split('::');
     for (const startMs of openByStoryPhase[key]) {
-      orphans.push({ story, phase, event: 'start-without-end', ts: new Date(startMs).toISOString() });
+      orphans.push({
+        story,
+        phase,
+        event: 'start-without-end',
+        ts: new Date(startMs).toISOString(),
+      });
     }
   }
 
@@ -213,14 +218,21 @@ function aggregate(paired) {
   withPct.sort((a, b) => b.sum_ms - a.sum_ms);
   const hotspots = withPct.filter((r) => r.pct_of_total > HOTSPOT_THRESHOLD);
 
-  const stories = Object.keys(paired.stories).sort().map((key) => {
-    const s = paired.stories[key];
-    const wall_ms = s.first !== null && s.last !== null ? s.last - s.first : 0;
-    const phaseSum = Object.values(s.phases)
-      .flat()
-      .reduce((acc, v) => acc + v, 0);
-    return { story: key, wall_ms, phase_sum_ms: phaseSum, phase_count: Object.keys(s.phases).length };
-  });
+  const stories = Object.keys(paired.stories)
+    .sort()
+    .map((key) => {
+      const s = paired.stories[key];
+      const wall_ms = s.first !== null && s.last !== null ? s.last - s.first : 0;
+      const phaseSum = Object.values(s.phases)
+        .flat()
+        .reduce((acc, v) => acc + v, 0);
+      return {
+        story: key,
+        wall_ms,
+        phase_sum_ms: phaseSum,
+        phase_count: Object.keys(s.phases).length,
+      };
+    });
 
   return {
     total_paired_ms: totalPaired,
@@ -263,7 +275,9 @@ function renderText(report) {
   if (report.phases.length === 0) {
     lines.push('  (no paired start/end events)');
   } else {
-    lines.push('  phase                                    count    sum     p50     p95     max    %');
+    lines.push(
+      '  phase                                    count    sum     p50     p95     max    %',
+    );
     for (const r of report.phases) {
       lines.push(
         `  ${r.phase.padEnd(40)} ${String(r.count).padStart(5)}  ${fmtMs(r.sum_ms).padStart(6)}  ${fmtMs(r.p50_ms).padStart(6)}  ${fmtMs(r.p95_ms).padStart(6)}  ${fmtMs(r.max_ms).padStart(6)}  ${fmtPct(r.pct_of_total).padStart(6)}`,
@@ -318,7 +332,9 @@ function renderMarkdown(report) {
     lines.push('| Story | Wall | Phase sum | # phases |');
     lines.push('|---|---|---|---|');
     for (const s of report.stories) {
-      lines.push(`| ${s.story} | ${fmtMs(s.wall_ms)} | ${fmtMs(s.phase_sum_ms)} | ${s.phase_count} |`);
+      lines.push(
+        `| ${s.story} | ${fmtMs(s.wall_ms)} | ${fmtMs(s.phase_sum_ms)} | ${s.phase_count} |`,
+      );
     }
   }
   lines.push('');
@@ -360,7 +376,9 @@ function renderMarkdown(report) {
     lines.push('');
     lines.push('## Anomalies');
     lines.push('');
-    lines.push('_Excluded from p50/p95/max so a single skew/stale-marker doesn\'t poison aggregates._');
+    lines.push(
+      "_Excluded from p50/p95/max so a single skew/stale-marker doesn't poison aggregates._",
+    );
     lines.push('');
     lines.push('| Phase | clock_skew | over_threshold |');
     lines.push('|---|---:|---:|');

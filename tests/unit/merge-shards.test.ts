@@ -1,5 +1,13 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -29,7 +37,12 @@ const { merge, isValidShard, compareStamps } = mergeMod as {
 };
 
 const { writeShardAtomic, yamlLoad, shardPath } = shardMod as {
-  writeShardAtomic: (root: string, story: string, kind: string, obj: Record<string, unknown>) => string;
+  writeShardAtomic: (
+    root: string,
+    story: string,
+    kind: string,
+    obj: Record<string, unknown>,
+  ) => string;
   yamlLoad: (s: string) => Record<string, unknown>;
   shardPath: (root: string, story: string, kind: string) => string;
 };
@@ -123,11 +136,23 @@ describe('merge — happy paths', () => {
       entries: [{ id: 'd1', ts: '2026-04-23T00:00:00Z', category: 'arch', decision: 'x' }],
     });
     const r1 = merge(tmpRoot);
-    const body1a = readFileSync(r1.files.state, 'utf8').replace(/merged_at: "[^"]+"/, 'merged_at: <T>');
-    const body1b = readFileSync(r1.files.decisions, 'utf8').replace(/merged_at: "[^"]+"/, 'merged_at: <T>');
+    const body1a = readFileSync(r1.files.state, 'utf8').replace(
+      /merged_at: "[^"]+"/,
+      'merged_at: <T>',
+    );
+    const body1b = readFileSync(r1.files.decisions, 'utf8').replace(
+      /merged_at: "[^"]+"/,
+      'merged_at: <T>',
+    );
     const r2 = merge(tmpRoot);
-    const body2a = readFileSync(r2.files.state, 'utf8').replace(/merged_at: "[^"]+"/, 'merged_at: <T>');
-    const body2b = readFileSync(r2.files.decisions, 'utf8').replace(/merged_at: "[^"]+"/, 'merged_at: <T>');
+    const body2a = readFileSync(r2.files.state, 'utf8').replace(
+      /merged_at: "[^"]+"/,
+      'merged_at: <T>',
+    );
+    const body2b = readFileSync(r2.files.decisions, 'utf8').replace(
+      /merged_at: "[^"]+"/,
+      'merged_at: <T>',
+    );
     expect(body2a).toBe(body1a);
     expect(body2b).toBe(body1b);
   });
@@ -335,7 +360,11 @@ describe('merge — output_folder honoring', () => {
     const r = merge(tmpRoot);
     expect(r.state.stories).toBe(1);
     // Merged file landed in the configured output folder, not the default.
-    expect(existsSync(join(tmpRoot, 'build-output/implementation-artifacts/autopilot-state.yaml'))).toBe(true);
-    expect(existsSync(join(tmpRoot, '_bmad-output/implementation-artifacts/autopilot-state.yaml'))).toBe(false);
+    expect(
+      existsSync(join(tmpRoot, 'build-output/implementation-artifacts/autopilot-state.yaml')),
+    ).toBe(true);
+    expect(
+      existsSync(join(tmpRoot, '_bmad-output/implementation-artifacts/autopilot-state.yaml')),
+    ).toBe(false);
   });
 });

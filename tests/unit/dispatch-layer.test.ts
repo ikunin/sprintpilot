@@ -250,7 +250,16 @@ describe('dispatch — real git integration', () => {
     // Pre-create a worktree at the path the third dispatch will want,
     // forcing failure on story c. Successful stories a, b should be
     // rolled back so we don't leave orphan worktrees.
-    spawnSync('git', ['-C', tmpRoot, 'worktree', 'add', join(tmpRoot, '.worktrees', 'c'), '-b', 'pre-existing-c', 'main']);
+    spawnSync('git', [
+      '-C',
+      tmpRoot,
+      'worktree',
+      'add',
+      join(tmpRoot, '.worktrees', 'c'),
+      '-b',
+      'pre-existing-c',
+      'main',
+    ]);
     expect(existsSync(join(tmpRoot, '.worktrees', 'c'))).toBe(true);
 
     const r = dispatch({

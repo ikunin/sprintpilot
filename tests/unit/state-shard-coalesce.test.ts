@@ -19,13 +19,23 @@ const {
   containsCriticalKey,
 } = shardMod as {
   CRITICAL_KEYS: Set<string>;
-  batchWrite: (root: string, story: string, kind: string, partial: Record<string, unknown>) => Record<string, unknown>;
+  batchWrite: (
+    root: string,
+    story: string,
+    kind: string,
+    partial: Record<string, unknown>,
+  ) => Record<string, unknown>;
   flushPending: (root: string, story: string, kind: string) => { flushed: boolean; fields: number };
   readPending: (root: string, story: string, kind: string) => Record<string, unknown>;
   pendingPath: (root: string, story: string, kind: string) => string;
   shardPath: (root: string, story: string, kind: string) => string;
   readShard: (root: string, story: string, kind: string) => Record<string, unknown> | null;
-  writeShardAtomic: (root: string, story: string, kind: string, obj: Record<string, unknown>) => string;
+  writeShardAtomic: (
+    root: string,
+    story: string,
+    kind: string,
+    obj: Record<string, unknown>,
+  ) => string;
   containsCriticalKey: (obj: Record<string, unknown>) => boolean;
 };
 
@@ -102,8 +112,26 @@ describe('batchWrite + flushPending', () => {
 
 describe('CLI — batch + flush + critical bypass', () => {
   it('batch keeps shard empty until flush', () => {
-    execFileSync(process.execPath, [SCRIPT, 'batch', '--story', 's1', '--json', '{"a":1}', '--project-root', tmpRoot]);
-    execFileSync(process.execPath, [SCRIPT, 'batch', '--story', 's1', '--json', '{"b":2}', '--project-root', tmpRoot]);
+    execFileSync(process.execPath, [
+      SCRIPT,
+      'batch',
+      '--story',
+      's1',
+      '--json',
+      '{"a":1}',
+      '--project-root',
+      tmpRoot,
+    ]);
+    execFileSync(process.execPath, [
+      SCRIPT,
+      'batch',
+      '--story',
+      's1',
+      '--json',
+      '{"b":2}',
+      '--project-root',
+      tmpRoot,
+    ]);
     expect(existsSync(shardPath(tmpRoot, 's1', 'state'))).toBe(false);
 
     const out = execFileSync(process.execPath, [
@@ -154,8 +182,26 @@ describe('CLI — batch + flush + critical bypass', () => {
   });
 
   it('write also flushes pending so the shard never has stale buffered data', () => {
-    execFileSync(process.execPath, [SCRIPT, 'batch', '--story', 's1', '--json', '{"x":1}', '--project-root', tmpRoot]);
-    execFileSync(process.execPath, [SCRIPT, 'write', '--story', 's1', '--json', '{"y":2}', '--project-root', tmpRoot]);
+    execFileSync(process.execPath, [
+      SCRIPT,
+      'batch',
+      '--story',
+      's1',
+      '--json',
+      '{"x":1}',
+      '--project-root',
+      tmpRoot,
+    ]);
+    execFileSync(process.execPath, [
+      SCRIPT,
+      'write',
+      '--story',
+      's1',
+      '--json',
+      '{"y":2}',
+      '--project-root',
+      tmpRoot,
+    ]);
     const shard = readShard(tmpRoot, 's1', 'state')!;
     expect(shard.x).toBe(1);
     expect(shard.y).toBe(2);

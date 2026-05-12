@@ -21,7 +21,10 @@ const {
   scaffoldPrompt,
 } = inferMod as {
   AUTO_MARKER: string;
-  validateEnvelope: (env: unknown, ctx: { projectRoot: string; epic: string }) => {
+  validateEnvelope: (
+    env: unknown,
+    ctx: { projectRoot: string; epic: string },
+  ) => {
     valid: boolean;
     errors: { code: string; [k: string]: unknown }[];
   };
@@ -31,7 +34,10 @@ const {
     doc: Record<string, unknown> | null;
     raw: string | null;
   };
-  mergeDoc: (env: Record<string, unknown>, existing: { doc: Record<string, unknown> | null }) => Record<string, unknown>;
+  mergeDoc: (
+    env: Record<string, unknown>,
+    existing: { doc: Record<string, unknown> | null },
+  ) => Record<string, unknown>;
   contentHash: (doc: Record<string, unknown>) => string;
   renderYaml: (doc: Record<string, unknown>, hash: string) => string;
   inlineScalar: (v: unknown) => string;
@@ -64,7 +70,10 @@ function seedFixtureProject(): string {
     join(impl, 'sprint-status.yaml'),
     readFileSync(join(FIXTURES, 'sprint-status.minimal.yaml'), 'utf8'),
   );
-  writeFileSync(join(planning, 'epics.md'), readFileSync(join(FIXTURES, 'epics.minimal.md'), 'utf8'));
+  writeFileSync(
+    join(planning, 'epics.md'),
+    readFileSync(join(FIXTURES, 'epics.minimal.md'), 'utf8'),
+  );
   writeFileSync(
     join(planning, 'architecture.md'),
     readFileSync(join(FIXTURES, 'architecture.minimal.md'), 'utf8'),
@@ -106,7 +115,9 @@ describe('validateEnvelope', () => {
     const env = { ...loadValidEnvelope(), epic: '2' };
     const r = validateEnvelope(env, { projectRoot: tmpRoot, epic: '1' });
     expect(r.valid).toBe(false);
-    expect(r.errors.some((e) => e.code === 'schema' && (e as { field?: string }).field === 'epic')).toBe(true);
+    expect(
+      r.errors.some((e) => e.code === 'schema' && (e as { field?: string }).field === 'epic'),
+    ).toBe(true);
   });
 
   it('rejects dep array that is not an array', () => {
@@ -124,7 +135,11 @@ describe('validateEnvelope', () => {
     };
     const r = validateEnvelope(env, { projectRoot: tmpRoot, epic: '1' });
     expect(r.valid).toBe(false);
-    expect(r.errors.some((e) => e.code === 'unknown-key' && (e as { key?: string }).key === '1-99-missing')).toBe(true);
+    expect(
+      r.errors.some(
+        (e) => e.code === 'unknown-key' && (e as { key?: string }).key === '1-99-missing',
+      ),
+    ).toBe(true);
   });
 
   it('rejects unknown deps (in dep array)', () => {
@@ -135,7 +150,11 @@ describe('validateEnvelope', () => {
     };
     const r = validateEnvelope(env, { projectRoot: tmpRoot, epic: '1' });
     expect(r.valid).toBe(false);
-    expect(r.errors.some((e) => e.code === 'unknown-key' && (e as { key?: string }).key === '1-99-ghost')).toBe(true);
+    expect(
+      r.errors.some(
+        (e) => e.code === 'unknown-key' && (e as { key?: string }).key === '1-99-ghost',
+      ),
+    ).toBe(true);
   });
 
   it('rejects self-dependency', () => {
@@ -171,7 +190,12 @@ describe('validateEnvelope', () => {
     };
     const r = validateEnvelope(env, { projectRoot: tmpRoot, epic: '1' });
     expect(r.valid).toBe(false);
-    expect(r.errors.some((e) => e.code === 'schema' && (e as { field?: string }).field === 'rationale.1-2-user-profile')).toBe(true);
+    expect(
+      r.errors.some(
+        (e) =>
+          e.code === 'schema' && (e as { field?: string }).field === 'rationale.1-2-user-profile',
+      ),
+    ).toBe(true);
   });
 
   it('rejects rationale supplied for a key not in dependencies', () => {
@@ -183,7 +207,12 @@ describe('validateEnvelope', () => {
     };
     const r = validateEnvelope(env, { projectRoot: tmpRoot, epic: '1' });
     expect(r.valid).toBe(false);
-    expect(r.errors.some((e) => e.code === 'schema' && (e as { field?: string }).field === 'rationale.1-2-user-profile')).toBe(true);
+    expect(
+      r.errors.some(
+        (e) =>
+          e.code === 'schema' && (e as { field?: string }).field === 'rationale.1-2-user-profile',
+      ),
+    ).toBe(true);
   });
 
   it('rejects cycles', () => {
@@ -200,7 +229,10 @@ describe('validateEnvelope', () => {
     expect(r.valid).toBe(false);
     const cycleErr = r.errors.find((e) => e.code === 'cycle');
     expect(cycleErr).toBeTruthy();
-    expect((cycleErr as { nodes: string[] }).nodes.sort()).toEqual(['1-1-data-model', '1-2-user-profile']);
+    expect((cycleErr as { nodes: string[] }).nodes.sort()).toEqual([
+      '1-1-data-model',
+      '1-2-user-profile',
+    ]);
   });
 });
 
@@ -422,7 +454,10 @@ describe('CLI integration', () => {
       { input: JSON.stringify(loadValidEnvelope()), encoding: 'utf8' },
     );
     expect(res.status).toBe(2);
-    expect(JSON.parse(res.stdout)).toMatchObject({ wrote: false, reason: 'existing-hand-authored' });
+    expect(JSON.parse(res.stdout)).toMatchObject({
+      wrote: false,
+      reason: 'existing-hand-authored',
+    });
   });
 
   it('write --force overwrites a hand-authored file', () => {

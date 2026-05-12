@@ -27,7 +27,8 @@ const log = require('../lib/runtime/log');
 const DEFAULT_ATTEMPTS = 3;
 const DEFAULT_MIN_MS = 500;
 const DEFAULT_MAX_MS = 2000;
-const DEFAULT_REF_LOCK_PATTERN = /cannot lock ref|Unable to create.*\.lock|Reference already exists|failed to lock|lock\.ref/i;
+const DEFAULT_REF_LOCK_PATTERN =
+  /cannot lock ref|Unable to create.*\.lock|Reference already exists|failed to lock|lock\.ref/i;
 
 function help() {
   log.out(
@@ -79,7 +80,15 @@ function runOnce(cmd, args, inherit = false) {
   };
 }
 
-function runWithRetry({ cmd, args, attempts = DEFAULT_ATTEMPTS, minMs = DEFAULT_MIN_MS, maxMs = DEFAULT_MAX_MS, pattern = DEFAULT_REF_LOCK_PATTERN, onAttempt = null }) {
+function runWithRetry({
+  cmd,
+  args,
+  attempts = DEFAULT_ATTEMPTS,
+  minMs = DEFAULT_MIN_MS,
+  maxMs = DEFAULT_MAX_MS,
+  pattern = DEFAULT_REF_LOCK_PATTERN,
+  onAttempt = null,
+}) {
   const actualAttempts = Math.max(1, attempts | 0);
   let last = null;
   for (let i = 0; i < actualAttempts; i++) {
@@ -107,9 +116,12 @@ function main() {
     help();
     process.exit(opts.help ? 0 : 1);
   }
-  const attempts = opts.attempts !== undefined ? Number.parseInt(String(opts.attempts), 10) : DEFAULT_ATTEMPTS;
-  const minMs = opts['min-ms'] !== undefined ? Number.parseInt(String(opts['min-ms']), 10) : DEFAULT_MIN_MS;
-  const maxMs = opts['max-ms'] !== undefined ? Number.parseInt(String(opts['max-ms']), 10) : DEFAULT_MAX_MS;
+  const attempts =
+    opts.attempts !== undefined ? Number.parseInt(String(opts.attempts), 10) : DEFAULT_ATTEMPTS;
+  const minMs =
+    opts['min-ms'] !== undefined ? Number.parseInt(String(opts['min-ms']), 10) : DEFAULT_MIN_MS;
+  const maxMs =
+    opts['max-ms'] !== undefined ? Number.parseInt(String(opts['max-ms']), 10) : DEFAULT_MAX_MS;
   let pattern = DEFAULT_REF_LOCK_PATTERN;
   if (opts.pattern) {
     try {

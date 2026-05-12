@@ -15,7 +15,7 @@
  * Run: ANTHROPIC_API_KEY=... npx vitest run tests/e2e/medium-parallel.test.ts
  */
 
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
@@ -115,9 +115,7 @@ function observedParallelism(dir: string): { max: number; examples: string[] } {
       // actually fans out. Overlaps outside this set are incidental and
       // do not demonstrate parallel dispatch.
       const activeStories = new Set(
-        [...open.values()]
-          .filter((o) => PARALLEL_RELEVANT_PHASES.has(o.phase))
-          .map((o) => o.story),
+        [...open.values()].filter((o) => PARALLEL_RELEVANT_PHASES.has(o.phase)).map((o) => o.story),
       );
       if (activeStories.size > max) {
         max = activeStories.size;
@@ -284,13 +282,18 @@ describe.skipIf(!HAS_CLAUDE)('Medium + parallel stories (Claude Code)', () => {
   );
 
   it('sprint-status shows all stories done', () => {
-    const statusPath = join(project.dir, '_bmad-output/implementation-artifacts/sprint-status.yaml');
+    const statusPath = join(
+      project.dir,
+      '_bmad-output/implementation-artifacts/sprint-status.yaml',
+    );
     if (!existsSync(statusPath)) {
       console.warn('[Result] sprint-status.yaml missing — autopilot may have halted');
       return;
     }
     const status = readYaml(statusPath) as Record<string, unknown>;
-    const block = (status.development_status ?? status.stories) as Record<string, string> | undefined;
+    const block = (status.development_status ?? status.stories) as
+      | Record<string, string>
+      | undefined;
     if (!block) return;
     const remaining = Object.entries(block).filter(([, v]) => v !== 'done');
     expect(remaining, `stories not done: ${JSON.stringify(remaining)}`).toEqual([]);
@@ -307,5 +310,4 @@ describe.skipIf(!HAS_CLAUDE)('Medium + parallel stories (Claude Code)', () => {
     const entries = readdirSync(archiveDir);
     expect(entries.some((f: string) => f.startsWith('layer-') || f === 'corrupt')).toBe(true);
   });
-
 });
