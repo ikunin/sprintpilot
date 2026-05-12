@@ -8,7 +8,7 @@
  *   - sprint-finalize-pending fresh-context handoff (2.0.1)
  *   - Step 10 CRITICAL 1-7 deterministic cleanup
  *
- * Sprint shape (from product brief):
+ * Sprint shape (from PRD):
  *   1-1 engine          — foundation
  *   1-2 generator+solver — depends on 1-1 only ──┐
  *   1-3 UI shell         — depends on 1-1 only ──┤  parallel layer
@@ -198,8 +198,8 @@ describe.skipIf(!HAS_CLAUDE)('Sudoku web game (parallel dispatch)', () => {
 
     placeFixture(
       project.dir,
-      '_bmad-output/planning-artifacts/product-brief.md',
-      readFileSync(join(FIXTURES_DIR, 'product-brief.md'), 'utf-8'),
+      '_bmad-output/planning-artifacts/prd.md',
+      readFileSync(join(FIXTURES_DIR, 'prd.md'), 'utf-8'),
     );
 
     // Force medium profile + enable parallel dispatch + auto-infer deps.
@@ -269,7 +269,7 @@ describe.skipIf(!HAS_CLAUDE)('Sudoku web game (parallel dispatch)', () => {
   it('setup is valid', () => {
     assertDirectoryExists(join(project.dir, '_Sprintpilot'));
     assertDirectoryExists(join(project.dir, '_bmad'));
-    assertFileExists(join(project.dir, '_bmad-output/planning-artifacts/product-brief.md'));
+    assertFileExists(join(project.dir, '_bmad-output/planning-artifacts/prd.md'));
     assertFileContains(
       join(project.dir, '_Sprintpilot/modules/autopilot/config.yaml'),
       /auto_infer_dependencies:\s*true/,
@@ -320,7 +320,7 @@ describe.skipIf(!HAS_CLAUDE)('Sudoku web game (parallel dispatch)', () => {
         const systemPrompt = [
           'You are running inside an automated e2e test.',
           session === 1
-            ? 'Follow the BMAD autopilot workflow exactly. Product brief is at _bmad-output/planning-artifacts/product-brief.md.'
+            ? 'Follow the BMAD autopilot workflow exactly. PRD is at _bmad-output/planning-artifacts/prd.md.'
             : 'Resume the BMAD autopilot from saved state.',
           'You are Claude Code. ma.parallel_stories is true and autopilot.auto_infer_dependencies is true.',
           'When the DAG resolver widens a layer to >1 story, spawn concurrent sub-agents (Agent tool) for that layer.',

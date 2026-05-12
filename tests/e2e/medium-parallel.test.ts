@@ -139,8 +139,8 @@ describe.skipIf(!HAS_CLAUDE)('Medium + parallel stories (Claude Code)', () => {
 
     placeFixture(
       project.dir,
-      '_bmad-output/planning-artifacts/product-brief.md',
-      readFileSync(join(FIXTURES_DIR, 'product-brief.md'), 'utf-8'),
+      '_bmad-output/planning-artifacts/prd.md',
+      readFileSync(join(FIXTURES_DIR, 'prd.md'), 'utf-8'),
     );
 
     // Force medium profile via autopilot config (medium is default but be explicit).
@@ -235,7 +235,7 @@ describe.skipIf(!HAS_CLAUDE)('Medium + parallel stories (Claude Code)', () => {
         const systemPrompt = [
           'You are running inside an automated e2e test.',
           session === 1
-            ? 'Follow the BMAD autopilot workflow exactly. Product brief is already at _bmad-output/planning-artifacts/product-brief.md.'
+            ? 'Follow the BMAD autopilot workflow exactly. PRD is already at _bmad-output/planning-artifacts/prd.md.'
             : 'Resume the BMAD autopilot from saved state.',
           'You are Claude Code. ma.parallel_stories is true. When the DAG resolver widens a layer to >1 story, spawn concurrent sub-agents (Agent tool) for that layer.',
           'Do NOT ask the user any questions — resolve all decisions autonomously.',

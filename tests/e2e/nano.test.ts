@@ -103,8 +103,8 @@ describe.skipIf(!HAS_CLAUDE)('Nano profile (Claude Code)', () => {
 
     placeFixture(
       project.dir,
-      '_bmad-output/planning-artifacts/product-brief.md',
-      readFileSync(join(FIXTURES_DIR, 'product-brief.md'), 'utf-8'),
+      '_bmad-output/planning-artifacts/prd.md',
+      readFileSync(join(FIXTURES_DIR, 'prd.md'), 'utf-8'),
     );
 
     // Force nano profile.
@@ -145,7 +145,7 @@ describe.skipIf(!HAS_CLAUDE)('Nano profile (Claude Code)', () => {
 
   it('setup is valid — nano profile selected', () => {
     assertDirectoryExists(join(project.dir, '_Sprintpilot'));
-    assertFileExists(join(project.dir, '_bmad-output/planning-artifacts/product-brief.md'));
+    assertFileExists(join(project.dir, '_bmad-output/planning-artifacts/prd.md'));
     assertFileContains(
       join(project.dir, '_Sprintpilot/modules/autopilot/config.yaml'),
       /complexity_profile:\s*nano/,
@@ -163,7 +163,7 @@ describe.skipIf(!HAS_CLAUDE)('Nano profile (Claude Code)', () => {
         const systemPrompt = [
           'You are running inside an automated e2e test.',
           session === 1
-            ? 'Follow the BMAD autopilot workflow exactly. Product brief is at _bmad-output/planning-artifacts/product-brief.md.'
+            ? 'Follow the BMAD autopilot workflow exactly. PRD is at _bmad-output/planning-artifacts/prd.md.'
             : 'Resume the BMAD autopilot from saved state.',
           'complexity_profile=nano. Route every story through bmad-quick-dev. Do NOT invoke bmad-dev-story, bmad-create-story, bmad-check-implementation-readiness, or bmad-code-review.',
           'Do NOT ask the user any questions.',

@@ -232,8 +232,8 @@ describe('Greenfield: Tic Tac Toe via Sprintpilot', () => {
 
     placeFixture(
       project.dir,
-      '_bmad-output/planning-artifacts/product-brief.md',
-      readFileSync(join(FIXTURES_DIR, 'product-brief.md'), 'utf-8'),
+      '_bmad-output/planning-artifacts/prd.md',
+      readFileSync(join(FIXTURES_DIR, 'prd.md'), 'utf-8'),
     );
 
     console.log(`[Greenfield] Temp project: ${project.dir}`);
@@ -269,7 +269,7 @@ describe('Greenfield: Tic Tac Toe via Sprintpilot', () => {
   it('setup is valid', () => {
     assertDirectoryExists(join(project.dir, '_Sprintpilot'));
     assertDirectoryExists(join(project.dir, '_bmad'));
-    assertFileExists(join(project.dir, '_bmad-output/planning-artifacts/product-brief.md'));
+    assertFileExists(join(project.dir, '_bmad-output/planning-artifacts/prd.md'));
     assertFileContains(join(project.dir, '.gitignore'), /\.autopilot\.lock/);
   });
 
@@ -344,7 +344,7 @@ describe('Greenfield: Tic Tac Toe via Sprintpilot', () => {
         const systemPrompt = [
           'You are running inside an automated e2e test.',
           session === 1
-            ? 'Follow the BMAD autopilot workflow exactly. The product brief is already at _bmad-output/planning-artifacts/product-brief.md.'
+            ? 'Follow the BMAD autopilot workflow exactly. The PRD is already at _bmad-output/planning-artifacts/prd.md.'
             : 'Resume the BMAD autopilot from saved state.',
           'Do NOT ask the user any questions — resolve all decisions autonomously.',
           'Use TypeScript with Vitest for testing.',
