@@ -20,10 +20,7 @@ The per-story flow depends on the active `complexity_profile` in
   session (session-scoped only — never written back to config) to `full`
   flow so the remaining stories run through the 7-step cycle.
 
-This policy is enforced by `_Sprintpilot/skills/sprint-autopilot-on/workflow.md`
-at runtime via `_Sprintpilot/scripts/resolve-profile.js`. When the profile
-key is absent, the autopilot falls back to `medium` — matching v1.0.5
-behavior byte-for-byte.
+This policy is enforced by the orchestrator state machine (`_Sprintpilot/lib/orchestrator/state-machine.js` and `adapt.js`) driven from `_Sprintpilot/skills/sprint-autopilot-on/workflow.orchestrator.md`, using profile resolution from `_Sprintpilot/scripts/resolve-profile.js`. When the profile key is absent, the autopilot falls back to `medium`.
 
 ### Mandatory sequence per story (all profiles except `nano`)
 

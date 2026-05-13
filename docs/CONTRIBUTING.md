@@ -12,13 +12,15 @@ The add-on consists of four layers:
 ## Adding a New Skill
 
 1. Create a directory under `_Sprintpilot/skills/sprintpilot-{name}/`
-2. Add `SKILL.md` with frontmatter (name, description) and a pointer to `workflow.md`
-3. Add `workflow.md` with the full workflow instructions
+2. Add `SKILL.md` with frontmatter (name, description) and the workflow body
+3. If the skill needs a long workflow, split it into a sibling `workflow.md` (or named variant like `workflow.<mode>.md`) and have `SKILL.md` point at it
 4. If the skill uses subagents, add agent prompts to `agents/`
 5. Add the skill name to `manifest.yaml` under `installed_skills`
 6. If the skill is part of the mandatory workflow, add it to `_Sprintpilot/Sprintpilot.md`
 7. If it introduces new constraints, add rules to `templates/agent-rules.md`
 8. Run `bin/sprintpilot.js install` to deploy
+
+> **Note**: `sprint-autopilot-on` is the canonical example of a multi-file skill — it ships only `workflow.orchestrator.md` (the legacy two-workflow dispatcher was removed). See `_Sprintpilot/skills/sprint-autopilot-on/SKILL.md` for the structure.
 
 ### SKILL.md Template
 
@@ -28,7 +30,7 @@ name: sprintpilot-{name}
 description: 'One-line description of what the skill does and when to use it.'
 ---
 
-Follow the instructions in ./workflow.md.
+# Skill body here, or pointer to ./workflow.md if you split it.
 ```
 
 ### Subagent Prompt Guidelines
@@ -100,12 +102,14 @@ Skills are tested by invoking them in your coding agent of choice:
 
 ## Design Decisions
 
-### Why separate scripts instead of inline steps in workflow.md?
+### Why separate scripts instead of inline steps in skill workflows?
 
 Skills are markdown prompts interpreted by an LLM. Complex multi-step logic embedded in markdown is fragile — the LLM may misinterpret, skip steps, or introduce errors. Scripts are:
 - Testable independently (Vitest unit + integration coverage)
 - Deterministic (Node execution, not LLM interpretation)
 - Maintainable (edit one script, not a 500-line workflow)
+
+The autopilot pushes this further: the orchestrator state machine (`_Sprintpilot/lib/orchestrator/`) owns sequencing entirely, with the LLM left to execute one BMad skill at a time per `invoke_skill` action. `workflow.orchestrator.md` is intentionally ≤150 lines.
 
 ### Why inlined agent prompts instead of Skill references?
 

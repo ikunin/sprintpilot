@@ -21,7 +21,7 @@ The per-story BMAD cycle is the right unit of rigor for a production team produc
 
 ## 2. Constraint: BMAD is off-limits
 
-The autopilot (`_Sprintpilot/skills/sprint-autopilot-on/workflow.md`) is Sprintpilot's. It decides **which** BMAD skills to invoke and **when**. Everything in this document is implemented through:
+The autopilot (`_Sprintpilot/bin/autopilot.js` driving `_Sprintpilot/skills/sprint-autopilot-on/workflow.orchestrator.md`) is Sprintpilot's. It decides **which** BMAD skills to invoke and **when**. Everything in this document is implemented through:
 
 - Autopilot routing changes
 - Sprintpilot module configs (`_Sprintpilot/modules/{autopilot,git,ma}/config.yaml`)
@@ -286,7 +286,7 @@ multi_agent:
 | Test fail in one parallel story | Isolate; continue others; block stories depending on the failed one; report at batch end |
 | Merge conflict at layer boundary | Retry once after rebase; on second failure, abort that story and force sequential for rest of epic |
 | `max_consecutive_conflicts` reached | Auto-disable parallelism for remainder of session, log to decision-log |
-| Worktree disk/permission failure | Fall back to sequential for that story (existing logic at `workflow.md:435`) |
+| Worktree disk/permission failure | Fall back to sequential for that story (orchestrator's `parallel_batch` resolver downgrades to sequential per profile) |
 | Rate-limit / 429 from provider | Exponential backoff, reduce effective concurrency for this session |
 
 ### 7.6 Cost and rate-limit handling — delegated to host agent (R2, revised)
@@ -344,7 +344,7 @@ All parameters live in Sprintpilot-owned YAMLs. Defaults shown per profile.
 
 **Session budget** is `session_story_limit` only (R8). Token estimation was researched and removed — it would require LLM observability Sprintpilot doesn't have (host agent owns all model interaction; no tool-agnostic API). Story count per profile is the entire mechanism. Users tune by changing the numeric limit.
 
-Defaults were retuned in 2.0.1 to mitigate context rot observed in end-to-end testing. Nano previously ran unlimited (`0`) and medium was `5`; both exposed step 10's CRITICAL cleanup actions to late-session instruction decay. All non-nano profiles now cap at 3 stories per session; nano at 5 (quick-dev is cheap enough to fit more, but unlimited is off the table). Independently, the autopilot now forces a one-session fresh-context handoff for step 10 regardless of where `session_story_limit` landed — see the `sprint-finalize-pending` state machine in `_Sprintpilot/skills/sprint-autopilot-on/workflow.md`.
+Defaults were retuned in 2.0.1 to mitigate context rot observed in end-to-end testing. Nano previously ran unlimited (`0`) and medium was `5`; both exposed step 10's CRITICAL cleanup actions to late-session instruction decay. All non-nano profiles now cap at 3 stories per session; nano at 5 (quick-dev is cheap enough to fit more, but unlimited is off the table). Independently, the autopilot forces a one-session fresh-context handoff for finalization regardless of where `session_story_limit` landed — enforced by the `sprint_finalize_pending` terminal state in `_Sprintpilot/lib/orchestrator/state-machine.js`.
 
 **M1 removed.** `skip_redundant_rereview` is gone from the concept entirely. BMad's own "Clean Review Shortcut" (`step-04-present.md:15-17`) handles this optimization internally; the autopilot always runs the second `bmad-code-review` invocation.
 

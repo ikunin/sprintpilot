@@ -61,9 +61,9 @@ Skills are markdown-based prompts interpreted by AI tools. All source skills liv
 
 | Skill | Files | Purpose |
 |-------|-------|---------|
-| `sprint-autopilot-on` | SKILL.md, workflow.md (~890 lines, profile-aware) | Full autonomous sprint execution |
-| `sprint-autopilot-off` | SKILL.md, workflow.md | Graceful exit with status report |
-| `sprintpilot-update` | SKILL.md, workflow.md | In-IDE update flow (compares vs npm latest) |
+| `sprint-autopilot-on` | SKILL.md, workflow.orchestrator.md (≤150 lines) + `_Sprintpilot/bin/autopilot.js` state machine | Full autonomous sprint execution |
+| `sprint-autopilot-off` | SKILL.md | Graceful exit with status report |
+| `sprintpilot-update` | SKILL.md | In-IDE update flow (compares vs npm latest) |
 
 ### Multi-Agent Skills
 

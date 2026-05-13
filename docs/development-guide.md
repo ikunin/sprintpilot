@@ -101,7 +101,7 @@ cd tests && npm test
 ### Adding a New Skill
 
 1. Create directory in `_Sprintpilot/skills/your-skill/`
-2. Add `SKILL.md` (metadata) and `workflow.md` (instructions)
+2. Add `SKILL.md` with frontmatter + skill body (or a pointer to a sibling `workflow.md` for long instructions)
 3. For multi-agent skills, add prompts in `agents/` subdirectory
 4. Register in `_Sprintpilot/manifest.yaml` under `installed_skills`
 5. Update `bin/sprintpilot.js install` if the skill needs special handling
@@ -130,7 +130,7 @@ Use `!` for breaking changes (`refactor!: …`, `feat!: …`).
 
 | Decision | Rationale |
 |----------|-----------|
-| Node.js scripts over inline logic in workflow.md | Deterministic, testable, version-controlled |
+| Node.js scripts + orchestrator state machine over inline workflow prose | Deterministic, testable, version-controlled |
 | Inlined agent prompts (not files) | Subagents can't invoke the Skill tool or read arbitrary files |
 | `git worktree add` via standard git commands | Compatible with any coding agent (not Claude-specific) |
 | Explicit file staging | Prevents accidental secret/binary commits; `git add -A` never used |

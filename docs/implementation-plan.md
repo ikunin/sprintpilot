@@ -5,6 +5,8 @@ Concept reference: `docs/adaptive-process-scaling.md`
 Target branch: `claude/optimize-dev-workflow-D0U4w`
 Audience: engineer picking this up to build, PR by PR
 
+> **Historical note (v2.1+):** This plan was written when the autopilot lived in a single 1,388-line `workflow.md`. As of v2.1, flow control moved to the deterministic state machine in `_Sprintpilot/bin/autopilot.js` + `_Sprintpilot/lib/orchestrator/`, and `workflow.md` has been replaced by a ≤150-line `workflow.orchestrator.md`. Every reference to `workflow.md` below describes the pre-v2.1 implementation surface; the *behaviors* described still apply, but the locus of enforcement is now the orchestrator state machine, not LLM-interpreted prose.
+
 ---
 
 ## Context

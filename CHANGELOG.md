@@ -2,11 +2,23 @@
 
 ## [Unreleased]
 
-**Orchestrator-driven autopilot is now the default.** Flow control moves out of the 1,388-line prose workflow.md and into a deterministic Node.js state machine at `_Sprintpilot/bin/autopilot.js`. The LLM keeps in-skill execution, diagnosis, triage, and small-judgment decisions; the orchestrator owns sequencing and BMad-step enforcement.
+**Orchestrator-driven autopilot is now the only path.** Flow control lives in a deterministic Node.js state machine at `_Sprintpilot/bin/autopilot.js`. The LLM keeps in-skill execution, diagnosis, triage, and small-judgment decisions; the orchestrator owns sequencing and BMad-step enforcement. The v2.0.x prose `workflow.md` (1,388 lines) is gone — `workflow.orchestrator.md` is the single shipped workflow.
 
 **The orchestrator delegates to BMad skills as-is — it does NOT invent workflows or templates.** BMad owns every skill body and template (`bmad-create-story`, `bmad-quick-dev`, `bmad-code-review`, etc.). The orchestrator's `template_slots` payload is just input parameters for those skills, not a competing prose template.
 
+### Removed (breaking)
+- **`autopilot.execution_mode` config knob is gone.** The orchestrator is the only path; `execution_mode: legacy` no longer reverts to v2.0.x prose behavior. Existing configs that set the key are silently ignored.
+- **`workflow.md` and `workflow.legacy.md.bak` are no longer shipped.** Single workflow at `_Sprintpilot/skills/sprint-autopilot-on/workflow.orchestrator.md`.
+- **`SKILL.md` no longer dispatches between two workflows.** Simplified to a direct pointer at `workflow.orchestrator.md`.
+- **`lockdownLegacyWorkflow()` / `executionModeOf()` removed from `_Sprintpilot/bin/autopilot.js`.**
+- **`tests/unit/orchestrator/autopilot-lockdown.test.ts` deleted** along with the lockdown rename behavior it covered.
+
 ### Added (this release)
+- **`git_op` actions carry inlined argv `steps`** from `git-plan.js`. Every `git_op` emitted by `cmdStart`/`cmdNext`/`cmdRecord` is decorated with the planned step sequence (`git add`, `git commit`, `git push`). The LLM executes `action.steps` verbatim instead of interpreting an abstract `op` — fixes live-LLM sessions silently skipping `git push` after STORY_DONE.
+- **Phase 2 `_bmad-output/` base-branch sync** in `commit_and_push_story`. After pushing the story branch, the orchestrator runs `switch <base> → checkout <branch> -- _bmad-output → add → commit --allow-empty → push <base> → switch <branch>`. BMad planning and bookkeeping artifacts land on `main` per story so `git log main` is the canonical sprint audit trail.
+- **`git.branch_prefix: 'story/'`** new profile knob. Branch naming aligned to `<branch_prefix>epic-<id>` for epic granularity (e.g. `story/epic-1`) — matches what the nano e2e test asserts on.
+- **`verify.js` enforces `git_steps_completed: true`** on STORY_DONE. A signal with `commit_sha` + `branch` but missing `git_steps_completed` now fails verify with a clear message — catches commit-without-push.
+- **Nano-aware boot phase.** Fresh sessions under `implementation_flow: quick` (nano) now start at `NANO_QUICK_DEV` so the first emitted action is `invoke_skill: bmad-quick-dev`. Previously hardcoded to `CREATE_STORY` regardless of profile.
 - **Branch reuse: `git.reuse_user_branch: false` (default)**. When `true`, autopilot detects the current non-base branch on boot and commits **every** story onto it. No per-story or per-epic branches are created. One PR opens at sprint-end. Useful for feature-branch workflows.
 - **Land-as-you-go: `git.merge_strategy: stacked | land_as_you_go`**. Under `land_as_you_go`, the orchestrator runs a new `STORY_LAND` state right after `STORY_DONE` to merge the PR immediately instead of accumulating a stack. `git.land_when: no_wait | ci_pass | ci_and_review` (default `ci_pass`) controls when. `git.land_wait_minutes: 30` caps CI/review wait time.
 - **Rebase-on-merge-conflict recovery.** When `STORY_LAND` can't fast-forward because base moved, the orchestrator runs `git rebase origin/<base>`. On rebase conflicts the orchestrator halts with `user_prompt`; resume reads `state.land_pending` and retries.
@@ -16,24 +28,26 @@
 - **Nano e2e config seeding hardened**: the `complexity_profile: nano` write is verified after writing; failure to stick raises a loud setup error instead of silently running under the wrong profile.
 - **Nano sprint-status filter accepts block-form** `{ status: 'done', ... }` entries (was inline-string-only).
 
+### Changed (this release)
+- **Live-LLM e2e tests gated behind env vars** — `RUN_LLM_E2E=1` unlocks the canonical `nano` test; the broader greenfield/sudoku/medium-parallel/brownfield/orchestrator-mode-live suites also require `RUN_LLM_E2E_FULL=1`. `npm test` no longer accidentally spawns `claude`.
+- **Default e2e model: `haiku`** (was `sonnet`). Override via `BMAD_TEST_MODEL=sonnet`. These tests measure autopilot flow completion, not code quality.
+- **Tightened e2e budgets** across the suite. Worst-case ceiling for `npm run test:e2e:live:full` drops from ~$620 to ~$120.
+- **New npm scripts** in `tests/package.json`: `test:e2e:live` (canonical `nano`), `test:e2e:live:full` (everything), per-test scripts auto-set both gates.
+
 ### Added (foundation, prior commits)
 
-- **`autopilot.execution_mode: orchestrator | legacy`** in `_Sprintpilot/modules/autopilot/config.yaml`. Default flipped to `orchestrator`. Set to `legacy` to rollback to v2.0.x behavior byte-for-byte while you adapt custom skills.
 - **`_Sprintpilot/bin/autopilot.js`** CLI: `start | next | record | state | report | validate-config | status`. Emits typed Actions (`invoke_skill | run_script | git_op | parallel_batch | user_prompt | halt | noop`); consumes typed Signals (`success | failure | blocked | propose_alternative | user_input | verify_override`). Drives the 7-step BMad cycle as an explicit state machine, with step-6 (patch_apply + patch_retest) as a first-class state pair so "tests still green after patches" is enforceable.
 - **`_Sprintpilot/lib/orchestrator/`** — 15 pure modules (state-machine, adapt, profile-rules, verify, impact-classifier, decision-log, state-store, action-ledger, divergence, user-commands, user-command-applier, parallel-batch, git-plan, report, land). All BMad skills invoked as-is; no Sprintpilot-side skill templates.
 - **`_Sprintpilot/scripts/lint-test-pitfalls.js`** + **`post-green-gates.js`** — post-GREEN quality pipeline (lint-changed + test-pitfall scan + ci-parity).
 - **`_Sprintpilot/scripts/stack-snapshot.js`**, **`land-this-pr.js`**, **`auto-merge-bmad-docs.js`** — stacked-PR primitives.
-- **`_Sprintpilot/skills/sprint-autopilot-on/workflow.orchestrator.md`** — 132-line workflow consulted when `execution_mode: orchestrator`. The legacy `workflow.md` remains the source of truth for `execution_mode: legacy`; it is scheduled for removal after one release cycle.
+- **`_Sprintpilot/skills/sprint-autopilot-on/workflow.orchestrator.md`** — 132-line workflow, sole authority for autopilot execution.
 - **`tests/scripts/autopilot-harness.test.ts`** (108 signal-state cross-product rows) and **`bmad-fidelity.test.ts`** (23 BMad-invariant scenarios) — the determinism gate.
 - **Windows + macOS** added to the CI matrix.
 
 ### Preserved
 - The full BMad 7-step sequence remains mandatory. Nano profile still routes through `bmad-quick-dev` and now escalates to `small` session-scoped on `tests_failed > 0` or `severity: high` (never written to config).
-- The fresh-context sprint-finalize handoff (commit `b1b6251`) is preserved verbatim as state 10.
+- The fresh-context sprint-finalize handoff (commit `b1b6251`) is preserved verbatim as the `sprint_finalize_pending` terminal state.
 - `coalesce_state_writes`, `conditional_boot_work`, `retrospective_mode`, and all other profile knobs are honored.
-
-### Rollback
-- `execution_mode: legacy` reverts byte-for-byte to v2.0.x autopilot behavior. Please open an issue if you hit an orchestrator-mode regression so it can be fixed before legacy is removed.
 
 ## [2.0.10] - 2026-04-28
 

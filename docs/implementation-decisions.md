@@ -2,6 +2,8 @@
 
 A running log of non-obvious implementation choices made during the v2 rollout. Each entry: PR, category, decision, rationale, impact. Referenced by `docs/implementation-plan.md` cross-cutting section.
 
+> **Historical note (v2.1+):** Entries below predate the v2.1 orchestrator. Many cite `workflow.md` as the locus of LLM-driven workflow text; in v2.1 the orchestrator state machine took over flow control and `workflow.md` was replaced by a ≤150-line `workflow.orchestrator.md`. The decisions remain valid as a record of *why* each piece was built the way it was; the *current* enforcement points are in `_Sprintpilot/lib/orchestrator/` (verify.js, adapt.js, state-machine.js).
+
 ## PR 1 — Foundation
 
 ### D1.1 — architecture / config

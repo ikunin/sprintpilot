@@ -55,7 +55,7 @@ sprintpilot/
 │   │   └── ma/
 │   │       └── config.yaml             # Multi-agent + parallelism config
 │   │
-│   ├── scripts/                        # Node.js helpers invoked by workflow.md (zero third-party deps)
+│   ├── scripts/                        # Node.js helpers invoked by the orchestrator + skills (zero third-party deps)
 │   │   │ # — Core git / commit pipeline —
 │   │   ├── lock.js                     # Mutex with stale timeout
 │   │   ├── health-check.js             # Worktree state classification
@@ -100,7 +100,7 @@ sprintpilot/
 │   │   └── yaml-lite.js                # Zero-dep YAML read/write for story blocks
 │   │
 │   ├── skills/                         # 10 addon-owned skills (markdown-based prompts)
-│   │   ├── sprint-autopilot-on/        # Profile-aware autopilot orchestrator (~890 lines workflow.md)
+│   │   ├── sprint-autopilot-on/        # Profile-aware autopilot driver (SKILL.md + workflow.orchestrator.md, ≤150 lines)
 │   │   ├── sprint-autopilot-off/       # Graceful disengage + status report
 │   │   ├── sprintpilot-update/         # In-IDE update flow
 │   │   ├── sprintpilot-code-review/    # 3-layer parallel code review
@@ -171,7 +171,8 @@ sprintpilot/
 | Entry Point | Purpose |
 |-------------|---------|
 | `bin/sprintpilot.js install` | Primary installation — deploys skills + system prompts, accepts `--profile`, handles legacy migration |
-| `_Sprintpilot/skills/sprint-autopilot-on/workflow.md` | Profile-aware autopilot orchestrator — main execution engine |
+| `_Sprintpilot/bin/autopilot.js` | Profile-aware autopilot CLI — deterministic state machine that emits typed Actions / consumes typed Signals |
+| `_Sprintpilot/skills/sprint-autopilot-on/workflow.orchestrator.md` | LLM-facing workflow (≤150 lines) consumed by the autopilot driver |
 | `_Sprintpilot/scripts/resolve-profile.js` | Profile resolution at boot |
 | `_Sprintpilot/scripts/dispatch-layer.js` | Parallel story dispatch entry point |
 | `_Sprintpilot/scripts/infer-dependencies.js` | Story DAG inference (validates LLM JSON envelopes) |

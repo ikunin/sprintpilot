@@ -26,6 +26,7 @@ Profile resolution happens at boot via `_Sprintpilot/scripts/resolve-profile.js`
 |-----|---------|-------------|
 | `autopilot.session_story_limit` | `3` (nano: `5`; large/legacy: `3`) | Stories per session before checkpoint. `0` = unlimited. Retuned in 2.0.1 after context-rot exposure. |
 | `autopilot.retrospective_mode` | `auto` | `auto` (deterministic artifact, continue) / `stop` (pause for `/bmad-retrospective`) / `skip` (no artifact). |
+| `autopilot.implementation_flow` | `full` (nano: `quick`) | `full` runs the 7-step BMad cycle (create-story → check-readiness → dev-RED → dev-GREEN → code-review → patch → retrospective). `quick` routes every story through `bmad-quick-dev` and boots fresh sessions directly at `NANO_QUICK_DEV`. |
 
 ### V2 Optimization Layers
 
@@ -142,6 +143,10 @@ See [Extending](EXTENDING.md) to add more languages.
 |-----|---------|-------------|
 | `merge.timing` | `epic-retrospective` | Suggest merge after epic retrospective |
 | `merge.require_user_confirm` | `true` | Always ask before merging |
+| `git.reuse_user_branch` | `false` | When `true`, autopilot detects the current non-base branch on boot and commits **every** story onto it. No per-story / per-epic branches are created; one PR opens at sprint-end. Suppresses `git.granularity`. |
+| `git.merge_strategy` | `stacked` | `stacked` keeps every story branch open until sprint-end. `land_as_you_go` runs a `STORY_LAND` state after `STORY_DONE` to merge the PR immediately. |
+| `git.land_when` | `ci_pass` | Under `land_as_you_go`: `no_wait` (sync merge), `ci_pass` (after CI green), or `ci_and_review` (after CI + approved review). |
+| `git.land_wait_minutes` | `30` | Max wait for CI / review under `land_as_you_go`. After this the orchestrator halts and prompts. |
 
 ### Worktree
 
@@ -207,7 +212,7 @@ GitHub and GitLab require their CLIs (`gh`, `glab`). No API fallback is availabl
 | `ma.min_epic_duration_for_parallel_sec` | `300` | Don't bother spinning up parallel infrastructure if the epic is shorter than this. |
 | `ma.baseline_story_duration_sec` | `180` | Used to estimate epic duration for the gate above. |
 | `ma.max_consecutive_conflicts` | `2` | After this many consecutive merge conflicts mid-session, parallel dispatch flips a session-scoped disable flag. |
-| `ma.effective_parallel_floor` | `1` | Don't engage parallel dispatch unless at least this many stories run in parallel. The workflow.md gate independently short-circuits on `active_layer.length < 2`, so this floor is a defensive backstop. |
+| `ma.effective_parallel_floor` | `1` | Don't engage parallel dispatch unless at least this many stories run in parallel. The orchestrator independently short-circuits on `active_layer.length < 2`, so this floor is a defensive backstop. |
 
 ## Secrets Allowlist (`.secrets-allowlist`)
 

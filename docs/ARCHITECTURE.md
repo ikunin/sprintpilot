@@ -35,7 +35,7 @@ _Sprintpilot/
 │           ├── large.yaml     # Parallel stories, state-sharding always
 │           └── legacy.yaml    # v1.0.5 byte-for-byte (version_pinned)
 │
-├── scripts/                   # Node.js helpers invoked by workflow.md (zero runtime deps)
+├── scripts/                   # Node.js helpers invoked by the orchestrator (zero runtime deps)
 │   ├── # — Core git / commit pipeline —
 │   ├── lock.js                # Mutex with stale timeout
 │   ├── health-check.js        # Orphaned worktree classification
@@ -261,7 +261,7 @@ When `parallel_stories: true` AND host_supports_parallel AND active layer ≥ 2 
 1. `dispatch-layer.js` creates one worktree per story + writes `.layer-plan.json`.
 2. The autopilot session spawns N concurrent Agent tool calls in a single message (one per story, `subagent_type=general-purpose`). Each sub-agent runs the full per-story flow inside its assigned worktree.
 3. When all return, `merge-shards.js --archive` collapses per-story state shards into the project YAMLs.
-4. Loop back to step 2 in workflow.md to re-evaluate the next layer.
+4. The orchestrator's `parallel_batch` resolver loops back to evaluate the next layer.
 
 `agent-adapter.js detect` returns host capability with confidence levels. Priority: env vars (HIGH) > parent process name (MEDIUM) > filesystem markers (LOW). Tautology guard: filesystem markers prove the install target, not the current host; `confidence=low` forces `supports_parallel=false`.
 
@@ -276,7 +276,7 @@ Cross-epic parallelism (`parallel_epics: true`, EXPERIMENTAL) is gated behind `p
 
 ## Cross-Platform Portability
 
-Every workflow.md call site runs under bash, zsh, Git Bash, PowerShell, and cmd. POSIX-shell idioms have been replaced with `_Sprintpilot/scripts/git-portable.js`:
+Every shell-out from the orchestrator and helper scripts runs under bash, zsh, Git Bash, PowerShell, and cmd. POSIX-shell idioms have been replaced with `_Sprintpilot/scripts/git-portable.js`:
 
 - `count-worktrees` — replaces `git worktree list --porcelain | grep -c '^worktree '`
 - `config-get <key> [--default <value>]` — replaces `git config --get K 2>/dev/null || echo X`
