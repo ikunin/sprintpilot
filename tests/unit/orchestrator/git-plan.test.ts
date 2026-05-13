@@ -47,8 +47,7 @@ describe('branchName', () => {
   });
 
   it('epic granularity → <branch_prefix>epic-<key> (e.g. story/epic-e2)', () => {
-    // Format matches the legacy workflow (workflow.legacy.md.bak:685,716)
-    // and is what the nano e2e test asserts on (origin/story/epic-*).
+    // Format is what the nano e2e test asserts on (origin/story/epic-*).
     const p = flatToProfile({ git: { granularity: 'epic' } }, 'nano');
     expect(branchName(p, 'S1', 'E2')).toBe('story/epic-e2');
   });

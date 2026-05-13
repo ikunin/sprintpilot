@@ -153,12 +153,11 @@ function planCommitAndPush(state, profile, action, branch) {
     });
   }
 
-  // Phase 2 — sync `_bmad-output/` to `<base_branch>`. The legacy workflow
-  // (workflow.legacy.md.bak:927–931) commits BMad planning + bookkeeping
-  // artifacts to main after every planning skill; the orchestrator does
-  // the same once per story at STORY_DONE. Without this, planning
-  // artifacts, sprint-status, story files, and reviews exist only on the
-  // story branch and `git log main` is empty of sprint history.
+  // Phase 2 — sync `_bmad-output/` to `<base_branch>`. BMad planning +
+  // bookkeeping artifacts must land on main per story so `git log main`
+  // is the canonical sprint audit trail. Without this, planning
+  // artifacts, sprint-status, story files, and reviews exist only on
+  // the story branch.
   steps.push({
     args: ['git', 'switch', baseBranch],
     description: `switch to ${baseBranch} to sync BMad artifacts`,

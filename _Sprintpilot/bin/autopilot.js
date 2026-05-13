@@ -82,63 +82,6 @@ function resolveProfile(projectRoot, explicit) {
   return { resolved: r.resolved, typed, source: r.source };
 }
 
-// Read autopilot.execution_mode from a resolved config tree. Default
-// 'orchestrator' (matches the current shipping default).
-function executionModeOf(resolved) {
-  if (!resolved || typeof resolved !== 'object') return 'orchestrator';
-  const m = resolved.autopilot && resolved.autopilot.execution_mode;
-  if (m === 'legacy' || m === 'orchestrator') return m;
-  return 'orchestrator';
-}
-
-// Lockdown: v2.1+ no longer ships `workflow.md` in the addon source —
-// only `workflow.legacy.md.bak` is present. But upgrades from v2.0.x
-// may still have a stale `workflow.md` on disk. When
-// execution_mode=orchestrator, move any surviving `workflow.md` aside
-// so the LLM cannot fall back to the legacy 1,388-line prose path.
-// Idempotent — if the backup already exists, just remove the stale live
-// copy.
-//
-// When execution_mode=legacy, the inverse: if a backup exists from a
-// prior orchestrator session OR from a fresh v2.1+ install (which ships
-// only the .bak), restore it; otherwise no-op.
-function lockdownLegacyWorkflow(projectRoot, mode) {
-  // Candidate skill dirs. We check both the user's `.claude/skills/`
-  // install location AND the addon source tree under `_Sprintpilot/`.
-  const candidates = [
-    path.join(projectRoot, '.claude', 'skills', 'sprint-autopilot-on'),
-    path.join(projectRoot, '_Sprintpilot', 'skills', 'sprint-autopilot-on'),
-  ];
-  const results = [];
-  for (const dir of candidates) {
-    if (!fs.existsSync(dir)) continue;
-    const live = path.join(dir, 'workflow.md');
-    const backup = path.join(dir, 'workflow.legacy.md.bak');
-    try {
-      if (mode === 'orchestrator') {
-        if (fs.existsSync(live)) {
-          if (fs.existsSync(backup)) {
-            // Backup already present — just remove the live copy.
-            fs.unlinkSync(live);
-          } else {
-            fs.renameSync(live, backup);
-          }
-          results.push({ dir, action: 'moved_aside' });
-        }
-      } else {
-        // legacy mode: restore if needed.
-        if (fs.existsSync(backup) && !fs.existsSync(live)) {
-          fs.renameSync(backup, live);
-          results.push({ dir, action: 'restored' });
-        }
-      }
-    } catch (e) {
-      results.push({ dir, action: 'error', message: e.message });
-    }
-  }
-  return results;
-}
-
 function loadState(projectRoot) {
   return stateStore.read({ projectRoot });
 }
@@ -349,23 +292,8 @@ function applySideEffects(sideEffects, runtime, profile, projectRoot) {
 
 function cmdStart(opts) {
   const projectRoot = resolveProjectRoot(opts);
-  const { typed: profile, resolved } = resolveProfile(projectRoot, opts.profile);
+  const { typed: profile } = resolveProfile(projectRoot, opts.profile);
   const persisted = loadState(projectRoot);
-
-  // Lockdown: v2.1+ ships only `workflow.legacy.md.bak`, so on a fresh
-  // install this is a no-op. The hook exists for two cases:
-  //   1. v2.0.x → v2.1 upgrades where a stale `workflow.md` survived.
-  //   2. execution_mode flipped to legacy — restore the .bak → .md.
-  const mode = executionModeOf(resolved);
-  const lockResults = lockdownLegacyWorkflow(projectRoot, mode);
-  for (const r of lockResults) {
-    if (r.action !== 'error') {
-      ledger.append(
-        { kind: 'state_transition', detail: { legacy_workflow: r.action, dir: r.dir, mode } },
-        { projectRoot },
-      );
-    }
-  }
 
   // Resume detection: if a prior session left a fingerprint, diff.
   const lastHalt = ledger.last({ projectRoot }, 'halt');

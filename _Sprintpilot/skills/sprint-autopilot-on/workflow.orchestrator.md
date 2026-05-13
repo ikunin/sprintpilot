@@ -6,10 +6,8 @@ state machine that enforces the BMad 7-step sequence. You own the
 *in-skill execution, diagnosis, triage, and small-judgment decisions* —
 not the flow.
 
-This file is the **≤150-line** replacement for the legacy
-`workflow.md` (now shipped only as `workflow.legacy.md.bak` for
-rollback). It is consulted when `autopilot.execution_mode: orchestrator`
-in `modules/autopilot/config.yaml` — the v2.1+ default.
+This file is the **≤150-line** authoritative workflow. It is the only
+workflow shipped — the v2.0.x prose `workflow.md` is gone.
 
 ## The loop
 

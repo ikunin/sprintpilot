@@ -56,18 +56,13 @@ describe.skipIf(!HAS_CLAUDE || !LLM_E2E_ENABLED)('Orchestrator mode (live LLM)',
       platform: 'git_only',
     });
 
-    // Force execution_mode=orchestrator, complexity_profile=nano.
+    // Force complexity_profile=nano.
     const cfgPath = join(project.dir, '_Sprintpilot/modules/autopilot/config.yaml');
     let body = existsSync(cfgPath) ? readFileSync(cfgPath, 'utf-8') : 'autopilot:\n';
     if (/complexity_profile:/.test(body)) {
       body = body.replace(/complexity_profile:\s*\w+/, 'complexity_profile: nano');
     } else {
       body = body.replace(/^autopilot:/m, 'autopilot:\n  complexity_profile: nano');
-    }
-    if (/execution_mode:/.test(body)) {
-      body = body.replace(/execution_mode:\s*\w+/, 'execution_mode: orchestrator');
-    } else {
-      body = body.replace(/^autopilot:/m, 'autopilot:\n  execution_mode: orchestrator');
     }
     writeFileSync(cfgPath, body);
 
@@ -105,23 +100,24 @@ describe.skipIf(!HAS_CLAUDE || !LLM_E2E_ENABLED)('Orchestrator mode (live LLM)',
     project?.cleanup();
   });
 
-  it('SKILL.md routes execution_mode=orchestrator to workflow.orchestrator.md', () => {
+  it('SKILL.md directs the LLM to workflow.orchestrator.md', () => {
     const skill = readFileSync(
       join(project.dir, '_Sprintpilot/skills/sprint-autopilot-on/SKILL.md'),
       'utf-8',
     );
     expect(skill).toContain('workflow.orchestrator.md');
-    expect(skill).toContain('execution_mode');
+    // Legacy two-workflow dispatch is gone — there should be no
+    // surviving reference to the old prose workflow file.
+    expect(skill).not.toContain('workflow.legacy.md.bak');
   });
 
   it(
     'LLM following SKILL.md + workflow.orchestrator.md drives at least one autopilot cycle',
     async () => {
       const systemPrompt = [
-        'You are running inside an automated e2e test for the new Sprintpilot orchestrator mode.',
+        'You are running inside an automated e2e test for the Sprintpilot orchestrator.',
         'Read _Sprintpilot/skills/sprint-autopilot-on/SKILL.md and follow it exactly.',
-        'execution_mode is set to "orchestrator" in _Sprintpilot/modules/autopilot/config.yaml.',
-        'Therefore you must follow workflow.orchestrator.md (NOT workflow.md).',
+        'Follow workflow.orchestrator.md verbatim — it is the only shipped workflow.',
         'Drive the autopilot via `node _Sprintpilot/bin/autopilot.js` subcommands.',
         'Use `next` to get the next Action, then `record --signal <json>` to report results.',
         'Stop after AT LEAST 3 phase transitions are recorded in the ledger,',

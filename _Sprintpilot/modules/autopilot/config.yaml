@@ -58,26 +58,3 @@ autopilot:
   # which exhausts the token/memory budget. That's why "auto" generates
   # the artifact inline instead of invoking the external skill.
   retrospective_mode: auto
-
-  # Execution mode for the autopilot loop.
-  #
-  # - "orchestrator" (default) — drives via _Sprintpilot/bin/autopilot.js
-  #                   with a typed Action/Signal protocol. The LLM owns
-  #                   in-skill execution; flow control is deterministic.
-  #                   See skills/sprint-autopilot-on/workflow.orchestrator.md.
-  # - "legacy"       — drives via the 1,388-line prose workflow.md.
-  #                   Same byte-for-byte behavior as v2.0.x. Retained for
-  #                   one release cycle for projects that hit
-  #                   orchestrator-mode regressions. Set this if you need
-  #                   to rollback; please also open an issue at
-  #                   https://github.com/ikunin/sprintpilot/issues so we
-  #                   can fix the regression before legacy is removed.
-  #
-  # Migration note: orchestrator mode enforces the BMad 7-step sequence
-  # via a state machine instead of LLM-interpreted prose. If you have
-  # custom skills that depend on legacy autopilot behaviors (e.g.
-  # reading {{next_skill}} from a prior skill's output), set
-  # execution_mode: legacy until those are adapted. The orchestrator
-  # honors `success.output.next_skill_hint` as a tiebreaker for the
-  # same effect; see workflow.orchestrator.md.
-  execution_mode: orchestrator
