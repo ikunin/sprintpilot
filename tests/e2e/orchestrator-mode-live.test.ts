@@ -27,9 +27,9 @@ import { runClaude } from './harness/claude-runner.js';
 import { createTempProject, type TempProject } from './harness/temp-project.js';
 
 const ADDON_SOURCE = join(import.meta.dirname, '../../_Sprintpilot');
-const BUDGET = Number.parseFloat(process.env.BMAD_E2E_BUDGET ?? '15');
+const BUDGET = Number.parseFloat(process.env.BMAD_E2E_BUDGET ?? '5');
 const TIMEOUT = 900_000; // 15 min
-const MODEL = process.env.BMAD_TEST_MODEL ?? 'sonnet';
+const MODEL = process.env.BMAD_TEST_MODEL ?? 'haiku';
 
 const HAS_CLAUDE = (() => {
   try {
@@ -39,10 +39,16 @@ const HAS_CLAUDE = (() => {
     return !!process.env.ANTHROPIC_API_KEY;
   }
 })();
+// Live-LLM tests are off by default — opt in via RUN_LLM_E2E=1.
+// orchestrator-mode-live is part of the broader suite and also requires
+// RUN_LLM_E2E_FULL=1 (canonical fast test is nano.test.ts).
+const RUN_LLM_E2E = process.env.RUN_LLM_E2E === '1';
+const RUN_LLM_E2E_FULL = process.env.RUN_LLM_E2E_FULL === '1';
+const LLM_E2E_ENABLED = RUN_LLM_E2E && RUN_LLM_E2E_FULL;
 
 let project: TempProject;
 
-describe.skipIf(!HAS_CLAUDE)('Orchestrator mode (live LLM)', () => {
+describe.skipIf(!HAS_CLAUDE || !LLM_E2E_ENABLED)('Orchestrator mode (live LLM)', () => {
   beforeAll(() => {
     project = createTempProject({
       installBmadCore: true,

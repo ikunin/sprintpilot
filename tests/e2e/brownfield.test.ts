@@ -24,8 +24,15 @@ import { costTracker } from './harness/cost-tracker.js';
 const FIXTURES_DIR = join(import.meta.dirname, 'fixtures/brownfield');
 const ADDON_SOURCE = join(import.meta.dirname, '../../_Sprintpilot');
 
-/** Model to use — override via BMAD_TEST_MODEL env var (e.g. "opus") */
-const MODEL = process.env.BMAD_TEST_MODEL ?? 'sonnet';
+/** Model to use — override via BMAD_TEST_MODEL env var (e.g. "sonnet", "opus") */
+const MODEL = process.env.BMAD_TEST_MODEL ?? 'haiku';
+
+// Live-LLM tests are off by default — opt in via RUN_LLM_E2E=1.
+// brownfield is part of the broader suite and also requires RUN_LLM_E2E_FULL=1
+// (canonical fast test is nano.test.ts).
+const RUN_LLM_E2E = process.env.RUN_LLM_E2E === '1';
+const RUN_LLM_E2E_FULL = process.env.RUN_LLM_E2E_FULL === '1';
+const LLM_E2E_ENABLED = RUN_LLM_E2E && RUN_LLM_E2E_FULL;
 
 let projectDir: string;
 let remoteDir: string | undefined;
@@ -73,7 +80,7 @@ if (!GIT_SIGN_OK) {
   );
 }
 
-describe.skipIf(!GIT_SIGN_OK)('Brownfield: json-server analysis + auth feature', () => {
+describe.skipIf(!GIT_SIGN_OK || !LLM_E2E_ENABLED)('Brownfield: json-server analysis + auth feature', () => {
   beforeAll(async () => {
     // Clone json-server v0.17.x into a temp directory
     const { mkdtempSync, cpSync } = await import('node:fs');
@@ -185,7 +192,7 @@ describe.skipIf(!GIT_SIGN_OK)('Brownfield: json-server analysis + auth feature',
   it('B1: codebase-map produces 5 analysis files', async () => {
     const result = await runClaude('/sprintpilot-codebase-map', {
       cwd: projectDir,
-      maxBudget: 10,
+      maxBudget: 4,
       model: MODEL,
       addDirs: [ADDON_SOURCE],
       timeout: 600_000,
@@ -234,7 +241,7 @@ describe.skipIf(!GIT_SIGN_OK)('Brownfield: json-server analysis + auth feature',
   it('B2: assess produces brownfield assessment', async () => {
     const result = await runClaude('/sprintpilot-assess', {
       cwd: projectDir,
-      maxBudget: 8,
+      maxBudget: 3,
       model: MODEL,
       addDirs: [ADDON_SOURCE],
       timeout: 600_000,
@@ -268,7 +275,7 @@ describe.skipIf(!GIT_SIGN_OK)('Brownfield: json-server analysis + auth feature',
   it('B3: reverse-architect produces architecture doc', async () => {
     const result = await runClaude('/sprintpilot-reverse-architect', {
       cwd: projectDir,
-      maxBudget: 8,
+      maxBudget: 3,
       model: MODEL,
       addDirs: [ADDON_SOURCE],
       timeout: 600_000,
@@ -323,7 +330,7 @@ describe.skipIf(!GIT_SIGN_OK)('Brownfield: json-server analysis + auth feature',
       '/sprintpilot-migrate\n\nTarget: Migrate from Express to Fastify',
       {
         cwd: projectDir,
-        maxBudget: 10,
+        maxBudget: 4,
         model: MODEL,
         addDirs: [ADDON_SOURCE],
         timeout: 1_500_000, // 25 min — 12-step migration is the heaviest skill

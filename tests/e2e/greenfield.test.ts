@@ -44,15 +44,22 @@ const ADDON_SOURCE = join(import.meta.dirname, '../../_Sprintpilot');
 // deliberately stops when it detects all stories are done and requires a
 // new /sprint-autopilot-on invocation to finalize — a context-rot
 // mitigation that trades one cheap boot for reliable CRITICAL cleanup.
-const MAX_SESSIONS = 6;
-const BUDGET_PER_SESSION = 25;
+const MAX_SESSIONS = 4;
+const BUDGET_PER_SESSION = 8;
 const TIMEOUT_PER_SESSION = 1_800_000; // 30 min — Sonnet often needs the full window
 
-/** Model to use — override via BMAD_TEST_MODEL env var (e.g. "opus") */
-const MODEL = process.env.BMAD_TEST_MODEL ?? 'sonnet';
+/** Model to use — override via BMAD_TEST_MODEL env var (e.g. "sonnet", "opus") */
+const MODEL = process.env.BMAD_TEST_MODEL ?? 'haiku';
 
 /** Remote URL for push testing — must be set via BMAD_TEST_REMOTE_URL env var */
 const REMOTE_URL = process.env.BMAD_TEST_REMOTE_URL ?? '';
+
+// Live-LLM tests are off by default — opt in via RUN_LLM_E2E=1.
+// greenfield is part of the broader suite and also requires RUN_LLM_E2E_FULL=1
+// (canonical fast test is nano.test.ts).
+const RUN_LLM_E2E = process.env.RUN_LLM_E2E === '1';
+const RUN_LLM_E2E_FULL = process.env.RUN_LLM_E2E_FULL === '1';
+const LLM_E2E_ENABLED = RUN_LLM_E2E && RUN_LLM_E2E_FULL;
 
 let project: TempProject;
 
@@ -221,7 +228,7 @@ function getTestCount(dir: string): { files: number; tests: number; error?: stri
   }
 }
 
-describe('Greenfield: Tic Tac Toe via Sprintpilot', () => {
+describe.skipIf(!LLM_E2E_ENABLED)('Greenfield: Tic Tac Toe via Sprintpilot', () => {
   beforeAll(() => {
     project = createTempProject({
       remoteUrl: REMOTE_URL,

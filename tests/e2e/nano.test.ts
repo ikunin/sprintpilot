@@ -31,10 +31,10 @@ import { createTempProject, placeFixture, type TempProject } from './harness/tem
 const FIXTURES_DIR = join(import.meta.dirname, 'fixtures/greenfield');
 const ADDON_SOURCE = join(import.meta.dirname, '../../_Sprintpilot');
 
-const MAX_SESSIONS = 4;
-const BUDGET_PER_SESSION = 20;
+const MAX_SESSIONS = 3;
+const BUDGET_PER_SESSION = 6;
 const TIMEOUT_PER_SESSION = 1_200_000; // 20 min
-const MODEL = process.env.BMAD_TEST_MODEL ?? 'sonnet';
+const MODEL = process.env.BMAD_TEST_MODEL ?? 'haiku';
 const REMOTE_URL = process.env.BMAD_TEST_REMOTE_URL ?? '';
 // claude CLI may authenticate via keychain (Claude Code install) OR an
 // ANTHROPIC_API_KEY env var. Skip only when BOTH are missing AND the
@@ -49,6 +49,10 @@ const HAS_CLAUDE = (() => {
     return !!process.env.ANTHROPIC_API_KEY;
   }
 })();
+// Live-LLM tests are off by default — opt in via RUN_LLM_E2E=1.
+// nano is the canonical test; the broader greenfield/sudoku/medium-parallel
+// suites also require RUN_LLM_E2E_FULL=1.
+const RUN_LLM_E2E = process.env.RUN_LLM_E2E === '1';
 
 let project: TempProject;
 
@@ -92,7 +96,7 @@ function skillsInvoked(dir: string): Set<string> {
   return skills;
 }
 
-describe.skipIf(!HAS_CLAUDE)('Nano profile (Claude Code)', () => {
+describe.skipIf(!HAS_CLAUDE || !RUN_LLM_E2E)('Nano profile (Claude Code)', () => {
   beforeAll(() => {
     project = createTempProject({
       remoteUrl: REMOTE_URL,

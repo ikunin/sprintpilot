@@ -60,10 +60,10 @@ import { createTempProject, placeFixture, type TempProject } from './harness/tem
 const FIXTURES_DIR = join(import.meta.dirname, 'fixtures/sudoku');
 const ADDON_SOURCE = join(import.meta.dirname, '../../_Sprintpilot');
 
-const MAX_SESSIONS = 8;
-const BUDGET_PER_SESSION = 30;
+const MAX_SESSIONS = 5;
+const BUDGET_PER_SESSION = 10;
 const TIMEOUT_PER_SESSION = 1_800_000; // 30 min
-const MODEL = process.env.BMAD_TEST_MODEL ?? 'sonnet';
+const MODEL = process.env.BMAD_TEST_MODEL ?? 'haiku';
 const REMOTE_URL = process.env.BMAD_TEST_REMOTE_URL ?? '';
 const AUTO_CLEANUP = process.env.SUDOKU_AUTO_CLEANUP === '1';
 
@@ -75,6 +75,12 @@ const HAS_CLAUDE = (() => {
     return !!process.env.ANTHROPIC_API_KEY;
   }
 })();
+// Live-LLM tests are off by default — opt in via RUN_LLM_E2E=1.
+// sudoku is part of the broader suite and also requires RUN_LLM_E2E_FULL=1
+// (canonical fast test is nano.test.ts).
+const RUN_LLM_E2E = process.env.RUN_LLM_E2E === '1';
+const RUN_LLM_E2E_FULL = process.env.RUN_LLM_E2E_FULL === '1';
+const LLM_E2E_ENABLED = RUN_LLM_E2E && RUN_LLM_E2E_FULL;
 
 let project: TempProject;
 let devServer: ChildProcess | null = null;
@@ -187,7 +193,7 @@ async function waitForDevUrl(logPath: string, timeoutMs: number): Promise<string
   throw new Error(`dev server URL not detected within ${timeoutMs}ms — see ${logPath}`);
 }
 
-describe.skipIf(!HAS_CLAUDE)('Sudoku web game (parallel dispatch)', () => {
+describe.skipIf(!HAS_CLAUDE || !LLM_E2E_ENABLED)('Sudoku web game (parallel dispatch)', () => {
   beforeAll(() => {
     project = createTempProject({
       remoteUrl: REMOTE_URL,

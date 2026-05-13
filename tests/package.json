@@ -5,12 +5,16 @@
   "scripts": {
     "test:unit": "vitest run unit/",
     "test:scripts": "vitest run scripts/",
-    "test:e2e:greenfield": "vitest run e2e/greenfield.test.ts",
-    "test:e2e:brownfield": "vitest run e2e/brownfield.test.ts",
-    "test:e2e:sudoku": "vitest run e2e/sudoku.test.ts",
-    "test:e2e": "vitest run e2e/",
     "test:fast": "vitest run unit/ scripts/",
-    "test": "vitest run unit/ scripts/ e2e/"
+    "test": "vitest run unit/ scripts/",
+    "test:e2e:nano": "RUN_LLM_E2E=1 vitest run e2e/nano.test.ts",
+    "test:e2e:live": "RUN_LLM_E2E=1 vitest run e2e/nano.test.ts",
+    "test:e2e:greenfield": "RUN_LLM_E2E=1 RUN_LLM_E2E_FULL=1 vitest run e2e/greenfield.test.ts",
+    "test:e2e:brownfield": "RUN_LLM_E2E=1 RUN_LLM_E2E_FULL=1 vitest run e2e/brownfield.test.ts",
+    "test:e2e:sudoku": "RUN_LLM_E2E=1 RUN_LLM_E2E_FULL=1 vitest run e2e/sudoku.test.ts",
+    "test:e2e:medium-parallel": "RUN_LLM_E2E=1 RUN_LLM_E2E_FULL=1 vitest run e2e/medium-parallel.test.ts",
+    "test:e2e:orchestrator-mode-live": "RUN_LLM_E2E=1 RUN_LLM_E2E_FULL=1 vitest run e2e/orchestrator-mode-live.test.ts",
+    "test:e2e:live:full": "RUN_LLM_E2E=1 RUN_LLM_E2E_FULL=1 vitest run e2e/"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.12",
