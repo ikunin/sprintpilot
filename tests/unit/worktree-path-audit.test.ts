@@ -2,15 +2,24 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-// PR 10 audit: no command inside workflow.md or any Sprintpilot script
-// should treat `<worktree>/.git` as a directory. In a git worktree the
-// `.git` entry is a file pointing at the parent repo's `.git/worktrees/
-// <name>/`, so `ls <worktree>/.git/refs/...` and friends break silently.
-// Use `git -C <worktree> rev-parse --git-dir` or similar git porcelain
+// PR 10 audit: no command inside workflow.legacy.md.bak (legacy
+// rollback workflow) or any Sprintpilot script should treat
+// `<worktree>/.git` as a directory. In a git worktree the `.git` entry
+// is a file pointing at the parent repo's `.git/worktrees/<name>/`, so
+// `ls <worktree>/.git/refs/...` and friends break silently. Use
+// `git -C <worktree> rev-parse --git-dir` or similar git porcelain
 // instead.
 
 const REPO_ROOT = join(__dirname, '..', '..');
-const WORKFLOW_MD = join(REPO_ROOT, '_Sprintpilot', 'skills', 'sprint-autopilot-on', 'workflow.md');
+// v2.1+ ships the legacy workflow only as `.bak` — audit that file so a
+// rollback to execution_mode=legacy doesn't reintroduce worktree-unsafe paths.
+const WORKFLOW_MD = join(
+  REPO_ROOT,
+  '_Sprintpilot',
+  'skills',
+  'sprint-autopilot-on',
+  'workflow.legacy.md.bak',
+);
 const SCRIPTS_DIR = join(REPO_ROOT, '_Sprintpilot', 'scripts');
 
 // Patterns that would misbehave inside a worktree. Kept specific — broad
@@ -61,12 +70,13 @@ function scanForBadPatterns(body: string): string[] {
 }
 
 describe('PR 10 worktree-path audit', () => {
-  it('workflow.md contains no worktree-context access that treats .git as a directory', () => {
+  it('workflow.legacy.md.bak contains no worktree-context access that treats .git as a directory', () => {
     const body = readFileSync(WORKFLOW_MD, 'utf8');
     const hits = scanForBadPatterns(body);
-    expect(hits, `workflow.md contains worktree-unsafe .git paths:\n${hits.join('\n')}`).toEqual(
-      [],
-    );
+    expect(
+      hits,
+      `workflow.legacy.md.bak contains worktree-unsafe .git paths:\n${hits.join('\n')}`,
+    ).toEqual([]);
   });
 
   it('no Sprintpilot script treats a worktree .git as a directory', () => {

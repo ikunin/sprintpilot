@@ -52,7 +52,7 @@ This unblocks parallel story dispatch (`parallel_stories: true` + `dispatch-laye
 
 Independent of `session_story_limit`, the autopilot forces an extra session at end-of-sprint. When step 2 detects all stories are done, it writes `current_bmad_step = sprint-finalize-pending` to the state file and halts — it does **not** run step 10 (cleanup) in that session. The next `/sprint-autopilot-on` invocation reads the marker in step 1 and jumps directly to step 10 with a clean context window, where seven CRITICAL deterministic script calls run the cleanup (checkbox marking, worktree removal, lock release, artifact commit, sprint-complete state, verification, state-file delete).
 
-This behavior is not configurable: it's a mitigation for late-session instruction decay that was reliably dropping cleanup actions in long single-session runs. The extra session is short (typically ~60-100 turns, under $2). See `_Sprintpilot/skills/sprint-autopilot-on/workflow.md` step 2 and step 10 for the exact protocol.
+This behavior is not configurable: it's a mitigation for late-session instruction decay that was reliably dropping cleanup actions in long single-session runs. The extra session is short (typically ~60-100 turns, under $2). See `_Sprintpilot/skills/sprint-autopilot-on/workflow.legacy.md.bak` step 2 and step 10 for the original protocol — orchestrator mode preserves the same behavior via the `sprint_finalize_pending` terminal state in the state machine.
 
 ---
 

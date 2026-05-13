@@ -46,27 +46,59 @@ describe('branchName', () => {
     expect(branchName(flatToProfile({}, 'medium'), 'S1.2', 'E1')).toBe('story/s1.2');
   });
 
-  it('epic granularity → epic/<key>', () => {
+  it('epic granularity → <branch_prefix>epic-<key> (e.g. story/epic-e2)', () => {
+    // Format matches the legacy workflow (workflow.legacy.md.bak:685,716)
+    // and is what the nano e2e test asserts on (origin/story/epic-*).
     const p = flatToProfile({ git: { granularity: 'epic' } }, 'nano');
-    expect(branchName(p, 'S1', 'E2')).toBe('epic/e2');
+    expect(branchName(p, 'S1', 'E2')).toBe('story/epic-e2');
+  });
+
+  it('epic granularity honors a custom branch_prefix', () => {
+    const p = flatToProfile(
+      { git: { granularity: 'epic', branch_prefix: 'feature/' } },
+      'nano',
+    );
+    expect(branchName(p, 'S1', 'E3')).toBe('feature/epic-e3');
   });
 });
 
 describe('plan: commit_and_push_story', () => {
-  it('with explicit files: add <files> → commit → push', () => {
+  it('with explicit files: phase 1 = add <files> → commit → push story branch', () => {
     const r = plan(story(), flatToProfile({}, 'medium'), {
       type: 'git_op',
       op: 'commit_and_push_story',
       files: ['src/a.ts', 'src/b.ts'],
     });
     expect(r.branch).toBe('story/s1.2');
-    expect(r.steps).toHaveLength(3);
     expect(r.steps[0].args).toEqual(['git', 'add', 'src/a.ts', 'src/b.ts']);
     expect(r.steps[1].args[0]).toBe('git');
     expect(r.steps[1].args[1]).toBe('commit');
     expect(r.steps[1].args).toContain('-m');
     expect(r.steps[2].args).toEqual(['git', 'push', '-u', 'origin', 'story/s1.2']);
     expect(r.steps[2].retry).toBeDefined();
+  });
+
+  it('phase 2 syncs _bmad-output/ to base branch after pushing story branch', () => {
+    const r = plan(story(), flatToProfile({}, 'medium'), {
+      type: 'git_op',
+      op: 'commit_and_push_story',
+    });
+    // Phase 1 ends with push to origin <story-branch> at step[2].
+    // Phase 2 must follow: switch base → checkout _bmad-output from story
+    // branch → add → commit (--allow-empty) → push base → switch back.
+    expect(r.steps[3].args).toEqual(['git', 'switch', 'main']);
+    expect(r.steps[4].args).toEqual([
+      'git',
+      'checkout',
+      'story/s1.2',
+      '--',
+      '_bmad-output',
+    ]);
+    expect(r.steps[5].args).toEqual(['git', 'add', '_bmad-output']);
+    expect(r.steps[6].args.slice(0, 4)).toEqual(['git', 'commit', '--allow-empty', '-m']);
+    expect(r.steps[7].args).toEqual(['git', 'push', 'origin', 'main']);
+    expect(r.steps[7].retry).toBeDefined();
+    expect(r.steps[8].args).toEqual(['git', 'switch', 'story/s1.2']);
   });
 
   it('without explicit files: uses git add -u (never -A or .)', () => {
@@ -82,13 +114,19 @@ describe('plan: commit_and_push_story', () => {
     }
   });
 
-  it('with has_origin=false: no push step', () => {
+  it('with has_origin=false: no push steps (story OR base)', () => {
     const p = { ...flatToProfile({}, 'medium'), has_origin: false };
     const r = plan(story(), p, { type: 'git_op', op: 'commit_and_push_story' });
-    expect(r.steps.find((s) => s.args.includes('push'))).toBeUndefined();
+    const pushSteps = r.steps.filter(
+      (s) => s.args[0] === 'git' && s.args[1] === 'push',
+    );
+    expect(pushSteps).toHaveLength(0);
+    // The base-branch sync (switch/checkout/add/commit) still happens —
+    // useful for local-only workflows that want main updated.
+    expect(r.steps.some((s) => s.args.join(' ') === 'git switch main')).toBe(true);
   });
 
-  it('honors a custom message', () => {
+  it('honors a custom message on the story-branch commit', () => {
     const r = plan(story(), flatToProfile({}, 'medium'), {
       type: 'git_op',
       op: 'commit_and_push_story',
@@ -97,13 +135,17 @@ describe('plan: commit_and_push_story', () => {
     expect(r.steps[1].args).toContain('fix: oops');
   });
 
-  it('push step has 4-attempt exponential backoff retry config', () => {
+  it('story-branch push has 4-attempt exponential backoff retry config', () => {
     const r = plan(story(), flatToProfile({}, 'medium'), {
       type: 'git_op',
       op: 'commit_and_push_story',
     });
-    const push = r.steps[r.steps.length - 1];
-    expect(push.retry).toMatchObject({
+    // The story-branch push is step[2] (first git push in the sequence).
+    const push = r.steps.find(
+      (s) => s.args.join(' ') === 'git push -u origin story/s1.2',
+    );
+    expect(push).toBeDefined();
+    expect(push?.retry).toMatchObject({
       attempts: 4,
       backoff_ms: [2000, 4000, 8000, 16000],
       on: 'network',

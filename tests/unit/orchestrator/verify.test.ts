@@ -311,15 +311,49 @@ function seedStoryFileWithTasks(unchecked: number, checked: number): string {
 }
 
 describe('verify STORY_DONE', () => {
-  it('ok with sprint-status done + no unchecked tasks + branch + commit_sha', () => {
+  it('ok with sprint-status done + no unchecked tasks + branch + commit_sha + git_steps_completed', () => {
     seedSprintStatus('development_status:\n  S1:\n    status: done\n    title: x\n');
     const storyPath = seedStoryFileWithTasks(0, 2);
+    const r = verify(
+      { phase: STATES.STORY_DONE, story_key: 'S1', story_file_path: storyPath },
+      {
+        commit_sha: 'abc',
+        branch: 'story/S1',
+        story_key: 'S1',
+        git_steps_completed: true,
+      },
+      { projectRoot },
+    );
+    expect(r.ok).toBe(true);
+  });
+
+  it("fails when git_steps_completed is missing — LLM ran 'git commit' but not 'git push'", () => {
+    seedSprintStatus('development_status:\n  S1: done\n');
+    const storyPath = seedStoryFileWithTasks(0, 1);
     const r = verify(
       { phase: STATES.STORY_DONE, story_key: 'S1', story_file_path: storyPath },
       { commit_sha: 'abc', branch: 'story/S1', story_key: 'S1' },
       { projectRoot },
     );
-    expect(r.ok).toBe(true);
+    expect(r.ok).toBe(false);
+    expect(r.issues.join(' ')).toContain('git_steps_completed must be true');
+  });
+
+  it('fails when git_steps_completed is false', () => {
+    seedSprintStatus('development_status:\n  S1: done\n');
+    const storyPath = seedStoryFileWithTasks(0, 1);
+    const r = verify(
+      { phase: STATES.STORY_DONE, story_key: 'S1', story_file_path: storyPath },
+      {
+        commit_sha: 'abc',
+        branch: 'story/S1',
+        story_key: 'S1',
+        git_steps_completed: false,
+      },
+      { projectRoot },
+    );
+    expect(r.ok).toBe(false);
+    expect(r.issues.join(' ')).toContain('git_steps_completed must be true');
   });
 
   it('fails when sprint-status.yaml is missing', () => {
@@ -370,7 +404,7 @@ describe('verify STORY_DONE', () => {
     seedSprintStatus('development_status:\n  S1: done\n');
     const r = verify(
       { phase: STATES.STORY_DONE, story_key: 'S1' },
-      { commit_sha: 'abc', branch: 'story/S1' },
+      { commit_sha: 'abc', branch: 'story/S1', git_steps_completed: true },
       { projectRoot },
     );
     expect(r.ok).toBe(true);

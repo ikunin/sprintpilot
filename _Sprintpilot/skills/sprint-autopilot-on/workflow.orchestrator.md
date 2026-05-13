@@ -7,10 +7,9 @@ state machine that enforces the BMad 7-step sequence. You own the
 not the flow.
 
 This file is the **≤150-line** replacement for the legacy
-`workflow.md`. It is only consulted when
-`autopilot.execution_mode: orchestrator` in `modules/autopilot/config.yaml`
-(the v2.1+ default). Until that flips, the legacy 1,388-line prose
-workflow remains authoritative.
+`workflow.md` (now shipped only as `workflow.legacy.md.bak` for
+rollback). It is consulted when `autopilot.execution_mode: orchestrator`
+in `modules/autopilot/config.yaml` — the v2.1+ default.
 
 ## The loop
 
@@ -36,7 +35,7 @@ orchestrator emits it.
 |-------------------|--------------------------------------------------------------------------------------------------|
 | `invoke_skill`    | Run the named BMad skill **verbatim from its own body** (e.g. `bmad-create-story`, `bmad-quick-dev`, `bmad-code-review`). `action.template_slots` is a parameter bag (story_key, prior_diagnosis, relevant_decisions, prior_signals_summary, …) — it's input context for BMad's skill, NOT a replacement for the skill's instructions. When `implementation_flow=quick`, you'll receive `invoke_skill: bmad-quick-dev` per story — follow BMad's `step-oneshot.md`. |
 | `run_script`      | Execute `action.command` via the host's shell-equivalent. Argv-only — no shell interpolation.    |
-| `git_op`          | Perform `action.op` (commit_and_push_story, merge, etc.) per `action.profile`'s git policy.      |
+| `git_op`          | Execute `action.steps` in order. The orchestrator pre-plans every git op (commit_and_push_story, merge_epic, push, fetch, create_branch) via `git-plan.js` and inlines the resulting argv sequence — each step has `args: [cmd, ...argv]`, a `description`, and an optional `retry` policy. Run each step's argv verbatim (NO shell interpolation), halt on first non-retryable failure. Never improvise the git commands or skip a step — `git push` lives in `steps`, not in `op`. |
 | `parallel_batch`  | Dispatch each child action concurrently (M6+ hosts only — fall back to sequential otherwise).    |
 | `user_prompt`     | Ask the user `action.prompt`. Pass the answer back via `user_input` signal.                      |
 | `halt`            | Stop. Honor `action.handoff: 'sprint_finalize_pending'` by ending the session cleanly.           |
@@ -97,7 +96,7 @@ bookkeeping you'd otherwise be tempted to skip:
 | `dev_red` / `dev_green` | Test files exist on disk; runner exit codes match the phase contract; `tests_run` matches the runner's count. |
 | `code_review` | `_bmad-output/reviews/<story_key>.md` exists; `findings[]` carries `{id, severity, category, action: 'block'\|'patch'\|'defer', rationale}` for every finding. |
 | `patch_apply` | Every `patch_finding` id present in `state.patch_findings` is included in `applied_finding_ids`. |
-| `story_done` (and `nano_quick_dev`) | sprint-status.yaml shows this story as `done` (under `development_status.<story_key>` or inline). Story file has zero remaining `[ ]` task boxes — dev-story is responsible for flipping them to `[x]`. `commit_sha` and `branch` reported; `story_key` matches. |
+| `story_done` (and `nano_quick_dev`) | sprint-status.yaml shows this story as `done` (under `development_status.<story_key>` or inline). Story file has zero remaining `[ ]` task boxes — dev-story is responsible for flipping them to `[x]`. `commit_sha` and `branch` reported; `story_key` matches. **`git_steps_completed: true` in success output** — set this ONLY after every step in `action.steps` (the orchestrator's decorated git plan: `git add`, `git commit`, `git push -u origin <branch>`) has exited 0. Skipping `git push` and reporting success leaves the branch unpushed and trips this check. |
 | `retrospective` | `_bmad-output/retrospectives/<epic>.md` exists. |
 
 Skipping any of these — even when the code is "obviously done" — produces

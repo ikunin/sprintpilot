@@ -211,7 +211,12 @@ describe('Orchestrator end-to-end smoke (full story cycle)', () => {
     seedSprintStatusDone();
     const r8 = record({
       status: 'success',
-      output: { commit_sha: 'def456', branch: 'story/s1', story_key: 'S1' },
+      output: {
+        commit_sha: 'def456',
+        branch: 'story/s1',
+        story_key: 'S1',
+        git_steps_completed: true,
+      },
     });
     expect(JSON.parse(r8.stdout).phase).toBe('epic_boundary_check');
 

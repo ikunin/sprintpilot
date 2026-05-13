@@ -273,6 +273,16 @@ function verifyStoryDone(state, out, ctx) {
   if (out.story_key && state.story_key && out.story_key !== state.story_key) {
     issues.push(`commit story_key mismatch: ${out.story_key} vs ${state.story_key}`);
   }
+  // The orchestrator decorated this phase's git_op action with the planned
+  // argv steps (commit + push). Without this check, the LLM can run only
+  // `git commit` and report success — leaving the story branch unpushed.
+  // Confirmed live in greenfield e2e: signal had commit_sha+branch but
+  // origin/<branch> never appeared on remote.
+  if (out.git_steps_completed !== true) {
+    issues.push(
+      'git_steps_completed must be true — set to true ONLY after every step in action.steps (git add, commit, push) exited 0. Skipping git push is the most common cause.',
+    );
+  }
   // BMad bookkeeping: sprint-status.yaml MUST record this story as `done`.
   // Without this check, the LLM can claim STORY_DONE while sprint-status
   // still shows the story as `backlog`/`in-progress`, which means the next

@@ -5,18 +5,22 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 /**
- * Legacy-workflow lockdown: when execution_mode=orchestrator (the v2.1+
- * default), the autopilot CLI moves `workflow.md` aside on `start` so
- * the LLM under `/sprint-autopilot-on` cannot silently fall back to the
- * legacy 1,388-line prose workflow when it's supposed to be following
- * the deterministic orchestrator state machine.
+ * Legacy-workflow lockdown: v2.1+ installs do not ship `workflow.md` —
+ * only `workflow.legacy.md.bak` is present. But upgrades from v2.0.x
+ * may still have a `workflow.md` left over. When execution_mode=
+ * orchestrator (the v2.1+ default), the autopilot CLI moves any
+ * surviving `workflow.md` aside on `start` so the LLM under
+ * `/sprint-autopilot-on` cannot silently fall back to the legacy
+ * 1,388-line prose workflow.
  *
- * Tested as an integration: invoke `autopilot start` end-to-end and
- * assert filesystem state.
+ * Tested as an integration: synthesize the v2.0.x-style layout
+ * (workflow.md present), invoke `autopilot start`, and assert
+ * filesystem state.
  */
 
 const CLI = join(__dirname, '..', '..', '..', '_Sprintpilot', 'bin', 'autopilot.js');
 const REPO_ROOT = join(__dirname, '..', '..', '..');
+const LEGACY_WORKFLOW_STUB = '# legacy workflow stub for lockdown tests\n';
 
 let projectRoot: string;
 
@@ -28,16 +32,23 @@ beforeEach(() => {
   for (const sub of ['scripts', 'lib', 'modules', 'skills']) {
     execFileSync('cp', ['-R', join(REPO_ROOT, '_Sprintpilot', sub), join(dest, sub)]);
   }
+  // Simulate a v2.0.x install: synthesize a stale `workflow.md` in both
+  // skill locations. The addon source itself no longer ships it (only
+  // `workflow.legacy.md.bak`), so we plant a stub the lockdown can move.
+  const addonSkill = join(dest, 'skills', 'sprint-autopilot-on');
+  writeFileSync(join(addonSkill, 'workflow.md'), LEGACY_WORKFLOW_STUB);
+
   // Also seed `.claude/skills/sprint-autopilot-on/` with the workflow files
   // — that's the location the LLM actually reads under Claude Code.
   const userSkill = join(projectRoot, '.claude', 'skills', 'sprint-autopilot-on');
   mkdirSync(userSkill, { recursive: true });
-  for (const f of ['SKILL.md', 'workflow.md', 'workflow.orchestrator.md']) {
+  for (const f of ['SKILL.md', 'workflow.orchestrator.md']) {
     const src = join(REPO_ROOT, '_Sprintpilot', 'skills', 'sprint-autopilot-on', f);
     if (existsSync(src)) {
       writeFileSync(join(userSkill, f), readFileSync(src, 'utf-8'));
     }
   }
+  writeFileSync(join(userSkill, 'workflow.md'), LEGACY_WORKFLOW_STUB);
 });
 
 afterEach(() => {

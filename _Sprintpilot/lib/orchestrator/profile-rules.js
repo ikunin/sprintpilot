@@ -95,6 +95,10 @@ function flatToProfile(resolved, profileName) {
       typeof get(resolved, 'git.base_branch') === 'string'
         ? get(resolved, 'git.base_branch')
         : 'main',
+    branch_prefix:
+      typeof get(resolved, 'git.branch_prefix') === 'string'
+        ? get(resolved, 'git.branch_prefix')
+        : 'story/',
     parallel_stories: coerceBool(get(resolved, 'ma.parallel_stories'), false),
     max_parallel_stories: coerceInt(get(resolved, 'ma.max_parallel_stories'), 2),
     fallback_on_tests_fail: coerceBool(

@@ -74,6 +74,24 @@ describe('autopilot validate-config', () => {
 });
 
 describe('autopilot start', () => {
+  it('nano profile boots at NANO_QUICK_DEV (not CREATE_STORY)', () => {
+    // Fresh session under complexity_profile=nano must emit
+    // invoke_skill: bmad-quick-dev as its first action. Pre-fix this
+    // hardcoded current_bmad_step=create_story and forced the LLM down
+    // the full 7-step flow even under nano.
+    writeFileSync(
+      join(projectRoot, '_Sprintpilot', 'modules', 'autopilot', 'config.yaml'),
+      'complexity_profile: nano\n',
+      'utf8',
+    );
+    const r = runCli(['start']);
+    expect(r.status).toBe(0);
+    const parsed = JSON.parse(r.stdout);
+    expect(parsed.phase).toBe('nano_quick_dev');
+    expect(parsed.action.type).toBe('invoke_skill');
+    expect(parsed.action.skill).toBe('bmad-quick-dev');
+  });
+
   it('boots a fresh session and emits the create_story action', () => {
     const r = runCli(['start']);
     expect(r.status).toBe(0);
@@ -167,6 +185,42 @@ describe('autopilot record', () => {
     const parsed = JSON.parse(r.stdout);
     expect(parsed.verdict).toBe('retry');
     expect(parsed.action.template_slots.prior_diagnosis).toBe('fixture missing');
+  });
+});
+
+describe('autopilot next: git_op decoration', () => {
+  it('inlines git-plan steps into git_op actions (story_done emits commit + push)', () => {
+    runCli(['start']);
+    // Seed state at story_done so the next action is git_op:commit_and_push_story.
+    const statePath = join(
+      projectRoot,
+      '_bmad-output',
+      'implementation-artifacts',
+      'autopilot-state.yaml',
+    );
+    const existing = readFileSync(statePath, 'utf8');
+    writeFileSync(
+      statePath,
+      existing.replace(/current_bmad_step:.*$/m, 'current_bmad_step: story_done') +
+        '\ncurrent_story: 1-1-game-engine\n',
+      'utf8',
+    );
+
+    const r = runCli(['next']);
+    expect(r.status).toBe(0);
+    const parsed = JSON.parse(r.stdout);
+    expect(parsed.action.type).toBe('git_op');
+    expect(parsed.action.op).toBe('commit_and_push_story');
+    // The decoration must inline the planned argv steps so the LLM doesn't
+    // have to interpret the abstract op — without this, live-LLM sessions
+    // silently skipped `git push` after STORY_DONE.
+    expect(Array.isArray(parsed.action.steps)).toBe(true);
+    expect(parsed.action.steps.length).toBeGreaterThanOrEqual(2);
+    const allArgs = parsed.action.steps.map((s: { args: string[] }) => s.args.join(' '));
+    expect(allArgs.some((s: string) => s.startsWith('git add'))).toBe(true);
+    expect(allArgs.some((s: string) => s.startsWith('git commit'))).toBe(true);
+    expect(allArgs.some((s: string) => /^git push -u origin /.test(s))).toBe(true);
+    expect(parsed.action.branch).toBe('story/1-1-game-engine');
   });
 });
 

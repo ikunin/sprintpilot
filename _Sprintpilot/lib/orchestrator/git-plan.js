@@ -26,21 +26,40 @@ function sanitizeStoryKey(key) {
 //   the user pre-created a working branch), every story commits to that
 //   single branch — per-story/per-epic branches are NOT created.
 //   Otherwise honor profile.granularity for story/epic per-unit branches.
+//
+// Format matches the legacy workflow (see git/config.yaml:12 + the legacy
+// workflow.md:685+716): `<branch_prefix>epic-<epic_id>` for epic granularity
+// and `<branch_prefix><story_key>` for story granularity. The default prefix
+// is "story/", so under nano you get `story/epic-1` (not `epic/1`) — that's
+// what the existing tooling and e2e tests expect.
 function branchName(profile, storyKey, epicKey, state) {
   if (state && state.user_branch) return state.user_branch;
-  const prefix = 'story/';
+  const prefix = profile.branch_prefix || 'story/';
   // git.granularity: 'story' (default) or 'epic'. Nano + large can be epic.
   if (profile.granularity === 'epic' && epicKey) {
-    return `epic/${sanitizeStoryKey(epicKey) || 'unknown'}`;
+    return `${prefix}epic-${sanitizeStoryKey(epicKey) || 'unknown'}`;
   }
   const safe = sanitizeStoryKey(storyKey) || 'unknown';
   return `${prefix}${safe}`;
 }
 
 // commit_and_push_story — full sequence for STORY_DONE.
-//   1. git add (specific files only — never -A / .)
-//   2. git commit -m "<message>"
-//   3. git push -u origin <branch>  (retried 4x with exponential backoff)
+//   Phase 1 — commit + push the story branch (code lives here):
+//     1. git add (specific files only — never -A / .)
+//     2. git commit -m "<message>"
+//     3. git push -u origin <branch>  (retried 4x with exponential backoff)
+//   Phase 2 — sync `_bmad-output/` to <base_branch> (BMad artifacts live
+//   on main so `git log main` is the canonical sprint audit trail):
+//     4. git switch <base_branch>
+//     5. git checkout <branch> -- _bmad-output
+//     6. git add _bmad-output
+//     7. git commit --allow-empty -m "docs(<story>): BMad artifacts"
+//     8. git push origin <base_branch>  (retried 4x)
+//     9. git switch <branch>            (return to story for next phase)
+//   --allow-empty on step 7 covers multi-story sprints where _bmad-output/
+//   on main already matches the story-branch version (e.g. epics.md was
+//   authored during story 1, unchanged for story 2). The empty commit is
+//   audit-trail noise but cheap.
 function plan(state, profile, action) {
   if (!action || !action.type || action.type !== 'git_op') {
     throw new Error('git-plan.plan: action.type must be git_op');
@@ -100,8 +119,13 @@ function planCommitAndPush(state, profile, action, branch) {
     (state.story_key
       ? `feat(${state.story_key}): ${state.ac_summary || 'story done'}`
       : 'feat: story done');
+  const baseBranch = profile.base_branch || 'main';
+  const storyKey = state.story_key || 'sprint';
+  const hasOrigin = profile.has_origin !== false;
 
   const steps = [];
+
+  // Phase 1 — commit + push the story branch (code lives here).
   if (files) {
     steps.push({
       args: ['git', 'add', ...files],
@@ -121,13 +145,48 @@ function planCommitAndPush(state, profile, action, branch) {
     args: ['git', 'commit', '-m', message],
     description: `commit on ${branch}`,
   });
-  if (profile.has_origin !== false) {
+  if (hasOrigin) {
     steps.push({
       args: ['git', 'push', '-u', 'origin', branch],
       description: `push ${branch} (retry 4× exponential backoff on network)`,
       retry: { attempts: 4, backoff_ms: [2000, 4000, 8000, 16000], on: 'network' },
     });
   }
+
+  // Phase 2 — sync `_bmad-output/` to `<base_branch>`. The legacy workflow
+  // (workflow.legacy.md.bak:927–931) commits BMad planning + bookkeeping
+  // artifacts to main after every planning skill; the orchestrator does
+  // the same once per story at STORY_DONE. Without this, planning
+  // artifacts, sprint-status, story files, and reviews exist only on the
+  // story branch and `git log main` is empty of sprint history.
+  steps.push({
+    args: ['git', 'switch', baseBranch],
+    description: `switch to ${baseBranch} to sync BMad artifacts`,
+  });
+  steps.push({
+    args: ['git', 'checkout', branch, '--', '_bmad-output'],
+    description: `bring _bmad-output/ from ${branch} into ${baseBranch}'s working tree`,
+  });
+  steps.push({
+    args: ['git', 'add', '_bmad-output'],
+    description: 'stage BMad artifacts',
+  });
+  steps.push({
+    args: ['git', 'commit', '--allow-empty', '-m', `docs(${storyKey}): BMad artifacts`],
+    description: `commit BMad artifacts to ${baseBranch} (--allow-empty for no-diff stories)`,
+  });
+  if (hasOrigin) {
+    steps.push({
+      args: ['git', 'push', 'origin', baseBranch],
+      description: `push ${baseBranch}`,
+      retry: { attempts: 4, backoff_ms: [2000, 4000, 8000, 16000], on: 'network' },
+    });
+  }
+  steps.push({
+    args: ['git', 'switch', branch],
+    description: `return to ${branch} for the next phase`,
+  });
+
   return { branch, steps };
 }
 

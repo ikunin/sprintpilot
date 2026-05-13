@@ -24,17 +24,24 @@ Picking wrong is the single most common cause of autopilot failure.
   next` / `autopilot record`). You own in-skill execution, diagnosis,
   triage, small judgment calls. The orchestrator owns sequencing,
   verification, and git plumbing.
-- **`workflow.md` is moved aside on start** (renamed to
-  `workflow.legacy.md.bak`). It is NOT the authoritative workflow. Do
-  not search for it; do not reconstruct it from memory; do not read
-  cached BMad legacy patterns and apply them ahead of the orchestrator's
-  state machine. The orchestrator emits actions; you execute them.
+- **`workflow.md` is not shipped with v2.1+.** The legacy v2.0.x
+  workflow is preserved as `workflow.legacy.md.bak` for rollback only.
+  Do not search for `workflow.md`; do not reconstruct it from memory;
+  do not read cached BMad legacy patterns and apply them ahead of the
+  orchestrator's state machine. The orchestrator emits actions; you
+  execute them. (If a stale `workflow.md` survived from a v2.0.x
+  install, the autopilot CLI moves it aside to `workflow.legacy.md.bak`
+  on first `autopilot start` — but a fresh v2.1+ install never had it.)
 
 **If `execution_mode: legacy`:**
 
 - Follow **`./workflow.md`** verbatim.
 - This is the v2.0.x byte-for-byte path. Retained one release for
-  rollback while custom skills are adapted.
+  rollback while custom skills are adapted. `workflow.md` is not
+  present by default — restore it by running
+  `node _Sprintpilot/bin/autopilot.js start` once with
+  `execution_mode: legacy` set, which renames
+  `workflow.legacy.md.bak` → `workflow.md`.
 
 ### Step 3: Never improvise
 

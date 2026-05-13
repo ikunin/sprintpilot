@@ -38,6 +38,7 @@ const decisionLog = require('../lib/orchestrator/decision-log');
 const userCommands = require('../lib/orchestrator/user-commands');
 const divergence = require('../lib/orchestrator/divergence');
 const reportRenderer = require('../lib/orchestrator/report');
+const gitPlan = require('../lib/orchestrator/git-plan');
 
 const { STATES } = stateMachine;
 
@@ -90,14 +91,17 @@ function executionModeOf(resolved) {
   return 'orchestrator';
 }
 
-// Lockdown: when execution_mode=orchestrator, the legacy 1,388-line
-// `workflow.md` is moved aside so the LLM cannot fall back to it. The
-// orchestrator-mode workflow at `workflow.orchestrator.md` is the only
-// path SKILL.md can dispatch to in practice. Idempotent — if the
-// backup already exists, just remove the live workflow.md.
+// Lockdown: v2.1+ no longer ships `workflow.md` in the addon source —
+// only `workflow.legacy.md.bak` is present. But upgrades from v2.0.x
+// may still have a stale `workflow.md` on disk. When
+// execution_mode=orchestrator, move any surviving `workflow.md` aside
+// so the LLM cannot fall back to the legacy 1,388-line prose path.
+// Idempotent — if the backup already exists, just remove the stale live
+// copy.
 //
 // When execution_mode=legacy, the inverse: if a backup exists from a
-// prior orchestrator session, restore it; otherwise no-op.
+// prior orchestrator session OR from a fresh v2.1+ install (which ships
+// only the .bak), restore it; otherwise no-op.
 function lockdownLegacyWorkflow(projectRoot, mode) {
   // Candidate skill dirs. We check both the user's `.claude/skills/`
   // install location AND the addon source tree under `_Sprintpilot/`.
@@ -254,6 +258,21 @@ function logSkillTiming(projectRoot, event, story, skillName, profile) {
   }
 }
 
+// git_op actions carry an abstract `op` (e.g. commit_and_push_story).
+// Inline the planned argv steps from git-plan.js so the LLM doesn't have
+// to interpret the op — it just executes `action.steps` in order.
+// Without this, live-LLM sessions silently skip `git push` after STORY_DONE.
+function decorateGitOp(action, state, profile) {
+  if (!action || action.type !== 'git_op') return action;
+  try {
+    const planned = gitPlan.plan(state, profile, action);
+    return { ...action, branch: planned.branch, steps: planned.steps };
+  } catch (e) {
+    log.warn(`git-plan failed for op=${action.op}: ${e.message}`);
+    return action;
+  }
+}
+
 // ------------------------------------------------------------ side effects
 
 function applySideEffects(sideEffects, runtime, profile, projectRoot) {
@@ -333,11 +352,10 @@ function cmdStart(opts) {
   const { typed: profile, resolved } = resolveProfile(projectRoot, opts.profile);
   const persisted = loadState(projectRoot);
 
-  // Lockdown: when execution_mode=orchestrator (the v2.1+ default), move
-  // the legacy `workflow.md` aside so the LLM under `/sprint-autopilot-on`
-  // has only `workflow.orchestrator.md` available. This was the missing
-  // piece from the prior iteration — live-LLM runs were silently falling
-  // back to the legacy workflow even with execution_mode=orchestrator set.
+  // Lockdown: v2.1+ ships only `workflow.legacy.md.bak`, so on a fresh
+  // install this is a no-op. The hook exists for two cases:
+  //   1. v2.0.x → v2.1 upgrades where a stale `workflow.md` survived.
+  //   2. execution_mode flipped to legacy — restore the .bak → .md.
   const mode = executionModeOf(resolved);
   const lockResults = lockdownLegacyWorkflow(projectRoot, mode);
   for (const r of lockResults) {
@@ -365,11 +383,17 @@ function cmdStart(opts) {
     }
   }
 
-  // Fresh start or clean resume.
+  // Fresh start or clean resume. Initial phase is profile-aware: nano (and
+  // any future profile with implementation_flow=quick) starts at
+  // NANO_QUICK_DEV so the first emitted action is `invoke_skill: bmad-quick-dev`,
+  // not `bmad-create-story`. Without this, fresh nano sessions would route
+  // through the full 7-step flow despite the profile.
+  const initialPhase =
+    profile.implementation_flow === 'quick' ? STATES.NANO_QUICK_DEV : STATES.CREATE_STORY;
   const runtime =
     Object.keys(persisted).length > 0
       ? composeRuntimeState(persisted)
-      : composeRuntimeState({ current_bmad_step: STATES.CREATE_STORY });
+      : composeRuntimeState({ current_bmad_step: initialPhase });
 
   // Branch reuse: on first boot under reuse_user_branch=true, detect the
   // current git branch and lock it in. The state machine + git-plan then
@@ -405,7 +429,7 @@ function cmdStart(opts) {
     );
   }
 
-  const action = stateMachine.nextAction(runtime, profile);
+  const action = decorateGitOp(stateMachine.nextAction(runtime, profile), runtime, profile);
   ledger.append({ kind: 'action_emitted', phase: runtime.phase, action }, { projectRoot });
   persistRuntimeState(runtime, profile, projectRoot);
   if (profile.coalesce_state_writes) stateStore.flush(profile, { projectRoot, story: runtime.story_key });
@@ -418,7 +442,7 @@ function cmdNext(opts) {
   const { typed: profile } = resolveProfile(projectRoot, opts.profile);
   const persisted = loadState(projectRoot);
   const runtime = composeRuntimeState(persisted);
-  const action = stateMachine.nextAction(runtime, profile);
+  const action = decorateGitOp(stateMachine.nextAction(runtime, profile), runtime, profile);
   ledger.append({ kind: 'action_emitted', phase: runtime.phase, action }, { projectRoot });
   // Skill timing: emit a `skill.<name>` start event when we hand off an
   // invoke_skill action. The matching end event is emitted on `record`
@@ -533,7 +557,7 @@ function cmdRecord(opts) {
   }
 
   const payload = {
-    action: result.nextAction,
+    action: decorateGitOp(result.nextAction, result.newState, result.newProfile),
     verdict: result.verdict,
     phase: result.newState.phase,
     profile: result.newProfile.name,
