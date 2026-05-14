@@ -391,7 +391,10 @@ describe('diffCounts', () => {
 
 describe('scaffoldPrompt', () => {
   it('interpolates the four file paths and the epic id', () => {
-    const p = scaffoldPrompt(tmpRoot, '1');
+    // scaffoldPrompt uses path.join, which emits `\` on Windows. Normalize
+    // before asserting the path fragments — the prompt is read by an LLM
+    // that accepts either separator, so this is a test-only concern.
+    const p = scaffoldPrompt(tmpRoot, '1').replace(/\\/g, '/');
     expect(p).toContain(`_bmad-output/implementation-artifacts/sprint-status.yaml`);
     expect(p).toContain(`_bmad-output/planning-artifacts/epics.md`);
     expect(p).toContain(`_bmad-output/planning-artifacts/architecture.md`);

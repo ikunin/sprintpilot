@@ -89,7 +89,13 @@ describe('constants + helpers', () => {
   });
 });
 
-describe('runWithRetry', () => {
+// runWithRetry's behavior is process-spawn agnostic, but these tests
+// exercise it via bash scripts (`/bin/sh` + shebang #!/bin/bash + chmod
+// 0o755). None of that is available on Windows runners, where there's
+// no /bin/sh and exec bits are ignored. Skip the whole `runWithRetry`
+// suite on Windows — the production code is plain Node and runs fine;
+// only this POSIX-flavored test scaffolding is platform-locked.
+describe.skipIf(process.platform === 'win32')('runWithRetry', () => {
   it('succeeds on the first try when the command is clean', () => {
     const r = runWithRetry({ cmd: '/bin/sh', args: ['-c', 'echo ok'] });
     expect(r.status).toBe(0);

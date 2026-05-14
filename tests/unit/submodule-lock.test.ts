@@ -42,7 +42,8 @@ describe('slugify', () => {
 describe('lockPathFor', () => {
   it('resolves under .sprintpilot/submodule-locks', () => {
     const p = lockPathFor(tmpRoot, 'pkg/foo');
-    expect(p.endsWith('.sprintpilot/submodule-locks/pkg-foo.lock')).toBe(true);
+    // Normalize separators so the assertion works on Windows (`\`) too.
+    expect(p.replace(/\\/g, '/').endsWith('.sprintpilot/submodule-locks/pkg-foo.lock')).toBe(true);
   });
 
   it('throws when the slug is empty', () => {

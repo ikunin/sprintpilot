@@ -94,7 +94,8 @@ describe('constants + validators', () => {
 describe('shardPath', () => {
   it('resolves inside the expected directory', () => {
     const p = shardPath(tmpRoot, '1-1-foo', 'state');
-    expect(p.endsWith('.autopilot-state/1-1-foo.yaml')).toBe(true);
+    // Normalize separators so the assertion works on Windows (`\`) too.
+    expect(p.replace(/\\/g, '/').endsWith('.autopilot-state/1-1-foo.yaml')).toBe(true);
   });
   it('refuses to resolve outside the kind dir', () => {
     // STORY_RE blocks this at CLI level; directly calling shardPath with a
