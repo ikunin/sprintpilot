@@ -6,8 +6,14 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { runCli } from './helpers/run.js';
 
 function which(cmd: string): string | null {
+  // Use `where.exe` on Windows (the equivalent of POSIX `which`). On Windows
+  // `where` may print multiple lines (e.g. .cmd, .exe variants) — take the
+  // first non-empty one. Returns null if not on PATH.
+  const finder = process.platform === 'win32' ? 'where' : 'which';
   try {
-    return execFileSync('which', [cmd], { encoding: 'utf8' }).trim();
+    const out = execFileSync(finder, [cmd], { encoding: 'utf8' });
+    const first = out.split(/\r?\n/).find((l) => l.trim().length > 0);
+    return first ? first.trim() : null;
   } catch {
     return null;
   }

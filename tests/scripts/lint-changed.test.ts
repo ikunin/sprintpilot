@@ -6,8 +6,13 @@ import { commitFile, createTempRepo, modifyFile, type TempRepo } from './helpers
 import { runScript } from './helpers/run.js';
 
 function whichOrNull(cmd: string): string | null {
+  // Use `where.exe` on Windows. `where` may print multiple lines — take
+  // the first non-empty match.
+  const finder = process.platform === 'win32' ? 'where' : 'which';
   try {
-    return execFileSync('which', [cmd], { encoding: 'utf8' }).trim();
+    const out = execFileSync(finder, [cmd], { encoding: 'utf8' });
+    const first = out.split(/\r?\n/).find((l) => l.trim().length > 0);
+    return first ? first.trim() : null;
   } catch {
     return null;
   }
@@ -16,9 +21,18 @@ function whichOrNull(cmd: string): string | null {
 function minimalPath(): string {
   const nodePath = whichOrNull('node');
   const gitPath = whichOrNull('git');
-  return [nodePath && dirname(nodePath), gitPath && dirname(gitPath), '/usr/bin', '/bin']
+  const sep = process.platform === 'win32' ? ';' : ':';
+  // POSIX defaults are `/usr/bin` and `/bin`. On Windows the closest
+  // equivalents are System32 and Windows itself — needed so the spawned
+  // shell can still find core commands when PATH is otherwise reduced.
+  const systemDefaults =
+    process.platform === 'win32'
+      ? [process.env.SystemRoot ? `${process.env.SystemRoot}\\System32` : 'C:\\Windows\\System32',
+         process.env.SystemRoot ?? 'C:\\Windows']
+      : ['/usr/bin', '/bin'];
+  return [nodePath && dirname(nodePath), gitPath && dirname(gitPath), ...systemDefaults]
     .filter(Boolean)
-    .join(':');
+    .join(sep);
 }
 
 describe('lint-changed', () => {
