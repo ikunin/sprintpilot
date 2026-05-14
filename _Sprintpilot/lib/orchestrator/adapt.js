@@ -428,6 +428,25 @@ function advanceState(state, profile, newPhase, signal) {
     next.tests_to_rerun = signal.output.tests_to_rerun;
   }
 
+  // Nano + quick-dev is one-shot per BMad's step-oneshot.md: a single
+  // intent → single spec → single commit. No iteration over stories or
+  // epics. Mark the sprint complete after the first successful NANO_QUICK_DEV
+  // so EPIC_BOUNDARY_CHECK routes to SPRINT_FINALIZE_PENDING (halt) instead
+  // of looping back to NANO_QUICK_DEV. The LLM can override by passing
+  // `output.sprint_is_complete: false` if they have additional stories to
+  // run (e.g. a sprint-status.yaml with multiple pending stories was
+  // pre-seeded).
+  if (
+    state.phase === STATES.NANO_QUICK_DEV &&
+    profile.implementation_flow === 'quick' &&
+    !next.sprint_is_complete
+  ) {
+    const explicitOverride = signal && signal.output && signal.output.sprint_is_complete === false;
+    if (!explicitOverride) {
+      next.sprint_is_complete = true;
+    }
+  }
+
   // Propagate story identity from the signal so the next git_op (STORY_DONE)
   // can compute the correct branch name. Without this, state.story_key
   // stays null after bmad-quick-dev / bmad-create-story / bmad-dev-story

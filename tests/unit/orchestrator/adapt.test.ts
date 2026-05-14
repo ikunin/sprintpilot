@@ -143,6 +143,38 @@ describe('success — happy path', () => {
     );
     expect(r.newState.current_epic).toBe('epic-alpha');
   });
+
+  it('NANO_QUICK_DEV success under quick flow marks sprint complete', () => {
+    // BMad's bmad-quick-dev is one-shot (step-oneshot.md): a single
+    // intent → single commit, no iteration. Without auto-completing the
+    // sprint after the first successful NANO_QUICK_DEV, the orchestrator
+    // loops EPIC_BOUNDARY_CHECK → NANO_QUICK_DEV forever because
+    // remaining_stories_in_epic stays 0 and sprint_is_complete stays
+    // false. Auto-set sprint_is_complete so the next transition halts at
+    // SPRINT_FINALIZE_PENDING.
+    const nanoProfile = { ...medium(), implementation_flow: 'quick' };
+    const r = interpretSignal(
+      st(STATES.NANO_QUICK_DEV),
+      { status: 'success', output: { story_key: '1-1-foo', git_steps_completed: true } },
+      nanoProfile,
+    );
+    expect(r.newState.sprint_is_complete).toBe(true);
+  });
+
+  it('NANO_QUICK_DEV success honors explicit sprint_is_complete: false override', () => {
+    // The LLM can opt out of auto-completion if they have additional
+    // stories to run (e.g. multi-story sprint-status was pre-seeded).
+    const nanoProfile = { ...medium(), implementation_flow: 'quick' };
+    const r = interpretSignal(
+      st(STATES.NANO_QUICK_DEV),
+      {
+        status: 'success',
+        output: { story_key: '1-1-foo', sprint_is_complete: false, git_steps_completed: true },
+      },
+      nanoProfile,
+    );
+    expect(r.newState.sprint_is_complete).toBe(false);
+  });
 });
 
 describe('success — verify.js trust boundary', () => {
