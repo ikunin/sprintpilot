@@ -1,5 +1,5 @@
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -312,8 +312,12 @@ describe('dispatch — real git integration', () => {
     // attempted to check out the branch into the same path again and
     // produced misleading errors.
     const wt = join(tmpRoot, '.worktrees', 'y');
-    spawnSync('mkdir', ['-p', wt]);
-    spawnSync('sh', ['-c', `echo content > ${join(wt, 'placeholder.txt')}`]);
+    // Use Node's fs API instead of POSIX `mkdir -p` / `sh -c echo` so the
+    // setup works on Windows runners too. The intent is just to plant a
+    // non-empty directory at the worktree path so the dispatch hits the
+    // "path exists" error code path.
+    mkdirSync(wt, { recursive: true });
+    writeFileSync(join(wt, 'placeholder.txt'), 'content\n');
 
     const r = dispatch({
       keys: ['y'],
