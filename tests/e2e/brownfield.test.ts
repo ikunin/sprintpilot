@@ -24,8 +24,8 @@ import { costTracker } from './harness/cost-tracker.js';
 const FIXTURES_DIR = join(import.meta.dirname, 'fixtures/brownfield');
 const ADDON_SOURCE = join(import.meta.dirname, '../../_Sprintpilot');
 
-/** Model to use — override via BMAD_TEST_MODEL env var (e.g. "sonnet", "opus") */
-const MODEL = process.env.BMAD_TEST_MODEL ?? 'haiku';
+/** Model to use — override via BMAD_TEST_MODEL env var (e.g. "haiku", "opus") */
+const MODEL = process.env.BMAD_TEST_MODEL ?? 'sonnet';
 
 // Live-LLM tests are off by default — opt in via RUN_LLM_E2E=1.
 // brownfield is part of the broader suite and also requires RUN_LLM_E2E_FULL=1

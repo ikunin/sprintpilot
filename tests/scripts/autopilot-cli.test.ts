@@ -130,6 +130,24 @@ describe('autopilot next', () => {
     expect(parsed.phase).toBe('create_story'); // hasn't moved yet
     expect(parsed.action.skill).toBe('bmad-create-story');
   });
+
+  it('nano profile: `next` without prior `start` boots at NANO_QUICK_DEV', () => {
+    // Regression: workflow.orchestrator.md tells the LLM to call `next`
+    // directly without `start`, so the profile-aware initial phase must
+    // apply in cmdNext too. Previously composeRuntimeState hardcoded
+    // CREATE_STORY when persisted state was empty, defeating the nano
+    // routing intent.
+    writeFileSync(
+      join(projectRoot, '_Sprintpilot', 'modules', 'autopilot', 'config.yaml'),
+      'complexity_profile: nano\n',
+      'utf8',
+    );
+    const r = runCli(['next']);
+    expect(r.status).toBe(0);
+    const parsed = JSON.parse(r.stdout);
+    expect(parsed.phase).toBe('nano_quick_dev');
+    expect(parsed.action.skill).toBe('bmad-quick-dev');
+  });
 });
 
 describe('autopilot record', () => {

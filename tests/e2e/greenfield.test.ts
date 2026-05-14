@@ -48,8 +48,8 @@ const MAX_SESSIONS = 4;
 const BUDGET_PER_SESSION = 8;
 const TIMEOUT_PER_SESSION = 1_800_000; // 30 min — Sonnet often needs the full window
 
-/** Model to use — override via BMAD_TEST_MODEL env var (e.g. "sonnet", "opus") */
-const MODEL = process.env.BMAD_TEST_MODEL ?? 'haiku';
+/** Model to use — override via BMAD_TEST_MODEL env var (e.g. "haiku", "opus") */
+const MODEL = process.env.BMAD_TEST_MODEL ?? 'sonnet';
 
 /** Remote URL for push testing — must be set via BMAD_TEST_REMOTE_URL env var */
 const REMOTE_URL = process.env.BMAD_TEST_REMOTE_URL ?? '';

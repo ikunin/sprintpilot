@@ -104,6 +104,45 @@ describe('success — happy path', () => {
     expect((r.nextAction as Record<string, unknown>).type).toBe('user_prompt');
     expect((r.nextAction as Record<string, unknown>).reason).toBe('code_review_blocking_findings');
   });
+
+  it('propagates story_key + derives current_epic from signal.output', () => {
+    // Regression: under nano, the orchestrator emits invoke_skill:
+    // bmad-quick-dev with story_key=null (LLM picks the story). The
+    // success signal carries story_key in output. Without this
+    // propagation, the next git_op sees state.story_key=null and
+    // computes branch=`story/unknown`, breaking epic granularity.
+    const r = interpretSignal(
+      st(STATES.NANO_QUICK_DEV),
+      {
+        status: 'success',
+        output: {
+          story_key: '1-1-game-engine',
+          commit_sha: 'abc',
+          branch: 'story/epic-1',
+          git_steps_completed: true,
+        },
+      },
+      medium(),
+    );
+    expect(r.newState.story_key).toBe('1-1-game-engine');
+    expect(r.newState.current_epic).toBe('1');
+  });
+
+  it('honors explicit epic_key over derived', () => {
+    const r = interpretSignal(
+      st(STATES.NANO_QUICK_DEV),
+      {
+        status: 'success',
+        output: {
+          story_key: '1-1-game-engine',
+          epic_key: 'epic-alpha',
+          git_steps_completed: true,
+        },
+      },
+      medium(),
+    );
+    expect(r.newState.current_epic).toBe('epic-alpha');
+  });
 });
 
 describe('success — verify.js trust boundary', () => {

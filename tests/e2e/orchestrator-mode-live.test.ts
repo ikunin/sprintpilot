@@ -29,7 +29,7 @@ import { createTempProject, type TempProject } from './harness/temp-project.js';
 const ADDON_SOURCE = join(import.meta.dirname, '../../_Sprintpilot');
 const BUDGET = Number.parseFloat(process.env.BMAD_E2E_BUDGET ?? '5');
 const TIMEOUT = 900_000; // 15 min
-const MODEL = process.env.BMAD_TEST_MODEL ?? 'haiku';
+const MODEL = process.env.BMAD_TEST_MODEL ?? 'sonnet';
 
 const HAS_CLAUDE = (() => {
   try {

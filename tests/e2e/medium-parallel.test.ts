@@ -34,7 +34,7 @@ const ADDON_SOURCE = join(import.meta.dirname, '../../_Sprintpilot');
 const MAX_SESSIONS = 3;
 const BUDGET_PER_SESSION = 8;
 const TIMEOUT_PER_SESSION = 1_200_000; // 20 min
-const MODEL = process.env.BMAD_TEST_MODEL ?? 'haiku';
+const MODEL = process.env.BMAD_TEST_MODEL ?? 'sonnet';
 const REMOTE_URL = process.env.BMAD_TEST_REMOTE_URL ?? '';
 const HAS_CLAUDE = (() => {
   try {

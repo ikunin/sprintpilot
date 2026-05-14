@@ -34,7 +34,7 @@ const ADDON_SOURCE = join(import.meta.dirname, '../../_Sprintpilot');
 const MAX_SESSIONS = 3;
 const BUDGET_PER_SESSION = 6;
 const TIMEOUT_PER_SESSION = 1_200_000; // 20 min
-const MODEL = process.env.BMAD_TEST_MODEL ?? 'haiku';
+const MODEL = process.env.BMAD_TEST_MODEL ?? 'sonnet';
 const REMOTE_URL = process.env.BMAD_TEST_REMOTE_URL ?? '';
 // claude CLI may authenticate via keychain (Claude Code install) OR an
 // ANTHROPIC_API_KEY env var. Skip only when BOTH are missing AND the
@@ -220,16 +220,20 @@ describe.skipIf(!HAS_CLAUDE || !RUN_LLM_E2E)('Nano profile (Claude Code)', () =>
 
   it('branches are per-epic (not per-story) under nano', () => {
     const dir = project.dir;
-    const remote = gitSafe(['branch', '-r', '--list', 'origin/story/epic-*'], dir);
-    const epicBranches = remote
+    // Query LOCAL branches — `git branch --list`, not `branch -r --list`.
+    // The temp project's local git starts fresh per test, while a shared
+    // remote (REMOTE_URL) accumulates leftover `story/*` branches across
+    // runs. Local-only inspection answers what THIS run created.
+    const localEpic = gitSafe(['branch', '--list', 'story/epic-*'], dir);
+    const epicBranches = localEpic
       .split('\n')
-      .map((b) => b.trim())
+      .map((b) => b.replace(/^\s*[*+]?\s*/, '').trim())
       .filter(Boolean);
-    const storyBranches = gitSafe(['branch', '-r', '--list', 'origin/story/*-*-*'], dir);
-    const perStory = storyBranches
+    const localStory = gitSafe(['branch', '--list', 'story/*'], dir);
+    const perStory = localStory
       .split('\n')
-      .map((b) => b.trim())
-      .filter((b) => b && !/\/epic-/.test(b));
+      .map((b) => b.replace(/^\s*[*+]?\s*/, '').trim())
+      .filter((b) => b && !/^story\/epic-/.test(b));
     console.log(`[Branches] epic=${epicBranches.length} perStory=${perStory.length}`);
     expect(epicBranches.length).toBeGreaterThan(0);
     expect(

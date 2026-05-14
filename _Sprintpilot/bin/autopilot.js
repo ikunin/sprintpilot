@@ -93,8 +93,20 @@ function persistState(updates, profile, projectRoot, story) {
 // Compose the runtime `state` shape the state machine expects from the
 // persisted autopilot-state.yaml. Missing fields default to fresh-session
 // values; the CLI does not assume more than what's on disk.
-function composeRuntimeState(persisted) {
-  const phase = persisted.current_bmad_step || STATES.CREATE_STORY;
+//
+// `profile` is consulted ONLY to pick the default initial phase when
+// `persisted.current_bmad_step` is missing — nano (and any future
+// `implementation_flow: quick` profile) boots at NANO_QUICK_DEV so the
+// first emitted action is `invoke_skill: bmad-quick-dev`. This applies
+// regardless of which CLI entrypoint composed the runtime (workflow.
+// orchestrator.md tells the LLM to call `next` directly, bypassing
+// cmdStart).
+function composeRuntimeState(persisted, profile) {
+  const defaultPhase =
+    profile && profile.implementation_flow === 'quick'
+      ? STATES.NANO_QUICK_DEV
+      : STATES.CREATE_STORY;
+  const phase = persisted.current_bmad_step || defaultPhase;
   return {
     phase,
     story_key: persisted.current_story || null,
@@ -311,17 +323,9 @@ function cmdStart(opts) {
     }
   }
 
-  // Fresh start or clean resume. Initial phase is profile-aware: nano (and
-  // any future profile with implementation_flow=quick) starts at
-  // NANO_QUICK_DEV so the first emitted action is `invoke_skill: bmad-quick-dev`,
-  // not `bmad-create-story`. Without this, fresh nano sessions would route
-  // through the full 7-step flow despite the profile.
-  const initialPhase =
-    profile.implementation_flow === 'quick' ? STATES.NANO_QUICK_DEV : STATES.CREATE_STORY;
-  const runtime =
-    Object.keys(persisted).length > 0
-      ? composeRuntimeState(persisted)
-      : composeRuntimeState({ current_bmad_step: initialPhase });
+  // Fresh start or clean resume. `composeRuntimeState` applies the
+  // profile-aware initial phase when persisted state is empty.
+  const runtime = composeRuntimeState(persisted, profile);
 
   // Branch reuse: on first boot under reuse_user_branch=true, detect the
   // current git branch and lock it in. The state machine + git-plan then
@@ -369,7 +373,7 @@ function cmdNext(opts) {
   const projectRoot = resolveProjectRoot(opts);
   const { typed: profile } = resolveProfile(projectRoot, opts.profile);
   const persisted = loadState(projectRoot);
-  const runtime = composeRuntimeState(persisted);
+  const runtime = composeRuntimeState(persisted, profile);
   const action = decorateGitOp(stateMachine.nextAction(runtime, profile), runtime, profile);
   ledger.append({ kind: 'action_emitted', phase: runtime.phase, action }, { projectRoot });
   // Skill timing: emit a `skill.<name>` start event when we hand off an
@@ -387,7 +391,7 @@ function cmdRecord(opts) {
   const projectRoot = resolveProjectRoot(opts);
   const { typed: profile } = resolveProfile(projectRoot, opts.profile);
   const persisted = loadState(projectRoot);
-  const runtime = composeRuntimeState(persisted);
+  const runtime = composeRuntimeState(persisted, profile);
 
   let signalJson;
   if (opts['signal-file']) {

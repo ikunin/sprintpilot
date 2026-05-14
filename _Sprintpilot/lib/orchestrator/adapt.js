@@ -428,7 +428,51 @@ function advanceState(state, profile, newPhase, signal) {
     next.tests_to_rerun = signal.output.tests_to_rerun;
   }
 
+  // Propagate story identity from the signal so the next git_op (STORY_DONE)
+  // can compute the correct branch name. Without this, state.story_key
+  // stays null after bmad-quick-dev / bmad-create-story / bmad-dev-story
+  // and git-plan.js falls back to `story/unknown` — breaking epic
+  // granularity entirely (branchName needs current_epic to emit
+  // `<prefix>epic-<id>`). The signal output is the authoritative source
+  // for the story the LLM just worked on, so it wins over any prior
+  // value in state.
+  if (signal && signal.output) {
+    if (signal.output.story_key) {
+      next.story_key = signal.output.story_key;
+    }
+    if (signal.output.story_file_path) {
+      next.story_file_path = signal.output.story_file_path;
+    }
+    // Derive epic_key from story_key if the signal didn't supply it
+    // explicitly. Convention: story_key first segment is the epic
+    // identifier (e.g. `1-1-game-engine` → `1`, `epic-1-game-engine` →
+    // `epic-1`). If the format doesn't match, we leave current_epic
+    // null and branchName falls back to story-granularity (graceful
+    // degradation).
+    if (signal.output.epic_key) {
+      next.current_epic = signal.output.epic_key;
+    } else if (next.story_key) {
+      const derived = deriveEpicKey(next.story_key);
+      if (derived) next.current_epic = derived;
+    }
+  }
+
   return next;
+}
+
+// Convention: story keys begin with the epic identifier followed by `-`.
+// Examples: `1-1-game-engine` → `1`, `2-3-add-auth` → `2`. A leading
+// `epic-N-...` form returns `epic-N` so the orchestrator can address
+// either flavor. Returns null when the key doesn't parse cleanly.
+function deriveEpicKey(storyKey) {
+  if (typeof storyKey !== 'string' || !storyKey) return null;
+  // `epic-1-...` → `epic-1`
+  const epicPrefixed = storyKey.match(/^(epic-[A-Za-z0-9_]+)-/);
+  if (epicPrefixed) return epicPrefixed[1];
+  // `<epic>-<story>-<slug>` → `<epic>` (first hyphen-separated segment)
+  const firstSeg = storyKey.match(/^([A-Za-z0-9_]+)-/);
+  if (firstSeg) return firstSeg[1];
+  return null;
 }
 
 module.exports = {
