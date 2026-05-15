@@ -1,5 +1,15 @@
 # Changelog
 
+## [2.1.1] - 2026-05-15
+
+**Hotfix for v2.1.0.** The orchestrator CLI directory was added to the repo (`_Sprintpilot/bin/autopilot.js`) and is bundled by npm, but the installer's `RUNTIME_RESOURCES` allow-list never included `bin`. Result: fresh installs and upgraders ended up with the orchestrator library at `_Sprintpilot/lib/orchestrator/*` but no CLI to drive it — `/sprint-autopilot-on` halted immediately because `workflow.orchestrator.md` requires `node _Sprintpilot/bin/autopilot.js next` / `record`. v2.1.0 is deprecated on npm.
+
+### Fixed
+- **Installer copies `_Sprintpilot/bin/`** — added `bin` to `RUNTIME_RESOURCES` in `lib/commands/install.js`. The orchestrator CLI now lands in target projects alongside `lib/`, `modules/`, `scripts/`, etc.
+
+### Added
+- **Regression test** (`tests/unit/runtime-resources-coverage.test.ts`) — scans every top-level entry under `_Sprintpilot/` and fails if any shipped directory isn't covered by `RUNTIME_RESOURCES` or the documented exception list (`skills/` copied per-tool, `sprints/` runtime-created, `_bmad-output/` BMad-owned). Prevents the next "we forgot to copy X" regression.
+
 ## [2.1.0] - 2026-05-15
 
 **Orchestrator-driven autopilot is now the only path.** Flow control lives in a deterministic Node.js state machine at `_Sprintpilot/bin/autopilot.js`. The LLM keeps in-skill execution, diagnosis, triage, and small-judgment decisions; the orchestrator owns sequencing and BMad-step enforcement. The v2.0.x prose `workflow.md` (1,388 lines) is gone — `workflow.orchestrator.md` is the single shipped workflow.
