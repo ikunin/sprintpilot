@@ -172,7 +172,30 @@ function nextAction(state, profile) {
   }
 
   switch (state.phase) {
-    case STATES.PREPARE_STORY_BRANCH:
+    case STATES.PREPARE_STORY_BRANCH: {
+      // Safety net: PREPARE_STORY_BRANCH needs a known story_key (and,
+      // under granularity=epic, a current_epic) so git-plan.branchName
+      // can compute a real branch. composeRuntimeState resolves these
+      // from sprint-status.yaml before we get here — but if BOTH are
+      // null (sprint-status was empty, unreadable, or doesn't exist
+      // yet) we'd emit `branch: story/unknown` and confuse the runner.
+      // Emit a user_prompt instead so the user fixes the upstream
+      // condition (run BMad sprint-planning) rather than acting on a
+      // garbage action.
+      const haveStoryKey = !!state.story_key;
+      const haveEpicForBranch =
+        profile.granularity === 'epic' && !!state.current_epic;
+      if (!haveStoryKey && !haveEpicForBranch) {
+        return {
+          type: 'user_prompt',
+          phase: state.phase,
+          reason: 'prepare_story_branch_no_story_key',
+          prompt:
+            'PREPARE_STORY_BRANCH was emitted but the orchestrator could not resolve a next story_key from sprint-status.yaml. ' +
+            'Either run BMad sprint-planning to populate sprint-status.yaml, set `git.reuse_user_branch: true` in modules/git/config.yaml to commit on the current branch, ' +
+            'or set `git.enabled: false` for a dry run without git operations.',
+        };
+      }
       // The edge layer (autopilot.js#decorateGitOp) inlines the planned
       // argv steps via git-plan.js#planCreateBranch. It also probes git
       // for branch existence and threads `state.branch_exists` through
@@ -187,6 +210,7 @@ function nextAction(state, profile) {
         epic_key: state.current_epic,
         profile: profile.name,
       };
+    }
     case STATES.CREATE_STORY:
       return {
         type: 'invoke_skill',

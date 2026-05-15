@@ -1,5 +1,25 @@
 # Changelog
 
+## [2.1.4] - 2026-05-15
+
+**Hotfix for v2.1.3.** PREPARE_STORY_BRANCH fires before CREATE_STORY but needed `story_key` to compute the branch name — and at fresh-sprint start there isn't one yet. v2.1.3 emitted `branch: story/unknown`. v2.1.4 resolves the next pending story from `sprint-status.yaml` before emitting, so the branch name is real.
+
+### Fixed
+
+- **`PREPARE_STORY_BRANCH` resolves `story_key` from `sprint-status.yaml`.** `composeRuntimeState` now reads BMad's sprint-status (the same source of truth `bmad-create-story` / `bmad-quick-dev` consult) and populates `runtime.story_key` + derived `current_epic` before emitting the phase. Reuses the `parseStatuses` + `remainingFrom` helpers exported by `_Sprintpilot/scripts/list-remaining-stories.js`. If sprint-status is missing / empty / unparseable (pre-planning, sprint complete, parse failure), falls back to `flowStart` (CREATE_STORY / NANO_QUICK_DEV) with a stderr warning telling the user to run sprint-planning or set `git.reuse_user_branch=true`.
+- **`PREPARE_STORY_BRANCH` safety net.** If `state.story_key` is somehow still null when `nextAction` runs (e.g. user invoked `cmdNext` directly at this phase with no upstream resolution), emit a `user_prompt` halt instead of a `git_op` with `branch: story/unknown`. Under `granularity: epic`, having `current_epic` set is enough — the branch name is `story/epic-<epic_id>`.
+- **`accept_alternative` propagates story metadata onto state.** Pre-2.1.4, `adapt.handleUserInput`'s `dispatch_action` branch returned the dispatched action verbatim but never copied its `story_key` / `current_epic` / `story_file_path` / `ac_summary` from `template_slots` onto `newState`. Result: a user accepting an alternative DEV_RED for a specific story would get the work dispatched, but `autopilot-state.yaml` still showed `current_story: null` and subsequent emissions / persists / verify checks all referenced the wrong story. Now: state metadata is synced from `dispatch.action.template_slots` (with explicit top-level fields as fallbacks). Caller-set state values are preserved — the sync uses `state.story_key || slots.story_key` so a mid-cycle dispatch doesn't blow away an existing identity.
+
+### Changed
+
+- **`composeRuntimeState` signature**: now takes `projectRoot` as a third arg. All three CLI call sites (`cmdStart` / `cmdNext` / `cmdRecord`) updated. Tests that bypassed the resolver pass `undefined` and exercise the fallback path.
+
+### Added
+
+- **`resolveNextStoryKey(projectRoot)`** helper in `_Sprintpilot/bin/autopilot.js`. Returns the first non-`done` story from `sprint-status.yaml`, or null.
+- **`deriveEpicFromStoryKey(storyKey)`** helper in autopilot.js. Mirrors adapt.js#deriveEpicKey so composeRuntimeState doesn't reach across modules.
+- **7 new test cases**: PREPARE_STORY_BRANCH resolution from sprint-status (success + empty + missing), safety-net user_prompt, `dispatch_action` story-metadata sync, caller-priority for existing state values.
+
 ## [2.1.3] - 2026-05-15
 
 **Enforce branch creation and close every config-contract gap the audit surfaced.** The orchestrator now matches the knobs `modules/git/config.yaml` advertises — `git.enabled`, `push.auto`, `push.create_pr`, `commit_templates`, `max_branch_length`, `platform.provider` / `base_url`, `epic_merge_wait_minutes` were either parsed nowhere or silently ignored at runtime; now they're all live and tested.

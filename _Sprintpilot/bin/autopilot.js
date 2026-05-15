@@ -39,6 +39,10 @@ const userCommands = require('../lib/orchestrator/user-commands');
 const divergence = require('../lib/orchestrator/divergence');
 const reportRenderer = require('../lib/orchestrator/report');
 const gitPlan = require('../lib/orchestrator/git-plan');
+const {
+  parseStatuses: parseSprintStatuses,
+  remainingFrom: remainingStoriesFrom,
+} = require('../scripts/list-remaining-stories');
 
 const { STATES } = stateMachine;
 
@@ -99,6 +103,49 @@ function safeExistsSync(p) {
   }
 }
 
+// Resolve the next pending story key from BMad's sprint-status.yaml.
+// Used by composeRuntimeState to populate state.story_key BEFORE
+// emitting PREPARE_STORY_BRANCH — without this, branchName() falls
+// back to "story/unknown" because state.story_key is null on a fresh
+// sprint (CREATE_STORY hasn't run yet; for nano there's no CREATE_STORY
+// at all and quick-dev reads sprint-status itself). Returns the first
+// story whose status is NOT "done" (case-insensitive), or null when:
+//   - the status file doesn't exist (pre-planning)
+//   - all stories are done (sprint complete)
+//   - the file can't be parsed
+function resolveNextStoryKey(projectRoot) {
+  if (!projectRoot) return null;
+  const sprintStatusPath = path.join(
+    projectRoot,
+    '_bmad-output',
+    'implementation-artifacts',
+    'sprint-status.yaml',
+  );
+  if (!safeExistsSync(sprintStatusPath)) return null;
+  try {
+    const raw = fs.readFileSync(sprintStatusPath, 'utf8');
+    const stories = parseSprintStatuses(raw);
+    const remaining = remainingStoriesFrom(stories);
+    return remaining.length > 0 ? remaining[0] : null;
+  } catch (_e) {
+    return null;
+  }
+}
+
+// Derive the epic identifier from a BMad story key. Convention:
+// `epic-N-slug` → `epic-N`; `<epic>-<story>-<slug>` → `<epic>`.
+// Returns null when the key doesn't parse cleanly. Kept in sync with
+// adapt.js#deriveEpicKey; centralized here so composeRuntimeState
+// doesn't have to import adapt's private helper.
+function deriveEpicFromStoryKey(storyKey) {
+  if (typeof storyKey !== 'string' || !storyKey) return null;
+  const epicPrefixed = storyKey.match(/^(epic-[A-Za-z0-9_]+)-/);
+  if (epicPrefixed) return epicPrefixed[1];
+  const firstSeg = storyKey.match(/^([A-Za-z0-9_]+)-/);
+  if (firstSeg) return firstSeg[1];
+  return null;
+}
+
 function persistState(updates, profile, projectRoot, story) {
   return stateStore.write(updates, profile, { projectRoot, story });
 }
@@ -114,7 +161,7 @@ function persistState(updates, profile, projectRoot, story) {
 // regardless of which CLI entrypoint composed the runtime (workflow.
 // orchestrator.md tells the LLM to call `next` directly, bypassing
 // cmdStart).
-function composeRuntimeState(persisted, profile) {
+function composeRuntimeState(persisted, profile, projectRoot) {
   // Fresh-sprint initial phase. When git settings require a per-story or
   // per-epic branch (granularity ∈ {story, epic} AND !reuse_user_branch
   // AND git.enabled !== false), boot at PREPARE_STORY_BRANCH so the very
@@ -180,11 +227,45 @@ function composeRuntimeState(persisted, profile) {
   ) {
     phase = STATES.PREPARE_STORY_BRANCH;
   }
+
+  // Resolve story_key for PREPARE_STORY_BRANCH. The branch creation step
+  // needs a known story_key (and current_epic under granularity=epic) to
+  // compute the branch name — without resolution, branchName() falls
+  // back to "story/unknown" and we'd push a useless ref to origin.
+  //
+  // Why this is needed: PREPARE_STORY_BRANCH runs BEFORE CREATE_STORY in
+  // the full flow (and NANO_QUICK_DEV picks the story itself in quick
+  // flow), so the story_key from persisted state can be null on a fresh
+  // sprint. Read sprint-status.yaml — the same source of truth bmad-
+  // create-story / bmad-quick-dev use — to look ahead and find the
+  // next pending story.
+  //
+  // If nothing is pending (pre-planning OR sprint complete OR parse
+  // failure), fall back to flowStart so the LLM gets a meaningful
+  // skill invocation. PREPARE_STORY_BRANCH with no story_key would be
+  // a confusing emission to act on.
+  let resolvedStoryKey = persisted.current_story || null;
+  let resolvedEpic = persisted.current_epic || null;
+  let resolvedStoryFilePath = persisted.story_file_path || null;
+  if (phase === STATES.PREPARE_STORY_BRANCH && !resolvedStoryKey) {
+    const next = resolveNextStoryKey(projectRoot);
+    if (next) {
+      resolvedStoryKey = next;
+      if (!resolvedEpic) resolvedEpic = deriveEpicFromStoryKey(next);
+    } else {
+      process.stderr.write(
+        `[autopilot] WARN PREPARE_STORY_BRANCH needs a next-story key but sprint-status.yaml has none pending — falling back to ${flowStart}. ` +
+          'Run BMad sprint-planning first, or set git.reuse_user_branch=true to commit on the current branch.\n',
+      );
+      phase = flowStart;
+    }
+  }
+
   return {
     phase,
-    story_key: persisted.current_story || null,
-    story_file_path: persisted.story_file_path || null,
-    current_epic: persisted.current_epic || null,
+    story_key: resolvedStoryKey,
+    story_file_path: resolvedStoryFilePath,
+    current_epic: resolvedEpic,
     ac_summary: persisted.ac_summary || null,
     prior_diagnosis: persisted.prior_diagnosis || null,
     relevant_decisions: persisted.relevant_decisions || [],
@@ -554,7 +635,7 @@ function cmdStart(opts) {
 
   // Fresh start or clean resume. `composeRuntimeState` applies the
   // profile-aware initial phase when persisted state is empty.
-  const runtime = composeRuntimeState(persisted, profile);
+  const runtime = composeRuntimeState(persisted, profile, projectRoot);
 
   const lockResult = lockUserBranchIfNeeded(runtime, profile, projectRoot);
   if (lockResult && lockResult.halt) {
@@ -580,7 +661,7 @@ function cmdNext(opts) {
   const projectRoot = resolveProjectRoot(opts);
   const { typed: profile } = resolveProfile(projectRoot, opts.profile);
   const persisted = loadState(projectRoot);
-  const runtime = composeRuntimeState(persisted, profile);
+  const runtime = composeRuntimeState(persisted, profile, projectRoot);
 
   // The LLM-driven workflow (workflow.orchestrator.md) tells the LLM to
   // call `next` directly without `start` — apply the same branch-reuse
@@ -618,7 +699,7 @@ function cmdRecord(opts) {
   const projectRoot = resolveProjectRoot(opts);
   const { typed: profile } = resolveProfile(projectRoot, opts.profile);
   const persisted = loadState(projectRoot);
-  const runtime = composeRuntimeState(persisted, profile);
+  const runtime = composeRuntimeState(persisted, profile, projectRoot);
 
   let signalJson;
   if (opts['signal-file']) {

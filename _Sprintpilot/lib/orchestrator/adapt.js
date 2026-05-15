@@ -397,12 +397,31 @@ function handleUserInput(state, signal, profile, sideEffects) {
 
   // One-shot dispatch (e.g. accept_alternative resolved a pending alt)?
   // Return the dispatched action in place of the state-machine's default.
+  //
+  // Sync story metadata onto newState. The dispatched action carries
+  // story_key / current_epic / story_file_path / ac_summary in its
+  // `template_slots` (and sometimes as top-level fields on git_ops).
+  // Without propagating these, accept_alternative dispatches work on
+  // a specific story but autopilot-state.yaml still shows
+  // `current_story: null` — subsequent emissions / persists / verify
+  // checks all reference the wrong story.
   const dispatch = applied.sideEffects.find((e) => e && e.kind === 'dispatch_action');
   if (dispatch && dispatch.action) {
+    const a = dispatch.action;
+    const slots = a.template_slots || {};
+    const enrichedState = {
+      ...newState,
+      story_key: newState.story_key || slots.story_key || a.story_key || null,
+      current_epic:
+        newState.current_epic || slots.current_epic || a.epic_key || null,
+      story_file_path:
+        newState.story_file_path || slots.story_file_path || null,
+      ac_summary: newState.ac_summary || slots.ac_summary || null,
+    };
     return {
-      newState,
+      newState: enrichedState,
       newProfile,
-      nextAction: { ...dispatch.action, _dispatched_via: dispatch.reason || 'user_input' },
+      nextAction: { ...a, _dispatched_via: dispatch.reason || 'user_input' },
       sideEffects,
       verdict: 'advanced',
     };

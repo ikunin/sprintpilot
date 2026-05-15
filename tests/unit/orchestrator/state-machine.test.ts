@@ -115,6 +115,30 @@ describe('nextAction — emits the canonical action per state (full flow)', () =
     expect(a.epic_key).toBe('E1');
   });
 
+  it('PREPARE_STORY_BRANCH → user_prompt when story_key + current_epic are both null (safety net)', () => {
+    // composeRuntimeState normally resolves story_key from sprint-status
+    // before we get here. If it couldn't (e.g. pre-planning + the user
+    // pointed cmdNext at PREPARE_STORY_BRANCH directly), emit a
+    // user_prompt instead of a `branch: story/unknown` git_op.
+    const a = nextAction(
+      baseState(STATES.PREPARE_STORY_BRANCH, { story_key: null, current_epic: null }),
+      p,
+    );
+    expect(a.type).toBe('user_prompt');
+    expect(a.reason).toBe('prepare_story_branch_no_story_key');
+  });
+
+  it('PREPARE_STORY_BRANCH with granularity=epic + current_epic set → emits git_op even if story_key null', () => {
+    const epicProfile = { ...medium(), granularity: 'epic' } as Profile;
+    const a = nextAction(
+      baseState(STATES.PREPARE_STORY_BRANCH, { story_key: null, current_epic: 'E2' }),
+      epicProfile,
+    );
+    expect(a.type).toBe('git_op');
+    expect(a.op).toBe('create_branch');
+    expect(a.epic_key).toBe('E2');
+  });
+
   it('EPIC_BOUNDARY_CHECK emits noop (orchestrator advances state machine)', () => {
     const a = nextAction(baseState(STATES.EPIC_BOUNDARY_CHECK), p);
     expect(a.type).toBe('noop');

@@ -18,6 +18,7 @@ const { decorateGitOp, composeRuntimeState } = autopilot as {
   composeRuntimeState: (
     persisted: Record<string, unknown>,
     profile: Record<string, unknown>,
+    projectRoot?: string,
   ) => Record<string, unknown>;
 };
 
@@ -69,12 +70,81 @@ describe('decorateGitOp — git.enabled short-circuit', () => {
   });
 });
 
+// Build a temp project root with a sprint-status.yaml seeded with the
+// given pending story. Returns { projectRoot, cleanup }. Used by tests
+// that exercise the PREPARE_STORY_BRANCH resolution path.
+function makeProjectWithSprintStatus(pendingStory: string | null) {
+  const projectRoot = mkdtempSync(join(tmpdir(), 'sp-compose-test-'));
+  if (pendingStory !== null) {
+    const dir = join(projectRoot, '_bmad-output', 'implementation-artifacts');
+    // mkdirSync is hoisted via tmpdir/mkdtemp; use node-fs.
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    require('node:fs').mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, 'sprint-status.yaml'),
+      `development_status:\n  ${pendingStory}: ready-for-dev\n`,
+      'utf8',
+    );
+  }
+  return { projectRoot, cleanup: () => rmSync(projectRoot, { recursive: true, force: true }) };
+}
+
 describe('composeRuntimeState — migration of legacy current_bmad_step', () => {
   const medium = () => flatToProfile({}, 'medium');
 
-  it('bumps create_story → prepare_story_branch on fresh sprint upgrade (no story signals)', () => {
-    const r = composeRuntimeState({ current_bmad_step: 'create_story' }, medium());
-    expect(r.phase).toBe('prepare_story_branch');
+  it('bumps create_story → prepare_story_branch on fresh sprint upgrade + resolves story_key from sprint-status', () => {
+    const { projectRoot, cleanup } = makeProjectWithSprintStatus('1-1-foo');
+    try {
+      const r = composeRuntimeState({ current_bmad_step: 'create_story' }, medium(), projectRoot);
+      expect(r.phase).toBe('prepare_story_branch');
+      expect(r.story_key).toBe('1-1-foo');
+      expect(r.current_epic).toBe('1');
+    } finally {
+      cleanup();
+    }
+  });
+
+  it('falls back to flowStart when migration would route to PREPARE_STORY_BRANCH but sprint-status has nothing pending', () => {
+    const { projectRoot, cleanup } = makeProjectWithSprintStatus(null);
+    try {
+      const r = composeRuntimeState({ current_bmad_step: 'create_story' }, medium(), projectRoot);
+      // Migration would have bumped to prepare_story_branch, but no
+      // story_key resolves → fall back to flowStart (create_story).
+      expect(r.phase).toBe('create_story');
+      expect(r.story_key).toBeNull();
+    } finally {
+      cleanup();
+    }
+  });
+
+  it('persisted PREPARE_STORY_BRANCH + null story_key resolves from sprint-status', () => {
+    const { projectRoot, cleanup } = makeProjectWithSprintStatus('2-3-bar');
+    try {
+      const r = composeRuntimeState(
+        { current_bmad_step: 'prepare_story_branch' },
+        medium(),
+        projectRoot,
+      );
+      expect(r.phase).toBe('prepare_story_branch');
+      expect(r.story_key).toBe('2-3-bar');
+      expect(r.current_epic).toBe('2');
+    } finally {
+      cleanup();
+    }
+  });
+
+  it('persisted PREPARE_STORY_BRANCH + null story_key + no sprint-status falls back to flowStart', () => {
+    const { projectRoot, cleanup } = makeProjectWithSprintStatus(null);
+    try {
+      const r = composeRuntimeState(
+        { current_bmad_step: 'prepare_story_branch' },
+        medium(),
+        projectRoot,
+      );
+      expect(r.phase).toBe('create_story');
+    } finally {
+      cleanup();
+    }
   });
 
   it('leaves create_story alone when current_story is set (mid-story)', () => {
@@ -85,16 +155,23 @@ describe('composeRuntimeState — migration of legacy current_bmad_step', () => 
     expect(r.phase).toBe('create_story');
   });
 
-  it('migrates when story_file_path is set but the file does not exist (stale persist)', () => {
-    // A persisted story_file_path can be optimistically written before
-    // the skill actually creates the file (e.g. coalesce_state_writes).
-    // The migration logic must check existence to avoid the false-
-    // positive mid-story signal.
-    const r = composeRuntimeState(
-      { current_bmad_step: 'create_story', story_file_path: '/nope/does-not-exist.md' },
-      medium(),
-    );
-    expect(r.phase).toBe('prepare_story_branch');
+  it('migrates when story_file_path is set but the file does not exist (stale persist) + resolves story_key', () => {
+    const { projectRoot, cleanup } = makeProjectWithSprintStatus('3-1-baz');
+    try {
+      // A persisted story_file_path can be optimistically written before
+      // the skill actually creates the file (e.g. coalesce_state_writes).
+      // The migration logic must check existence to avoid the false-
+      // positive mid-story signal.
+      const r = composeRuntimeState(
+        { current_bmad_step: 'create_story', story_file_path: '/nope/does-not-exist.md' },
+        medium(),
+        projectRoot,
+      );
+      expect(r.phase).toBe('prepare_story_branch');
+      expect(r.story_key).toBe('3-1-baz');
+    } finally {
+      cleanup();
+    }
   });
 
   it('leaves create_story alone when story_file_path points at a real file', () => {

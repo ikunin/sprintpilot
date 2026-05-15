@@ -523,6 +523,70 @@ describe('propose_alternative + accept_alternative round-trip (Bug B regression)
     expect(r.newState.pending_alternative).toBeUndefined();
   });
 
+  it('accept_alternative syncs story_key/current_epic/story_file_path/ac_summary from dispatched action onto state', () => {
+    // Regression: dispatch_action used to return the dispatched action
+    // verbatim but never propagated its story metadata, leaving
+    // autopilot-state.yaml with current_story: null even though
+    // accept_alternative just dispatched work on a specific story.
+    const dispatchedAction = {
+      type: 'invoke_skill',
+      skill: 'bmad-dev-story',
+      template_slots: {
+        story_key: '4-8-realm-wide-matcher',
+        current_epic: '4',
+        story_file_path: '/repo/_bmad-output/stories/4-8.md',
+        ac_summary: 'Lock the realm session',
+      },
+    };
+    const stateWithPending = st(STATES.CREATE_STORY, {
+      story_key: null,
+      current_epic: null,
+      story_file_path: null,
+      ac_summary: null,
+      pending_alternative: {
+        action: dispatchedAction,
+        impact: 'high',
+        reason: 'jump to dev_red',
+        prompted_at: '2026-05-15T12:00:00Z',
+      },
+    });
+    const r = interpretSignal(
+      stateWithPending,
+      { status: 'user_input', commands: [{ kind: 'accept_alternative' }] },
+      medium(),
+    );
+    expect(r.verdict).toBe('advanced');
+    expect(r.newState.story_key).toBe('4-8-realm-wide-matcher');
+    expect(r.newState.current_epic).toBe('4');
+    expect(r.newState.story_file_path).toBe('/repo/_bmad-output/stories/4-8.md');
+    expect(r.newState.ac_summary).toBe('Lock the realm session');
+  });
+
+  it('accept_alternative does NOT overwrite existing story_key on state (caller priority)', () => {
+    // If state already has a story_key (mid-cycle dispatch), the dispatch
+    // shouldn't blow it away with the alternative's value.
+    const dispatchedAction = {
+      type: 'invoke_skill',
+      skill: 'bmad-dev-story',
+      template_slots: { story_key: 'alt-story' },
+    };
+    const stateWithPending = st(STATES.DEV_GREEN, {
+      story_key: 'original-story',
+      pending_alternative: {
+        action: dispatchedAction,
+        impact: 'high',
+        reason: 'oops',
+        prompted_at: '2026-05-15T12:00:00Z',
+      },
+    });
+    const r = interpretSignal(
+      stateWithPending,
+      { status: 'user_input', commands: [{ kind: 'accept_alternative' }] },
+      medium(),
+    );
+    expect(r.newState.story_key).toBe('original-story');
+  });
+
   it('user_input { force_continue } clears pending_alternative and returns planned action', () => {
     const stateWithPending = st(STATES.DEV_GREEN, {
       pending_alternative: {
