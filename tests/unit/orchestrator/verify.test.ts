@@ -142,6 +142,49 @@ describe('verify CREATE_STORY', () => {
     expect(r.issues).toEqual([]);
   });
 
+  it('verify_override evidence.acknowledge_missing_front_matter skips ONLY the front-matter check', () => {
+    // Escape hatch for legacy stories where bmad-create-story can't or
+    // won't regenerate front-matter. AC + Tasks still enforced — the
+    // override is narrow.
+    const path = makeStoryFile(
+      `# Story 4.9: Legacy WS Handshake\n\n` +
+        `Status: backlog\n\n` +
+        `## Acceptance Criteria\n- AC1\n\n` +
+        `## Tasks\n- [ ] design\n`,
+    );
+    // Without override: rejects (no front-matter).
+    const baseR = verify(
+      { phase: STATES.CREATE_STORY, story_key: '4-9-foo', story_file_path: path },
+      {},
+      { projectRoot },
+    );
+    expect(baseR.ok).toBe(false);
+    expect(baseR.issues.join(' ')).toContain('missing YAML front-matter');
+    // With override: passes. AC + Tasks still verified.
+    const okR = verifyMod.verifyWithOverride(
+      { phase: STATES.CREATE_STORY, story_key: '4-9-foo', story_file_path: path },
+      {},
+      { projectRoot },
+      { acknowledge_missing_front_matter: true, decision_log_ref: 'DEC-LEGACY-FRONT-MATTER' },
+    );
+    expect(okR.ok).toBe(true);
+    expect(okR.issues).toEqual([]);
+  });
+
+  it('verify_override acknowledge_missing_front_matter does NOT skip AC or Tasks checks', () => {
+    // Override is narrow — missing AC or Tasks still fail.
+    const path = makeStoryFile(`# Story\n\nNo AC, no Tasks.\n`);
+    const r = verifyMod.verifyWithOverride(
+      { phase: STATES.CREATE_STORY, story_key: 'X', story_file_path: path },
+      {},
+      { projectRoot },
+      { acknowledge_missing_front_matter: true },
+    );
+    expect(r.ok).toBe(false);
+    expect(r.issues.join(' ')).toContain('Acceptance Criteria');
+    expect(r.issues.join(' ')).toContain('Tasks');
+  });
+
   it('state.story_file_path still wins when both state and signal.output are set', () => {
     // Precedence guard: an in-flight retry with stale signal.output
     // must not clobber the authoritative state path. Verify uses

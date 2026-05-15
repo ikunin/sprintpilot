@@ -157,7 +157,17 @@ function verifyCreateStory(state, _out, ctx) {
   else {
     const text = readFileSafe(ctx.fs, state.story_file_path);
     const fm = frontMatter(text);
-    if (!fm) issues.push('story file missing YAML front-matter');
+    // Escape hatch: when the LLM sends verify_override with evidence
+    // {acknowledge_missing_front_matter: true, decision_log_ref: '...'},
+    // skip the front-matter check ONLY for this verification call. AC +
+    // Tasks checks still run. Auditable via the verify_override ledger
+    // entry which captures evidence verbatim. Used when bmad-create-story
+    // can't or won't regenerate front-matter (e.g., legacy story files
+    // in repos that pre-date the front-matter convention and have a
+    // body the skill wants to preserve).
+    const override = ctx.augmented || {};
+    const ackMissingFm = override && override.acknowledge_missing_front_matter === true;
+    if (!fm && !ackMissingFm) issues.push('story file missing YAML front-matter');
     // AC presence — look for "## Acceptance Criteria" section with at least one bullet.
     if (text && !/##\s+Acceptance Criteria[\s\S]*?\n-\s+/.test(text)) {
       issues.push('Acceptance Criteria section missing or empty');
