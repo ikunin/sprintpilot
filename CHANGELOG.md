@@ -1,5 +1,54 @@
 # Changelog
 
+## [2.1.3] - 2026-05-15
+
+**Enforce branch creation and close every config-contract gap the audit surfaced.** The orchestrator now matches the knobs `modules/git/config.yaml` advertises — `git.enabled`, `push.auto`, `push.create_pr`, `commit_templates`, `max_branch_length`, `platform.provider` / `base_url`, `epic_merge_wait_minutes` were either parsed nowhere or silently ignored at runtime; now they're all live and tested.
+
+### Fixed
+
+- **Story branches are actually created.** Pre-2.1.3 the orchestrator's deterministic state machine had no `create_branch` step — every story committed onto whatever HEAD pointed at (often `main`) and the eventual `git push -u origin story/<key>` produced a remote ref that pointed at `main`'s HEAD, not the story's work. The e2e suite missed this because its only branch assertion was "ref exists." Added `PREPARE_STORY_BRANCH` state run before `CREATE_STORY` / `NANO_QUICK_DEV` when `granularity ∈ {story, epic}` AND `!reuse_user_branch` AND `enabled`. Story files are authored on the story branch. `composeRuntimeState` migrates mid-sprint upgrades by bumping `current_bmad_step: create_story` (or `nano_quick_dev`) to `prepare_story_branch` when no in-flight markers are present — guarded against false positives via `fs.existsSync(story_file_path)`, not just truthiness.
+
+- **`git.enabled: false` short-circuits cleanly.** `decorateGitOp` swaps every `git_op` for `{ steps: [] }` so the LLM signals success without touching git. `composeRuntimeState` skips `PREPARE_STORY_BRANCH` under `enabled=false`. `cmdRecord` bypasses `verify.js` for git-interacting phases (`PREPARE_STORY_BRANCH`, `STORY_DONE`, `MERGE_EPIC`, `STORY_LAND`) so verify doesn't reject every success in a loop. Centralized via `stateMachine.shouldSkipVerifyWhenGitDisabled` so new phases of either kind automatically get the bypass.
+
+- **`git.push.auto: false` actually stays local.** `planCommitAndPush` drops both push steps (story branch + base branch sync) AND the PR creation step. Commits still happen so `_bmad-output/` stays in sync; the user pushes manually.
+
+- **`git.push.create_pr: true` actually opens a PR under stacked.** `planCommitAndPush` appends a `create-pr.js` step after every push, gated on `stacked + push_auto + has_origin + !reuse_user_branch`. Idempotent under `granularity=epic` via the github path's `gh pr list --head` pre-check — so the second+ story of an epic short-circuits instead of failing with "PR already exists."
+
+- **`git.push.create_pr: false` actually direct-merges under stacked + granularity=story.** New plan branch: `switch <base> → fetch + merge --ff-only origin/<base> → merge --no-ff <branch> (or --squash + commit) → push <base> → switch <branch>`. Skips the `_bmad-output`-only Phase 2 sync since the full merge brings everything along. Recovery hint baked into the switch step's description.
+
+- **Granularity=epic auto-merges at the boundary.** New `MERGE_EPIC` state routed from `EPIC_BOUNDARY_CHECK` end-of-epic under `granularity=epic + stacked + push_auto + has_origin + !reuse_user_branch`. `planMergeEpic` fan-out by platform: github/auto → `gh pr merge` (with a `create-pr.js --mode checks` pre-step that waits for CI green); gitlab → `glab mr merge`; bitbucket/gitea → halt with a clear user_prompt; local fallback when `push_create_pr=false`. Honors `squash_on_merge` and `epic_merge_wait_minutes`.
+
+- **`commit_templates.story` is honored.** Default `feat({epic}): {story-title} ({story-key})` from the config is now expanded with function-form `String.replace` so `$1` / `$&` / `$$` in LLM-authored `ac_summary` text are treated as literal characters (string-form replace would corrupt them as regex backreferences). `expandTemplate` is the shared helper for commit messages and PR bodies.
+
+- **`max_branch_length` truncates long branch names** with an 8-char SHA-1 suffix (32 bits — ~65k variants per truncated stem before 50% collision). User-supplied branches (`reuse_user_branch=true`) bypass truncation.
+
+- **`platform.provider` + `platform.base_url` route to the right CLI and host.** `create-pr.js` resolves `--platform auto` via CLI probing (gh > glab > bb > tea > git_only) so default config no longer falls through to "unknown platform" exit 1. Self-hosted instances get `GH_HOST` / `GITLAB_URI` threaded onto the merge step via the new `env` step-metadata field.
+
+- **`--mode checks` polling for `land_as_you_go` and `MERGE_EPIC` CI gating.** `create-pr.js` got a polling mode that calls `gh pr checks` every 30s (±5s jitter) and optionally `gh pr view --json reviewDecision` until checks pass + review approved, or `--wait-minutes` elapses. The previous land.js `--mode checks` argv called a code path that didn't exist; `land_as_you_go` was non-functional.
+
+- **`workflow.orchestrator.md` requires `run-step.js` for any step with metadata.** Documentation-as-enforcement drift is replaced by a canonical executor at `_Sprintpilot/scripts/run-step.js` that honors `retry` (attempts + indexed `backoff_ms` + `on: 'never'`), `tolerate_exit_codes`, `optional`, `env`, and `timeout_ms` uniformly. Subprocess stdin is set to `'ignore'` so future stdin-reading commands (`git commit --file=-`) work; SIGINT/SIGTERM is forwarded to in-flight children.
+
+- **`reuse_user_branch` enforcement applies on `cmdNext` too.** The workflow tells LLMs to call `next` without `start`, so the legacy `cmdStart`-only detection silently bypassed enforcement. Extracted `lockUserBranchIfNeeded`; called from both. `cmdNext` now persists the locked branch.
+
+- **`probeBranchExists` short-circuits on local-only repos** via a 50ms `git remote get-url origin` check instead of paying 5s of fetch timeout on every emit. Checks both local AND remote refs after a best-effort fetch.
+
+- **Persisted `current_bmad_step` is validated against `STATES`** — garbage / typos reset to the profile-aware default with a clear warning instead of throwing "unknown phase" with a stack trace.
+
+### Added
+
+- **`_Sprintpilot/scripts/run-step.js`** — canonical step executor. Pipe step JSON to it (or pass `--step-file`) and inspect exit code.
+- **`MERGE_EPIC` state** in `_Sprintpilot/lib/orchestrator/state-machine.js`.
+- **`shouldSkipVerifyWhenGitDisabled` helper** in state-machine.js.
+- **`expandTemplate` helper** in git-plan.js — deduplicates commit-message and PR-body placeholder expansion.
+- **`epic_merge_wait_minutes` profile knob** in `modules/git/config.yaml` (falls back to `land_wait_minutes`).
+- **20 new test files / suites** — `autopilot-decorate-git-op.test.ts` (decorateGitOp + migration), `run-step.test.ts` (runner contract: tolerate / optional / env / retry / signal). 30+ new cases added to `git-plan.test.ts`, `state-machine.test.ts`, `profile-rules.test.ts`, `create-pr.test.ts` covering every new knob + their interactions with `merge_strategy`, `reuse_user_branch`, `has_origin`, and `granularity`.
+
+### Changed
+
+- **`branchName` truncation uses 8-char hash** (was 6, documented as "unique" — actually only 24 bits / 4k collision threshold). Now 32 bits.
+- **`gh pr list --head`** replaces `gh pr view` for idempotency checks — distinguishes "no PR" from "auth/network error."
+- **MERGE_EPIC pre-switches to base** before `gh pr merge --delete-branch` so worktree setups with the branch checked out don't fail the delete.
+
 ## [2.1.2] - 2026-05-15
 
 **Three correctness fixes hit during real-world v2.1 use.** Each fix has unit + integration coverage and a regression test pinned to the symptom the user reported.
