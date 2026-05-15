@@ -70,16 +70,17 @@ describe('decorateGitOp — git.enabled short-circuit', () => {
   });
 });
 
-// Build a temp project root with a sprint-status.yaml seeded with the
-// given pending story. Returns { projectRoot, cleanup }. Used by tests
-// that exercise the PREPARE_STORY_BRANCH resolution path.
-function makeProjectWithSprintStatus(pendingStory: string | null) {
+// Build a temp project root with a sprint-status.yaml. Accepts either
+// a single pending story key (convenience) or a full development_status
+// block as a string. Returns { projectRoot, cleanup }.
+function makeProjectWithSprintStatus(pendingStory: string | null, raw?: string) {
   const projectRoot = mkdtempSync(join(tmpdir(), 'sp-compose-test-'));
-  if (pendingStory !== null) {
-    const dir = join(projectRoot, '_bmad-output', 'implementation-artifacts');
-    // mkdirSync is hoisted via tmpdir/mkdtemp; use node-fs.
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    require('node:fs').mkdirSync(dir, { recursive: true });
+  const dir = join(projectRoot, '_bmad-output', 'implementation-artifacts');
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  require('node:fs').mkdirSync(dir, { recursive: true });
+  if (raw !== undefined) {
+    writeFileSync(join(dir, 'sprint-status.yaml'), raw, 'utf8');
+  } else if (pendingStory !== null) {
     writeFileSync(
       join(dir, 'sprint-status.yaml'),
       `development_status:\n  ${pendingStory}: ready-for-dev\n`,
@@ -112,6 +113,108 @@ describe('composeRuntimeState — migration of legacy current_bmad_step', () => 
       // story_key resolves → fall back to flowStart (create_story).
       expect(r.phase).toBe('create_story');
       expect(r.story_key).toBeNull();
+    } finally {
+      cleanup();
+    }
+  });
+
+  it('skips epic rollup headers when resolving next story (regression: v2.1.4 picked epic-4 as story_key)', () => {
+    // Real BMad sprint-status.yaml shape: epic rollups live next to
+    // stories under development_status. parseStatuses returns them
+    // flat; the resolver must filter out non-story entries.
+    const { projectRoot, cleanup } = makeProjectWithSprintStatus(
+      null,
+      [
+        'development_status:',
+        '  epic-4: in-progress',
+        '  4-2b-speaker-enrollment: done',
+        '  4-5-realm-config: backlog',
+        '  4-8-realm-wide-matcher-and-session-lock: ready-for-dev',
+        '  4-retrospective: pending',
+        '',
+      ].join('\n'),
+    );
+    try {
+      const r = composeRuntimeState(
+        { current_bmad_step: 'create_story' },
+        flatToProfile({}, 'medium'),
+        projectRoot,
+      );
+      // epic-4 is rejected (epic header).
+      // 4-2b is rejected (done).
+      // 4-retrospective is rejected (retro entry).
+      // 4-5 is the first remaining real story.
+      expect(r.phase).toBe('prepare_story_branch');
+      expect(r.story_key).toBe('4-5-realm-config');
+      expect(r.current_epic).toBe('4');
+    } finally {
+      cleanup();
+    }
+  });
+
+  it('skips *-retrospective entries (regression: looksLikeStoryKey)', () => {
+    const { projectRoot, cleanup } = makeProjectWithSprintStatus(
+      null,
+      [
+        'development_status:',
+        '  4-retrospective: pending',
+        '  4-8-realm-wide-matcher-and-session-lock: ready-for-dev',
+        '',
+      ].join('\n'),
+    );
+    try {
+      const r = composeRuntimeState(
+        { current_bmad_step: 'create_story' },
+        flatToProfile({}, 'medium'),
+        projectRoot,
+      );
+      expect(r.story_key).toBe('4-8-realm-wide-matcher-and-session-lock');
+    } finally {
+      cleanup();
+    }
+  });
+
+  it('falls back to flowStart when only epic headers and retrospectives are pending (no real stories)', () => {
+    const { projectRoot, cleanup } = makeProjectWithSprintStatus(
+      null,
+      [
+        'development_status:',
+        '  epic-4: in-progress',
+        '  4-retrospective: pending',
+        '',
+      ].join('\n'),
+    );
+    try {
+      const r = composeRuntimeState(
+        { current_bmad_step: 'create_story' },
+        flatToProfile({}, 'medium'),
+        projectRoot,
+      );
+      expect(r.phase).toBe('create_story');
+      expect(r.story_key).toBeNull();
+    } finally {
+      cleanup();
+    }
+  });
+
+  it('accepts epic-prefixed story keys (epic-1-game-engine, not epic header)', () => {
+    const { projectRoot, cleanup } = makeProjectWithSprintStatus(
+      null,
+      [
+        'development_status:',
+        '  epic-1: in-progress',
+        '  epic-1-game-engine: ready-for-dev',
+        '',
+      ].join('\n'),
+    );
+    try {
+      const r = composeRuntimeState(
+        { current_bmad_step: 'create_story' },
+        flatToProfile({}, 'medium'),
+        projectRoot,
+      );
+      expect(r.story_key).toBe('epic-1-game-engine');
+      expect(r.current_epic).toBe('epic-1');
     } finally {
       cleanup();
     }

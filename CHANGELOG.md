@@ -1,5 +1,24 @@
 # Changelog
 
+## [2.1.5] - 2026-05-15
+
+**Hotfix for v2.1.4.** `resolveNextStoryKey` used BMad's `parseStatuses` directly, which returns every entry under `development_status:` — including epic rollup headers (`epic-4: in-progress`) and retrospective bookkeeping entries (`4-retrospective: pending`). The resolver picked the first non-`done` entry without filtering, so a real-world sprint emitted `git_op create_branch story/epic-4` (epic header) instead of `story/4-8-realm-wide-matcher` (the next pending story).
+
+### Fixed
+
+- **`resolveNextStoryKey` filters non-story keys.** New `looksLikeStoryKey(key)` predicate rejects:
+  - **Epic rollup headers** — `epic-4`, bare `4`. Detected by stripping any leading `epic-` prefix and requiring at least one remaining hyphen. `epic-4` → `4` → no hyphen → reject. `epic-1-game-engine` → `1-game-engine` → has hyphen → accept.
+  - **Retrospective entries** — `4-retrospective`, `epic-4-retrospective`. Detected by `-retrospective$` suffix.
+- The resolver only picks from real stories now. If only epic headers / retrospectives remain pending (no real stories), it returns null and `composeRuntimeState` falls back to `flowStart` with the same warning as before.
+
+### Added
+
+- 4 new regression tests in `tests/unit/orchestrator/autopilot-decorate-git-op.test.ts`:
+  - sprint-status with `epic-4`, done story, ready story, retrospective → picks the ready story not the epic
+  - `*-retrospective` entries are skipped
+  - only epic headers + retrospectives → fall back to flowStart
+  - `epic-1-game-engine` (story key with `epic-` prefix) is accepted, not confused with the `epic-1` header
+
 ## [2.1.4] - 2026-05-15
 
 **Hotfix for v2.1.3.** PREPARE_STORY_BRANCH fires before CREATE_STORY but needed `story_key` to compute the branch name — and at fresh-sprint start there isn't one yet. v2.1.3 emitted `branch: story/unknown`. v2.1.4 resolves the next pending story from `sprint-status.yaml` before emitting, so the branch name is real.

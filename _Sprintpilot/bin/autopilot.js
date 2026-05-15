@@ -109,10 +109,11 @@ function safeExistsSync(p) {
 // back to "story/unknown" because state.story_key is null on a fresh
 // sprint (CREATE_STORY hasn't run yet; for nano there's no CREATE_STORY
 // at all and quick-dev reads sprint-status itself). Returns the first
-// story whose status is NOT "done" (case-insensitive), or null when:
+// non-done STORY key (filtering out epic rollup headers), or null when:
 //   - the status file doesn't exist (pre-planning)
 //   - all stories are done (sprint complete)
 //   - the file can't be parsed
+//   - the only non-done entries are epic rollups (no real stories yet)
 function resolveNextStoryKey(projectRoot) {
   if (!projectRoot) return null;
   const sprintStatusPath = path.join(
@@ -126,10 +127,46 @@ function resolveNextStoryKey(projectRoot) {
     const raw = fs.readFileSync(sprintStatusPath, 'utf8');
     const stories = parseSprintStatuses(raw);
     const remaining = remainingStoriesFrom(stories);
-    return remaining.length > 0 ? remaining[0] : null;
+    // parseStatuses returns every key under `development_status:` —
+    // including BMad's epic rollup headers (`epic-4: in-progress`).
+    // Filter them out so we don't ask the orchestrator to branch on an
+    // epic identifier (the v2.1.4 hotfix shipped without this filter and
+    // a user reported branch: story/epic-4 instead of story/4-8-...).
+    const realStories = remaining.filter(looksLikeStoryKey);
+    return realStories.length > 0 ? realStories[0] : null;
   } catch (_e) {
     return null;
   }
+}
+
+// Tell story keys apart from non-story bookkeeping entries in
+// sprint-status.yaml. BMad development_status: holds three kinds of
+// entries that parseStatuses returns side-by-side:
+//
+//   1. Real stories — `4-8-realm-wide-matcher` / `epic-1-game-engine`.
+//      Always have at least one hyphen AFTER the epic identifier.
+//   2. Epic rollup headers — `epic-4` / bare `4`. The status reflects
+//      child-story rollup, not a unit of work for the autopilot.
+//   3. Retrospective entries — `4-retrospective` / `epic-4-retrospective`.
+//      Status tracks whether the per-epic retro ritual has run; not a
+//      story to dev.
+//
+// Reject (2) and (3). The v2.1.4 hotfix shipped without this filter and
+// the user reported `branch: story/epic-4` instead of the real next
+// pending story. The v2.1.5 hotfix extends the filter to retrospectives
+// after a follow-up report.
+function looksLikeStoryKey(key) {
+  if (typeof key !== 'string' || !key) return false;
+  // Retrospective entries (`-retrospective` suffix, with or without epic
+  // prefix). Match anywhere the suffix appears so `epic-4-retrospective`
+  // and `4-retrospective` are both rejected.
+  if (/-retrospective$/i.test(key)) return false;
+  // Strip any leading `epic-` prefix and require a remaining hyphen.
+  // `epic-4` → `4` → no hyphen → epic header (reject).
+  // `epic-1-game-engine` → `1-game-engine` → has hyphen → story (accept).
+  // `4-8-realm-wide-matcher` → unchanged → has hyphen → story (accept).
+  const withoutEpicPrefix = key.replace(/^epic-/i, '');
+  return withoutEpicPrefix.includes('-');
 }
 
 // Derive the epic identifier from a BMad story key. Convention:
