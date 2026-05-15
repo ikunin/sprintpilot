@@ -14,6 +14,16 @@ beforeEach(() => {
   const cfgDir = join(projectRoot, '_Sprintpilot', 'modules', 'autopilot');
   mkdirSync(cfgDir, { recursive: true });
   writeFileSync(join(cfgDir, 'config.yaml'), 'complexity_profile: medium\n', 'utf8');
+  // git.enabled: false skips the PREPARE_STORY_BRANCH precursor so these
+  // CLI tests can keep asserting on the legacy CREATE_STORY/NANO_QUICK_DEV
+  // first-action contract. Branch-creation correctness is covered by the
+  // dedicated unit tests (state-machine, git-plan, decorateGitOp).
+  // resolve-profile.js reads modules/git/config.yaml separately from
+  // modules/autopilot/config.yaml, so this knob has to live in its own
+  // file.
+  const gitCfgDir = join(projectRoot, '_Sprintpilot', 'modules', 'git');
+  mkdirSync(gitCfgDir, { recursive: true });
+  writeFileSync(join(gitCfgDir, 'config.yaml'), 'enabled: false\n', 'utf8');
   // Profile YAMLs the resolver expects to read.
   const profilesDir = join(cfgDir, 'profiles');
   mkdirSync(profilesDir, { recursive: true });
@@ -222,6 +232,16 @@ describe('autopilot record', () => {
 
 describe('autopilot next: git_op decoration', () => {
   it('inlines git-plan steps into git_op actions (story_done emits commit + push)', () => {
+    // This test specifically asserts the git decoration produces real
+    // argv steps — so it must re-enable git for its scope (the suite-
+    // wide fixture sets enabled=false to bypass PREPARE_STORY_BRANCH).
+    // We seed the state file directly at story_done, so PREPARE_STORY_
+    // BRANCH's own enabled=true behavior is never triggered.
+    writeFileSync(
+      join(projectRoot, '_Sprintpilot', 'modules', 'git', 'config.yaml'),
+      'enabled: true\n',
+      'utf8',
+    );
     runCli(['start']);
     // Seed state at story_done so the next action is git_op:commit_and_push_story.
     const statePath = join(

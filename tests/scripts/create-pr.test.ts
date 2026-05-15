@@ -94,4 +94,66 @@ describe('create-pr', () => {
     expect(r.status).toBe(0);
     expect(r.stdout).toContain('Usage:');
   });
+
+  it('--platform auto resolves via CLI probing (gh > glab > bb > tea > git_only)', () => {
+    // No origin → 'auto' resolution still happens, but the no-remote
+    // SKIPPED branch is the first one we hit. Exit 2 here proves we got
+    // PAST the unknown-platform fall-through (which would be exit 1
+    // with "unknown platform 'auto'"). That's the regression we're
+    // guarding against.
+    const r = runScript(
+      'create-pr',
+      ['--platform', 'auto', '--branch', 'story/1-1', '--title', 'Test PR'],
+      { cwd: repo.dir },
+    );
+    expect(r.status).toBe(2);
+    expect(r.stderr + r.stdout).not.toContain("unknown platform 'auto'");
+  });
+
+  describe('--mode checks', () => {
+    it('without --platform/--branch exits 1', () => {
+      const r = runScript('create-pr', ['--mode', 'checks'], { cwd: repo.dir });
+      expect(r.status).toBe(1);
+      expect(r.stderr + r.stdout).toContain('--mode checks requires');
+    });
+
+    it('non-github platform returns SKIPPED exit 2 (polling not implemented)', () => {
+      gitIn(repo.dir, ['remote', 'add', 'origin', 'https://example.com/repo.git']);
+      const r = runScript(
+        'create-pr',
+        [
+          '--mode',
+          'checks',
+          '--platform',
+          'gitlab',
+          '--branch',
+          'story/1-1',
+          '--wait-minutes',
+          '1',
+        ],
+        { cwd: repo.dir },
+      );
+      expect(r.status).toBe(2);
+      expect(r.stdout).toContain('SKIPPED');
+    });
+
+    it('git_only platform returns SKIPPED exit 2', () => {
+      gitIn(repo.dir, ['remote', 'add', 'origin', 'https://example.com/repo.git']);
+      const r = runScript(
+        'create-pr',
+        [
+          '--mode',
+          'checks',
+          '--platform',
+          'git_only',
+          '--branch',
+          'story/1-1',
+          '--wait-minutes',
+          '1',
+        ],
+        { cwd: repo.dir },
+      );
+      expect(r.status).toBe(2);
+    });
+  });
 });

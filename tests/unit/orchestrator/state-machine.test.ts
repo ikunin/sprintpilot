@@ -107,6 +107,14 @@ describe('nextAction — emits the canonical action per state (full flow)', () =
     expect(a.op).toBe('commit_and_push_story');
   });
 
+  it('PREPARE_STORY_BRANCH → git_op create_branch', () => {
+    const a = nextAction(baseState(STATES.PREPARE_STORY_BRANCH), p);
+    expect(a.type).toBe('git_op');
+    expect(a.op).toBe('create_branch');
+    expect(a.story_key).toBe('S1.2');
+    expect(a.epic_key).toBe('E1');
+  });
+
   it('EPIC_BOUNDARY_CHECK emits noop (orchestrator advances state machine)', () => {
     const a = nextAction(baseState(STATES.EPIC_BOUNDARY_CHECK), p);
     expect(a.type).toBe('noop');
@@ -137,12 +145,21 @@ describe('nextAction — nano flow', () => {
     expect(a.skill).toBe('bmad-quick-dev');
   });
 
-  it('nextStoryStart returns NANO_QUICK_DEV for quick flow', () => {
-    expect(nextStoryStart(nano())).toBe(STATES.NANO_QUICK_DEV);
+  it('nextStoryStart routes through PREPARE_STORY_BRANCH (default: granularity=story, !reuse_user_branch)', () => {
+    expect(nextStoryStart(nano())).toBe(STATES.PREPARE_STORY_BRANCH);
+    expect(nextStoryStart(medium())).toBe(STATES.PREPARE_STORY_BRANCH);
   });
 
-  it('nextStoryStart returns CREATE_STORY for full flow', () => {
-    expect(nextStoryStart(medium())).toBe(STATES.CREATE_STORY);
+  it('nextStoryStart skips PREPARE_STORY_BRANCH when reuse_user_branch=true', () => {
+    const fullReuse = { ...medium(), reuse_user_branch: true } as Profile;
+    const nanoReuse = { ...nano(), reuse_user_branch: true } as Profile;
+    expect(nextStoryStart(fullReuse)).toBe(STATES.CREATE_STORY);
+    expect(nextStoryStart(nanoReuse)).toBe(STATES.NANO_QUICK_DEV);
+  });
+
+  it('nextStoryStart still routes through PREPARE_STORY_BRANCH under granularity=epic', () => {
+    const epicProfile = { ...medium(), granularity: 'epic' } as Profile;
+    expect(nextStoryStart(epicProfile)).toBe(STATES.PREPARE_STORY_BRANCH);
   });
 });
 
@@ -272,8 +289,15 @@ describe('nextStateAfterSuccess — deterministic transitions', () => {
     ).toBe(STATES.RETROSPECTIVE);
   });
 
-  it('EPIC_BOUNDARY_CHECK end-of-epic, mode=skip, sprint not complete → next story start (full)', () => {
+  it('EPIC_BOUNDARY_CHECK end-of-epic, mode=skip, sprint not complete → next story start (full → PREPARE_STORY_BRANCH)', () => {
     const sp = { ...medium(), retrospective_mode: 'skip' } as Profile;
+    expect(
+      nextStateAfterSuccess(baseState(STATES.EPIC_BOUNDARY_CHECK), sp, { status: 'success' }),
+    ).toBe(STATES.PREPARE_STORY_BRANCH);
+  });
+
+  it('EPIC_BOUNDARY_CHECK end-of-epic, mode=skip, reuse_user_branch=true → CREATE_STORY directly', () => {
+    const sp = { ...medium(), retrospective_mode: 'skip', reuse_user_branch: true } as Profile;
     expect(
       nextStateAfterSuccess(baseState(STATES.EPIC_BOUNDARY_CHECK), sp, { status: 'success' }),
     ).toBe(STATES.CREATE_STORY);
@@ -290,20 +314,105 @@ describe('nextStateAfterSuccess — deterministic transitions', () => {
     ).toBe(STATES.SPRINT_FINALIZE_PENDING);
   });
 
-  it('EPIC_BOUNDARY_CHECK with more stories in epic → next story start', () => {
+  it('EPIC_BOUNDARY_CHECK with more stories in epic → PREPARE_STORY_BRANCH (default settings)', () => {
     expect(
       nextStateAfterSuccess(
         baseState(STATES.EPIC_BOUNDARY_CHECK, { remaining_stories_in_epic: 2 }),
         p,
         { status: 'success' },
       ),
+    ).toBe(STATES.PREPARE_STORY_BRANCH);
+  });
+
+  it('RETROSPECTIVE → next story start (PREPARE_STORY_BRANCH) when sprint not complete', () => {
+    expect(nextStateAfterSuccess(baseState(STATES.RETROSPECTIVE), p, { status: 'success' })).toBe(
+      STATES.PREPARE_STORY_BRANCH,
+    );
+  });
+
+  it('PREPARE_STORY_BRANCH → CREATE_STORY (full flow)', () => {
+    expect(
+      nextStateAfterSuccess(baseState(STATES.PREPARE_STORY_BRANCH), p, { status: 'success' }),
     ).toBe(STATES.CREATE_STORY);
   });
 
-  it('RETROSPECTIVE → next story start when sprint not complete', () => {
-    expect(nextStateAfterSuccess(baseState(STATES.RETROSPECTIVE), p, { status: 'success' })).toBe(
-      STATES.CREATE_STORY,
-    );
+  it('EPIC_BOUNDARY_CHECK end-of-epic + granularity=epic + stacked + autopush → MERGE_EPIC', () => {
+    const epicProfile = { ...medium(), granularity: 'epic' } as Profile;
+    expect(
+      nextStateAfterSuccess(
+        baseState(STATES.EPIC_BOUNDARY_CHECK, { remaining_stories_in_epic: 0 }),
+        epicProfile,
+        { status: 'success' },
+      ),
+    ).toBe(STATES.MERGE_EPIC);
+  });
+
+  it('EPIC_BOUNDARY_CHECK end-of-epic + granularity=epic + reuse_user_branch=true → skip MERGE_EPIC', () => {
+    const epicProfile = { ...medium(), granularity: 'epic', reuse_user_branch: true } as Profile;
+    expect(
+      nextStateAfterSuccess(
+        baseState(STATES.EPIC_BOUNDARY_CHECK, { remaining_stories_in_epic: 0 }),
+        epicProfile,
+        { status: 'success' },
+      ),
+    ).toBe(STATES.RETROSPECTIVE);
+  });
+
+  it('EPIC_BOUNDARY_CHECK end-of-epic + granularity=epic + push_auto=false → skip MERGE_EPIC', () => {
+    const epicProfile = { ...medium(), granularity: 'epic', push_auto: false } as Profile;
+    expect(
+      nextStateAfterSuccess(
+        baseState(STATES.EPIC_BOUNDARY_CHECK, { remaining_stories_in_epic: 0 }),
+        epicProfile,
+        { status: 'success' },
+      ),
+    ).toBe(STATES.RETROSPECTIVE);
+  });
+
+  it('EPIC_BOUNDARY_CHECK end-of-epic + granularity=story → no MERGE_EPIC (per-story flow)', () => {
+    expect(
+      nextStateAfterSuccess(
+        baseState(STATES.EPIC_BOUNDARY_CHECK, { remaining_stories_in_epic: 0 }),
+        p,
+        { status: 'success' },
+      ),
+    ).toBe(STATES.RETROSPECTIVE);
+  });
+
+  it('MERGE_EPIC → RETROSPECTIVE (mode auto, sprint not done)', () => {
+    const epicProfile = { ...medium(), granularity: 'epic' } as Profile;
+    expect(
+      nextStateAfterSuccess(baseState(STATES.MERGE_EPIC), epicProfile, { status: 'success' }),
+    ).toBe(STATES.RETROSPECTIVE);
+  });
+
+  it('MERGE_EPIC → SPRINT_FINALIZE_PENDING when retro=skip + sprint done', () => {
+    const epicProfile = {
+      ...medium(),
+      granularity: 'epic',
+      retrospective_mode: 'skip',
+    } as Profile;
+    expect(
+      nextStateAfterSuccess(
+        baseState(STATES.MERGE_EPIC, { sprint_is_complete: true }),
+        epicProfile,
+        { status: 'success' },
+      ),
+    ).toBe(STATES.SPRINT_FINALIZE_PENDING);
+  });
+
+  it('nextAction(MERGE_EPIC) emits git_op merge_epic', () => {
+    const epicProfile = { ...medium(), granularity: 'epic' } as Profile;
+    const a = nextAction(baseState(STATES.MERGE_EPIC), epicProfile);
+    expect(a.type).toBe('git_op');
+    expect(a.op).toBe('merge_epic');
+    expect(a.epic_key).toBe('E1');
+  });
+
+  it('PREPARE_STORY_BRANCH → NANO_QUICK_DEV (quick flow)', () => {
+    expect(
+      nextStateAfterSuccess(baseState(STATES.PREPARE_STORY_BRANCH), np, { status: 'success' }),
+    ).toBe(STATES.NANO_QUICK_DEV);
   });
 
   it('RETROSPECTIVE → SPRINT_FINALIZE_PENDING when sprint complete', () => {

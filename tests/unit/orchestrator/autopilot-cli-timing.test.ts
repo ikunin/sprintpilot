@@ -38,6 +38,15 @@ beforeEach(() => {
     'complexity_profile: medium\nautopilot:\n  execution_mode: orchestrator\n  phase_timings: true\n',
     'utf8',
   );
+  // git.enabled: false bypasses PREPARE_STORY_BRANCH so the skill-timing
+  // tests can keep asserting on CREATE_STORY/NANO_QUICK_DEV as the first
+  // visible skill phase. composeRuntimeState's migration rule otherwise
+  // bumps create_story → prepare_story_branch on every CLI call.
+  writeFileSync(
+    join(projectRoot, '_Sprintpilot', 'modules', 'git', 'config.yaml'),
+    'enabled: false\n',
+    'utf8',
+  );
 });
 
 afterEach(() => {
@@ -77,9 +86,26 @@ function readTimings(story: string): { phase?: string; event?: string }[] {
     });
 }
 
+// Seed autopilot-state.yaml with `current_bmad_step: create_story` so the
+// orchestrator skips the PREPARE_STORY_BRANCH precursor for tests that
+// only care about skill-timing emission downstream. PREPARE_STORY_BRANCH
+// emits a `git_op`, which does not produce a `skill.<name>` timing event
+// — it's deliberately invisible to this test's assertion surface.
+function bypassPrepareBranch() {
+  const statePath = join(
+    projectRoot,
+    '_bmad-output',
+    'implementation-artifacts',
+    'autopilot-state.yaml',
+  );
+  const existing = existsSync(statePath) ? readFileSync(statePath, 'utf8') : '';
+  writeFileSync(statePath, `${existing}current_bmad_step: create_story\n`, 'utf8');
+}
+
 describe('autopilot CLI: skill timing events', () => {
   it('emits skill.bmad-create-story start on first `next`', () => {
     cli(['start']);
+    bypassPrepareBranch();
     cli(['next']);
     const events = readTimings('sprint');
     const starts = events.filter((e) => e.event === 'start' && e.phase?.startsWith('skill.'));
@@ -89,6 +115,7 @@ describe('autopilot CLI: skill timing events', () => {
 
   it('emits skill.<name> end on phase-advancing `record success`', () => {
     cli(['start']);
+    bypassPrepareBranch();
     // Seed a valid story file so verify accepts the success.
     const storyDir = join(projectRoot, '_bmad-output', 'stories');
     mkdirSync(storyDir, { recursive: true });

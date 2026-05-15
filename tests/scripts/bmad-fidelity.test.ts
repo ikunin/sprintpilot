@@ -258,8 +258,11 @@ describe('Three-consecutive-test-failures TRUE BLOCKER', () => {
 });
 
 describe('Per-epic retrospective boundary', () => {
-  it('mid-epic STORY_DONE → next story, no retrospective', () => {
-    // STORY_DONE → EPIC_BOUNDARY_CHECK → CREATE_STORY (remaining_stories_in_epic > 0)
+  it('mid-epic STORY_DONE → next story (PREPARE_STORY_BRANCH under default git settings)', () => {
+    // STORY_DONE → EPIC_BOUNDARY_CHECK → PREPARE_STORY_BRANCH
+    // (default profile: granularity=story, reuse_user_branch=false).
+    // PREPARE_STORY_BRANCH then advances to CREATE_STORY once the branch
+    // exists — that transition is covered in state-machine.test.ts.
     const afterStoryDone = interpretSignal(st(STATES.STORY_DONE), { status: 'success' }, MEDIUM());
     expect(afterStoryDone.newState.phase).toBe(STATES.EPIC_BOUNDARY_CHECK);
 
@@ -268,7 +271,7 @@ describe('Per-epic retrospective boundary', () => {
       { status: 'success' },
       MEDIUM(),
     );
-    expect(afterEpicCheck.newState.phase).toBe(STATES.CREATE_STORY);
+    expect(afterEpicCheck.newState.phase).toBe(STATES.PREPARE_STORY_BRANCH);
   });
 
   it('end-of-epic EPIC_BOUNDARY_CHECK → RETROSPECTIVE (retro=auto)', () => {
@@ -280,7 +283,10 @@ describe('Per-epic retrospective boundary', () => {
     expect(r.newState.phase).toBe(STATES.RETROSPECTIVE);
   });
 
-  it('retrospective_mode=skip + mid-sprint → next story (no retro)', () => {
+  it('retrospective_mode=skip + mid-sprint → next story (PREPARE_STORY_BRANCH)', () => {
+    // Same routing rationale as mid-epic STORY_DONE: under default git
+    // settings the next-story start phase is PREPARE_STORY_BRANCH, which
+    // then advances to CREATE_STORY.
     const profile = { ...MEDIUM(), retrospective_mode: 'skip' };
     const r = interpretSignal(
       st(STATES.EPIC_BOUNDARY_CHECK, {
@@ -290,7 +296,7 @@ describe('Per-epic retrospective boundary', () => {
       { status: 'success' },
       profile,
     );
-    expect(r.newState.phase).toBe(STATES.CREATE_STORY);
+    expect(r.newState.phase).toBe(STATES.PREPARE_STORY_BRANCH);
   });
 });
 

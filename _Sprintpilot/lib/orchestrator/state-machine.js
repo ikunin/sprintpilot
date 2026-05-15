@@ -41,6 +41,14 @@
 'use strict';
 
 const STATES = Object.freeze({
+  // PREPARE_STORY_BRANCH — emitted as the first state of a fresh story
+  // when the active git settings require a per-story or per-epic branch
+  // (granularity ∈ {story, epic} AND !reuse_user_branch). Resolves to a
+  // git_op with op: 'create_branch' so the story file itself is authored
+  // on the story branch. Under `reuse_user_branch: true` this state is
+  // skipped and CREATE_STORY / NANO_QUICK_DEV runs directly on the
+  // user-locked branch.
+  PREPARE_STORY_BRANCH: 'prepare_story_branch',
   CREATE_STORY: 'create_story',
   CHECK_READINESS: 'check_readiness',
   DEV_RED: 'dev_red',
@@ -54,6 +62,16 @@ const STATES = Object.freeze({
   // story's PR into base. Skipped (STORY_DONE → EPIC_BOUNDARY_CHECK directly)
   // under the default 'stacked' strategy.
   STORY_LAND: 'story_land',
+  // MERGE_EPIC — entered from EPIC_BOUNDARY_CHECK when:
+  //   • end-of-epic (remaining_stories_in_epic === 0)
+  //   • granularity === 'epic'
+  //   • merge_strategy === 'stacked'
+  //   • push_auto === true, has_origin !== false, !reuse_user_branch
+  // Closes out the epic branch by either merging its PR (push_create_pr=
+  // true) or local-merging directly to base (push_create_pr=false). The
+  // existing planMergeEpic builds the local-merge sequence; planMergeEpicPr
+  // builds the gh-cli sequence.
+  MERGE_EPIC: 'merge_epic',
   EPIC_BOUNDARY_CHECK: 'epic_boundary_check',
   RETROSPECTIVE: 'retrospective',
   SPRINT_FINALIZE_PENDING: 'sprint_finalize_pending',
@@ -68,6 +86,7 @@ const TERMINAL_STATES = new Set([STATES.SPRINT_FINALIZE_PENDING]);
 // edges (e.g. patch_apply only when findings.action==='patch') are
 // enforced in `nextStateAfterSuccess`.
 const FULL_FLOW_SUCCESSORS = {
+  [STATES.PREPARE_STORY_BRANCH]: [STATES.CREATE_STORY],
   [STATES.CREATE_STORY]: [STATES.CHECK_READINESS],
   [STATES.CHECK_READINESS]: [STATES.DEV_RED],
   [STATES.DEV_RED]: [STATES.DEV_GREEN],
@@ -77,16 +96,39 @@ const FULL_FLOW_SUCCESSORS = {
   [STATES.PATCH_RETEST]: [STATES.CODE_REVIEW, STATES.STORY_DONE], // conditional (re-review if still blocking)
   [STATES.STORY_DONE]: [STATES.STORY_LAND, STATES.EPIC_BOUNDARY_CHECK], // STORY_LAND only under land_as_you_go
   [STATES.STORY_LAND]: [STATES.EPIC_BOUNDARY_CHECK],
-  [STATES.EPIC_BOUNDARY_CHECK]: [STATES.RETROSPECTIVE, STATES.CREATE_STORY, STATES.SPRINT_FINALIZE_PENDING],
-  [STATES.RETROSPECTIVE]: [STATES.CREATE_STORY, STATES.SPRINT_FINALIZE_PENDING],
+  [STATES.EPIC_BOUNDARY_CHECK]: [
+    STATES.MERGE_EPIC,
+    STATES.RETROSPECTIVE,
+    STATES.PREPARE_STORY_BRANCH,
+    STATES.CREATE_STORY,
+    STATES.SPRINT_FINALIZE_PENDING,
+  ],
+  [STATES.MERGE_EPIC]: [STATES.RETROSPECTIVE, STATES.SPRINT_FINALIZE_PENDING],
+  [STATES.RETROSPECTIVE]: [
+    STATES.PREPARE_STORY_BRANCH,
+    STATES.CREATE_STORY,
+    STATES.SPRINT_FINALIZE_PENDING,
+  ],
 };
 
 const NANO_FLOW_SUCCESSORS = {
+  [STATES.PREPARE_STORY_BRANCH]: [STATES.NANO_QUICK_DEV],
   [STATES.NANO_QUICK_DEV]: [STATES.STORY_DONE],
   [STATES.STORY_DONE]: [STATES.STORY_LAND, STATES.EPIC_BOUNDARY_CHECK],
   [STATES.STORY_LAND]: [STATES.EPIC_BOUNDARY_CHECK],
-  [STATES.EPIC_BOUNDARY_CHECK]: [STATES.RETROSPECTIVE, STATES.NANO_QUICK_DEV, STATES.SPRINT_FINALIZE_PENDING],
-  [STATES.RETROSPECTIVE]: [STATES.NANO_QUICK_DEV, STATES.SPRINT_FINALIZE_PENDING],
+  [STATES.EPIC_BOUNDARY_CHECK]: [
+    STATES.MERGE_EPIC,
+    STATES.RETROSPECTIVE,
+    STATES.PREPARE_STORY_BRANCH,
+    STATES.NANO_QUICK_DEV,
+    STATES.SPRINT_FINALIZE_PENDING,
+  ],
+  [STATES.MERGE_EPIC]: [STATES.RETROSPECTIVE, STATES.SPRINT_FINALIZE_PENDING],
+  [STATES.RETROSPECTIVE]: [
+    STATES.PREPARE_STORY_BRANCH,
+    STATES.NANO_QUICK_DEV,
+    STATES.SPRINT_FINALIZE_PENDING,
+  ],
 };
 
 // Build instruction template content slots from state + profile. This is the
@@ -130,6 +172,21 @@ function nextAction(state, profile) {
   }
 
   switch (state.phase) {
+    case STATES.PREPARE_STORY_BRANCH:
+      // The edge layer (autopilot.js#decorateGitOp) inlines the planned
+      // argv steps via git-plan.js#planCreateBranch. It also probes git
+      // for branch existence and threads `state.branch_exists` through
+      // so the plan can degrade `git switch -c` to `git switch` when the
+      // branch already exists (e.g. second story under granularity=epic,
+      // or resume after partial failure).
+      return {
+        type: 'git_op',
+        phase: state.phase,
+        op: 'create_branch',
+        story_key: state.story_key,
+        epic_key: state.current_epic,
+        profile: profile.name,
+      };
     case STATES.CREATE_STORY:
       return {
         type: 'invoke_skill',
@@ -192,6 +249,19 @@ function nextAction(state, profile) {
         phase: state.phase,
         op: 'commit_and_push_story',
         story_key: state.story_key,
+        profile: profile.name,
+      };
+    case STATES.MERGE_EPIC:
+      // Edge layer (decorateGitOp) inlines the argv steps via
+      // git-plan.js#planMergeEpic. The plan branches internally on
+      // profile.push_create_pr to choose `gh pr merge --squash` vs the
+      // local-merge sequence.
+      return {
+        type: 'git_op',
+        phase: state.phase,
+        op: 'merge_epic',
+        story_key: state.story_key,
+        epic_key: state.current_epic,
         profile: profile.name,
       };
     case STATES.STORY_LAND:
@@ -288,6 +358,13 @@ function nextStateAfterSuccess(currentState, profile, signal) {
 function deterministicNext(state, profile, output) {
   const phase = state.phase;
   switch (phase) {
+    case STATES.PREPARE_STORY_BRANCH: {
+      // Branch is on disk → enter the actual story work (flow-dependent).
+      const next = profile.implementation_flow === 'quick'
+        ? STATES.NANO_QUICK_DEV
+        : STATES.CREATE_STORY;
+      return { chosen: next, allValid: [next] };
+    }
     case STATES.CREATE_STORY:
       return { chosen: STATES.CHECK_READINESS, allValid: [STATES.CHECK_READINESS] };
     case STATES.CHECK_READINESS:
@@ -330,6 +407,12 @@ function deterministicNext(state, profile, output) {
       const sprintDone = !!state.sprint_is_complete;
       // End of epic?
       if (remainingInEpic <= 0) {
+        // Epic merge: granularity=epic + stacked + autoremote-push +
+        // !reuse_user_branch + git enabled → close out the epic branch
+        // (MERGE_EPIC) before retrospective / next-epic routing.
+        if (epicMergeNeeded(profile)) {
+          return { chosen: STATES.MERGE_EPIC, allValid: [STATES.MERGE_EPIC] };
+        }
         if (profile.retrospective_mode === 'skip') {
           return {
             chosen: sprintDone ? STATES.SPRINT_FINALIZE_PENDING : nextStoryStart(profile),
@@ -340,6 +423,22 @@ function deterministicNext(state, profile, output) {
       }
       // More stories in the same epic.
       return { chosen: nextStoryStart(profile), allValid: [nextStoryStart(profile)] };
+    }
+    case STATES.MERGE_EPIC: {
+      const sprintDone = !!state.sprint_is_complete;
+      const successor = nextStoryStart(profile);
+      // Structurally-valid successors per FULL/NANO_FLOW_SUCCESSORS:
+      // [RETROSPECTIVE, SPRINT_FINALIZE_PENDING]. Include the next-story
+      // start under retro=skip so the hint tiebreaker can route to it
+      // when the LLM has a strong opinion.
+      const allValid = [STATES.RETROSPECTIVE, STATES.SPRINT_FINALIZE_PENDING, successor];
+      if (profile.retrospective_mode === 'skip') {
+        return {
+          chosen: sprintDone ? STATES.SPRINT_FINALIZE_PENDING : successor,
+          allValid,
+        };
+      }
+      return { chosen: STATES.RETROSPECTIVE, allValid };
     }
     case STATES.RETROSPECTIVE: {
       const sprintDone = !!state.sprint_is_complete;
@@ -355,13 +454,66 @@ function deterministicNext(state, profile, output) {
   }
 }
 
+// nextStoryStart(profile) — the first phase of a fresh story.
+//
+// Under settings that require a per-story or per-epic branch
+// (granularity ∈ {story, epic} AND !reuse_user_branch) the very first
+// phase is PREPARE_STORY_BRANCH so the branch exists before the story
+// file is authored. Otherwise we skip straight to the flow-appropriate
+// implementation step.
+//
+// The `reuse_user_branch: true` path is handled by autopilot.js#cmdStart
+// which detects the current branch and locks it in via state.user_branch;
+// PREPARE_STORY_BRANCH is unnecessary in that mode (every story commits
+// to the same already-checked-out branch).
+// epicMergeNeeded(profile) — true when EPIC_BOUNDARY_CHECK at end-of-epic
+// should route through MERGE_EPIC instead of jumping straight to
+// retrospective / next-story. Matches the same triggers as the per-story
+// PR/merge in planCommitAndPush, just shifted to the epic-branch flow.
+function epicMergeNeeded(profile) {
+  return (
+    profile &&
+    profile.enabled !== false &&
+    !profile.reuse_user_branch &&
+    profile.granularity === 'epic' &&
+    (profile.merge_strategy || 'stacked') === 'stacked' &&
+    profile.push_auto !== false &&
+    profile.has_origin !== false
+  );
+}
+
+// shouldSkipVerifyWhenGitDisabled(phase) — true when verify.js should
+// be bypassed under `git.enabled: false`. This covers phases that emit
+// a git_op (PREPARE_STORY_BRANCH, STORY_DONE, MERGE_EPIC) and STORY_LAND
+// (which emits a run_script but reports the same kind of post-merge
+// bookkeeping that requires git operations to have happened).
+//
+// Centralizing the list here means new phases of either kind won't
+// silently miss the verify-skip wiring — add them to the set below.
+// (Previously named `isGitOpPhase`; renamed because STORY_LAND is not
+// strictly a git_op and the old name lied.)
+const GIT_INTERACTING_PHASES = new Set([
+  STATES.PREPARE_STORY_BRANCH,
+  STATES.STORY_DONE,
+  STATES.MERGE_EPIC,
+  STATES.STORY_LAND,
+]);
+function shouldSkipVerifyWhenGitDisabled(phase) {
+  return GIT_INTERACTING_PHASES.has(phase);
+}
+
 function nextStoryStart(profile) {
+  const needsBranchPrep =
+    !profile.reuse_user_branch &&
+    (profile.granularity === 'story' || profile.granularity === 'epic');
+  if (needsBranchPrep) return STATES.PREPARE_STORY_BRANCH;
   return profile.implementation_flow === 'quick' ? STATES.NANO_QUICK_DEV : STATES.CREATE_STORY;
 }
 
 // Best-effort mapping from a next_skill_hint string (e.g. "bmad-code-review")
 // to a phase identifier. Used only as a tiebreaker.
 const HINT_TO_PHASE = {
+  prepare_story_branch: STATES.PREPARE_STORY_BRANCH,
   'bmad-create-story': STATES.CREATE_STORY,
   'bmad-check-implementation-readiness': STATES.CHECK_READINESS,
   'bmad-dev-story:red': STATES.DEV_RED,
@@ -372,6 +524,7 @@ const HINT_TO_PHASE = {
   'bmad-retrospective': STATES.RETROSPECTIVE,
   'bmad-quick-dev': STATES.NANO_QUICK_DEV,
   story_done: STATES.STORY_DONE,
+  merge_epic: STATES.MERGE_EPIC,
   sprint_finalize_pending: STATES.SPRINT_FINALIZE_PENDING,
 };
 
@@ -396,6 +549,8 @@ module.exports = {
   nextStateAfterSuccess,
   // Exposed for adapt.js to construct fresh-story states.
   nextStoryStart,
+  // Exposed for autopilot.js verify-skip routing.
+  shouldSkipVerifyWhenGitDisabled,
   // Exposed for tests / inspection.
   buildTemplateSlots,
   HINT_TO_PHASE,

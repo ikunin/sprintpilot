@@ -18,6 +18,10 @@ const VALID_RETRO_MODES = ['auto', 'stop', 'skip'];
 const VALID_GRANULARITIES = ['story', 'epic'];
 const VALID_MERGE_STRATEGIES = ['stacked', 'land_as_you_go'];
 const VALID_LAND_WHENS = ['no_wait', 'ci_pass', 'ci_and_review'];
+const VALID_PLATFORM_PROVIDERS = ['auto', 'github', 'gitlab', 'bitbucket', 'gitea', 'git_only'];
+
+const DEFAULT_COMMIT_TEMPLATE_STORY = 'feat({epic}): {story-title} ({story-key})';
+const DEFAULT_COMMIT_TEMPLATE_PATCH = 'fix({story-key}): {patch-title}';
 
 // Per-profile defaults for fields the orchestrator manages directly
 // (verify_reject_budget, retry_budget_per_action). These are orchestrator-
@@ -59,6 +63,16 @@ function coerceEnum(v, allowed, fallback) {
   return fallback;
 }
 
+// Compute land_wait_minutes (default 30) and epic_merge_wait_minutes
+// (falls back to land_wait_minutes). Kept as a helper so the fallback
+// chain is readable; inlining produced a nested coerceInt call that
+// was hard to scan.
+function resolveWaitMinutes(resolved) {
+  const land = coerceInt(get(resolved, 'git.land_wait_minutes'), 30);
+  const epic = coerceInt(get(resolved, 'git.epic_merge_wait_minutes'), land);
+  return { land_wait_minutes: land, epic_merge_wait_minutes: epic };
+}
+
 // Convert the flat resolved-config tree (from resolve-profile.js) into a
 // typed Profile. Missing keys fall back to documented defaults.
 function flatToProfile(resolved, profileName) {
@@ -90,7 +104,7 @@ function flatToProfile(resolved, profileName) {
       'stacked',
     ),
     land_when: coerceEnum(get(resolved, 'git.land_when'), VALID_LAND_WHENS, 'ci_pass'),
-    land_wait_minutes: coerceInt(get(resolved, 'git.land_wait_minutes'), 30),
+    ...resolveWaitMinutes(resolved),
     base_branch:
       typeof get(resolved, 'git.base_branch') === 'string'
         ? get(resolved, 'git.base_branch')
@@ -99,6 +113,53 @@ function flatToProfile(resolved, profileName) {
       typeof get(resolved, 'git.branch_prefix') === 'string'
         ? get(resolved, 'git.branch_prefix')
         : 'story/',
+    // git.enabled — when false, every `git_op` action emitted by the
+    // state machine is replaced with a `noop` at decorateGitOp time.
+    // Used for evaluation / dry-run setups where the user wants the
+    // BMad cycle to run but doesn't want any commits / pushes / PRs.
+    enabled: coerceBool(get(resolved, 'git.enabled'), true),
+    // git.push.auto — when false, planCommitAndPush drops the push
+    // steps (both story-branch and base-branch). Branches stay local.
+    push_auto: coerceBool(get(resolved, 'git.push.auto'), true),
+    // git.push.create_pr — when true (and merge_strategy=stacked),
+    // planCommitAndPush appends a `create-pr.js` step after the push so
+    // each story branch gets one PR opened automatically. land_as_you_go
+    // already opens its own PRs via land.js, so this knob doesn't gate
+    // that path.
+    push_create_pr: coerceBool(get(resolved, 'git.push.create_pr'), true),
+    pr_template_path:
+      typeof get(resolved, 'git.push.pr_template') === 'string'
+        ? get(resolved, 'git.push.pr_template')
+        : null,
+    // Commit message templates. Placeholders expanded in git-plan.js:
+    //   {story-key}    — state.story_key
+    //   {epic}         — state.current_epic (or derived from story_key)
+    //   {story-title}  — state.ac_summary or story_key as fallback
+    //   {patch-title}  — set on patch commits (bmad-dev-story owns those)
+    commit_template_story:
+      typeof get(resolved, 'git.commit_templates.story') === 'string'
+        ? get(resolved, 'git.commit_templates.story')
+        : DEFAULT_COMMIT_TEMPLATE_STORY,
+    commit_template_patch:
+      typeof get(resolved, 'git.commit_templates.patch') === 'string'
+        ? get(resolved, 'git.commit_templates.patch')
+        : DEFAULT_COMMIT_TEMPLATE_PATCH,
+    // git.max_branch_length — branchName() truncates long branch names
+    // (story keys + prefix) to this length with a 6-char hash suffix to
+    // keep the name unique. Honors the contract advertised in config.yaml.
+    max_branch_length: coerceInt(get(resolved, 'git.max_branch_length'), 60),
+    // git.platform.provider + base_url — forwarded to create-pr.js when
+    // the orchestrator opens or polls PRs. 'auto' delegates platform
+    // detection to create-pr.js (currently defaults to github).
+    platform_provider: coerceEnum(
+      get(resolved, 'git.platform.provider'),
+      VALID_PLATFORM_PROVIDERS,
+      'auto',
+    ),
+    platform_base_url:
+      typeof get(resolved, 'git.platform.base_url') === 'string'
+        ? get(resolved, 'git.platform.base_url')
+        : null,
     parallel_stories: coerceBool(get(resolved, 'ma.parallel_stories'), false),
     max_parallel_stories: coerceInt(get(resolved, 'ma.max_parallel_stories'), 2),
     fallback_on_tests_fail: coerceBool(
@@ -161,6 +222,9 @@ module.exports = {
   VALID_GRANULARITIES,
   VALID_MERGE_STRATEGIES,
   VALID_LAND_WHENS,
+  VALID_PLATFORM_PROVIDERS,
+  DEFAULT_COMMIT_TEMPLATE_STORY,
+  DEFAULT_COMMIT_TEMPLATE_PATCH,
   ORCHESTRATOR_DEFAULTS_BY_PROFILE,
   flatToProfile,
   escalateOnFailure,

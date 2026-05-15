@@ -118,6 +118,83 @@ describe('flatToProfile', () => {
     expect(on.reuse_user_branch).toBe(true);
   });
 
+  it('git.enabled defaults true; reads false from config', () => {
+    expect(flatToProfile({}, 'medium').enabled).toBe(true);
+    expect(flatToProfile({ git: { enabled: false } }, 'medium').enabled).toBe(false);
+  });
+
+  it('push.auto / push.create_pr default true; honor explicit overrides', () => {
+    const def = flatToProfile({}, 'medium');
+    expect(def.push_auto).toBe(true);
+    expect(def.push_create_pr).toBe(true);
+    const off = flatToProfile(
+      { git: { push: { auto: false, create_pr: false } } },
+      'medium',
+    );
+    expect(off.push_auto).toBe(false);
+    expect(off.push_create_pr).toBe(false);
+  });
+
+  it('pr_template_path defaults null; reads from git.push.pr_template', () => {
+    expect(flatToProfile({}, 'medium').pr_template_path).toBeNull();
+    const p = flatToProfile(
+      { git: { push: { pr_template: 'modules/git/templates/pr-body.md' } } },
+      'medium',
+    );
+    expect(p.pr_template_path).toBe('modules/git/templates/pr-body.md');
+  });
+
+  it('commit_template_story / patch default to the documented format', () => {
+    const p = flatToProfile({}, 'medium');
+    expect(p.commit_template_story).toBe('feat({epic}): {story-title} ({story-key})');
+    expect(p.commit_template_patch).toBe('fix({story-key}): {patch-title}');
+  });
+
+  it('commit_templates honor explicit overrides', () => {
+    const p = flatToProfile(
+      {
+        git: {
+          commit_templates: {
+            story: '[{story-key}] {story-title}',
+            patch: 'patch({story-key}): {patch-title}',
+          },
+        },
+      },
+      'medium',
+    );
+    expect(p.commit_template_story).toBe('[{story-key}] {story-title}');
+    expect(p.commit_template_patch).toBe('patch({story-key}): {patch-title}');
+  });
+
+  it('max_branch_length defaults to 60; reads git.max_branch_length', () => {
+    expect(flatToProfile({}, 'medium').max_branch_length).toBe(60);
+    expect(flatToProfile({ git: { max_branch_length: 100 } }, 'medium').max_branch_length).toBe(
+      100,
+    );
+  });
+
+  it('platform.provider defaults to auto and validates enum', () => {
+    expect(flatToProfile({}, 'medium').platform_provider).toBe('auto');
+    expect(
+      flatToProfile({ git: { platform: { provider: 'gitea' } } }, 'medium').platform_provider,
+    ).toBe('gitea');
+    // Invalid value falls back to default.
+    expect(
+      flatToProfile({ git: { platform: { provider: 'fictional' } } }, 'medium')
+        .platform_provider,
+    ).toBe('auto');
+  });
+
+  it('platform.base_url defaults null; reads git.platform.base_url', () => {
+    expect(flatToProfile({}, 'medium').platform_base_url).toBeNull();
+    expect(
+      flatToProfile(
+        { git: { platform: { base_url: 'https://git.example.com' } } },
+        'medium',
+      ).platform_base_url,
+    ).toBe('https://git.example.com');
+  });
+
   it('merge_strategy defaults to stacked; honors land_as_you_go', () => {
     expect(flatToProfile({}, 'medium').merge_strategy).toBe('stacked');
     const land = flatToProfile({ git: { merge_strategy: 'land_as_you_go' } }, 'medium');

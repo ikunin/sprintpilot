@@ -40,6 +40,14 @@ git:
   # the orchestrator halts and prompts the user.
   land_wait_minutes: 30
 
+  # Max minutes to wait for CI green on the epic branch before MERGE_EPIC
+  # invokes `gh pr merge`. Only consulted under granularity=epic +
+  # merge_strategy=stacked. Falls back to `land_wait_minutes` if unset,
+  # so existing configs with only the land knob keep working. Effective
+  # wall time can exceed this by up to ~60s due to the polling cycle
+  # (gh pr checks timeout + 30s±5s sleep) — see create-pr.js#runChecksMode.
+  epic_merge_wait_minutes: 30
+
   # Branch naming
   branch_prefix: "story/" # prefix for story branches (e.g., story/1-2-user-auth)
   max_branch_length: 60 # truncate + 6-char hash if longer

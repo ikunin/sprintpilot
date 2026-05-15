@@ -33,11 +33,44 @@ orchestrator emits it.
 |-------------------|--------------------------------------------------------------------------------------------------|
 | `invoke_skill`    | Run the named BMad skill **verbatim from its own body** (e.g. `bmad-create-story`, `bmad-quick-dev`, `bmad-code-review`). `action.template_slots` is a parameter bag (story_key, prior_diagnosis, relevant_decisions, prior_signals_summary, …) — it's input context for BMad's skill, NOT a replacement for the skill's instructions. When `implementation_flow=quick`, you'll receive `invoke_skill: bmad-quick-dev` per story — follow BMad's `step-oneshot.md`. |
 | `run_script`      | Execute `action.command` via the host's shell-equivalent. Argv-only — no shell interpolation.    |
-| `git_op`          | Execute `action.steps` in order. The orchestrator pre-plans every git op (commit_and_push_story, merge_epic, push, fetch, create_branch) via `git-plan.js` and inlines the resulting argv sequence — each step has `args: [cmd, ...argv]`, a `description`, and an optional `retry` policy. Run each step's argv verbatim (NO shell interpolation), halt on first non-retryable failure. Never improvise the git commands or skip a step — `git push` lives in `steps`, not in `op`. |
+| `git_op`          | Execute `action.steps` in order. The orchestrator pre-plans every git op (commit_and_push_story, merge_epic, push, fetch, create_branch) via `git-plan.js` and inlines the resulting argv sequence — each step has `args: [cmd, ...argv]`, a `description`, and optional metadata fields (see below). **Required**: run each step via `_Sprintpilot/scripts/run-step.js` (see "Step metadata" below) so the metadata contract is enforced uniformly. Argv-only — NO shell interpolation. Halt on first non-retryable failure. Never improvise the git commands or skip a step — `git push` lives in `steps`, not in `op`. Empty `steps: []` (e.g. when `git.enabled: false`) means "no work, signal success." |
 | `parallel_batch`  | Dispatch each child action concurrently (M6+ hosts only — fall back to sequential otherwise).    |
 | `user_prompt`     | Ask the user `action.prompt`. Pass the answer back via `user_input` signal.                      |
 | `halt`            | Stop. Honor `action.handoff: 'sprint_finalize_pending'` by ending the session cleanly.           |
 | `noop`            | Re-loop (state machine advancing without an external effect).                                    |
+
+### Step metadata (git_op / run_script)
+
+Each step in `action.steps` may carry these optional fields. They are
+NOT defaults — only honor them when present:
+
+| Field | Meaning |
+|---|---|
+| `retry` | `{ attempts: N, backoff_ms: [...], on: 'network' \| 'never' }`. Retry transient errors per the policy. `on: 'network'` covers e.g. `git push` to a flaky remote. |
+| `optional: true` | Run the step; on non-zero exit, log a warning and **continue** to the next step rather than halting. Used for best-effort prefetches and pulls. |
+| `tolerate_exit_codes: [N, M, ...]` | Treat any of these exit codes as success (equivalent to exit 0 for halt-detection). Used for idempotent commands like `gh pr merge` (which exits non-zero when the PR is already merged) and `create-pr.js` (which returns exit 2 SKIPPED when the platform CLI is unavailable). |
+| `env: { KEY: "value", ... }` | Set environment variables for this step's process only (merged on top of inherited env). Used to target self-hosted platform instances: `GH_HOST` for GitHub Enterprise, `GITLAB_URI` for self-hosted GitLab. |
+| `description` | Human-readable summary, surface in your own logs. |
+
+**Use the runner — direct argv execution is not equivalent.** A step
+that carries ANY of `retry`, `optional`, `tolerate_exit_codes`, or
+`env` MUST be executed via `_Sprintpilot/scripts/run-step.js`. The
+runner is the source of truth for the metadata contract; honoring
+those fields by hand drifts and loses retries, env scoping, and
+exit-code tolerance. Direct execution is only acceptable for steps
+that have none of those fields.
+
+```
+echo '<step-json>' | node _Sprintpilot/scripts/run-step.js
+```
+
+Path resolution: the orchestrator runs from the project root, so the
+relative path `_Sprintpilot/scripts/run-step.js` is correct in normal
+invocations. If running from a different cwd (e.g. a worktree
+subdirectory), resolve the absolute path from the autopilot's
+`--project-root` argument.
+
+When you signal `success` after a `git_op`, include `git_steps_completed: true` only if every step ran via the runner (or hand-executed in a way equivalent to it) and either exited 0 or matched its `tolerate_exit_codes`. A step that needed `optional: true` to pass still counts as not-completed for stricter sub-steps' purposes; `git_steps_completed` reflects the strict run.
 
 ## Signals you emit
 
@@ -90,6 +123,7 @@ bookkeeping you'd otherwise be tempted to skip:
 
 | Phase | Bookkeeping that MUST be true before you signal `success` |
 |---|---|
+| `prepare_story_branch` | Every step in `action.steps` exited 0 — HEAD is on `action.branch` (verify with `git rev-parse --abbrev-ref HEAD`). Emitted only when `git.granularity ∈ {story, epic}` AND `git.reuse_user_branch=false`. Under `reuse_user_branch=true` this phase is skipped — the user-locked branch is detected at cmdStart instead. |
 | `create_story` | Story file has `## Acceptance Criteria` (≥1 bullet) AND a `## Tasks` (or `## Tasks/Subtasks`) section with at least one `[ ]` or `[x]` checkbox. |
 | `dev_red` / `dev_green` | Test files exist on disk; runner exit codes match the phase contract; `tests_run` matches the runner's count. |
 | `code_review` | `_bmad-output/reviews/<story_key>.md` exists; `findings[]` carries `{id, severity, category, action: 'block'\|'patch'\|'defer', rationale}` for every finding. |

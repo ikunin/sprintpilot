@@ -71,18 +71,28 @@ function planLand(state, profile, options) {
     description: `snapshot stack for ${branch}`,
   });
 
-  // Step 2: wait for CI / review depending on land_when.
+  // Step 2: wait for CI / review depending on land_when. Honors
+  // git.platform.provider (forwarded via --platform) so non-github
+  // providers route to the correct CLI / API path inside create-pr.js.
   if (landWhen === 'ci_pass' || landWhen === 'ci_and_review') {
+    const platform = (profile.platform_provider || options.platform || 'auto');
     const checkArgs = [
       'node',
       createPr,
       '--mode',
       'checks',
+      '--platform',
+      platform,
       '--branch',
       branch,
+      '--base',
+      baseBranch,
       '--wait-minutes',
       String(waitMinutes),
     ];
+    if (profile.platform_base_url) {
+      checkArgs.push('--base-url', profile.platform_base_url);
+    }
     if (landWhen === 'ci_and_review') {
       checkArgs.push('--require-approved-review');
     }

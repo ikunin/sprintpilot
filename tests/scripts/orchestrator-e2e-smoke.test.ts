@@ -42,6 +42,13 @@ beforeEach(() => {
     'complexity_profile: medium\nautopilot:\n  execution_mode: orchestrator\n',
     'utf8',
   );
+  // git.enabled: false bypasses the PREPARE_STORY_BRANCH precursor so the
+  // smoke test stays focused on the BMad skill cycle. Branch-creation is
+  // covered by state-machine + git-plan unit tests. resolve-profile.js
+  // reads modules/git/config.yaml separately, so the knob must live here.
+  const gitCfgDir = join(projectRoot, '_Sprintpilot', 'modules', 'git');
+  mkdirSync(gitCfgDir, { recursive: true });
+  writeFileSync(join(gitCfgDir, 'config.yaml'), 'enabled: false\n', 'utf8');
   const profilesDir = join(cfgDir, 'profiles');
   mkdirSync(profilesDir, { recursive: true });
   for (const f of [

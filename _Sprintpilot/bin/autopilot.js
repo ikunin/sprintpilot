@@ -86,6 +86,19 @@ function loadState(projectRoot) {
   return stateStore.read({ projectRoot });
 }
 
+// Existence probe that never throws. Used by composeRuntimeState's
+// migration guard so a stale `persisted.story_file_path` from before
+// the file was actually written doesn't suppress migration. Returns
+// false on any error (path is null/undefined, fs permission, etc.).
+function safeExistsSync(p) {
+  if (!p || typeof p !== 'string') return false;
+  try {
+    return fs.existsSync(p);
+  } catch (_e) {
+    return false;
+  }
+}
+
 function persistState(updates, profile, projectRoot, story) {
   return stateStore.write(updates, profile, { projectRoot, story });
 }
@@ -102,11 +115,71 @@ function persistState(updates, profile, projectRoot, story) {
 // orchestrator.md tells the LLM to call `next` directly, bypassing
 // cmdStart).
 function composeRuntimeState(persisted, profile) {
-  const defaultPhase =
+  // Fresh-sprint initial phase. When git settings require a per-story or
+  // per-epic branch (granularity ∈ {story, epic} AND !reuse_user_branch
+  // AND git.enabled !== false), boot at PREPARE_STORY_BRANCH so the very
+  // first action is a `git_op: create_branch` — the story file is then
+  // authored on the story branch rather than on `main`.
+  //
+  // Skipped when:
+  //   - reuse_user_branch: true → cmdStart detects + locks user branch
+  //   - enabled: false           → git is disabled entirely; no branch
+  //                                to prepare. State machine still emits
+  //                                git_ops at STORY_DONE but decorateGitOp
+  //                                empties their steps.
+  const needsBranchPrep =
+    profile &&
+    profile.enabled !== false &&
+    !profile.reuse_user_branch &&
+    (profile.granularity === 'story' || profile.granularity === 'epic');
+  const flowStart =
     profile && profile.implementation_flow === 'quick'
       ? STATES.NANO_QUICK_DEV
       : STATES.CREATE_STORY;
-  const phase = persisted.current_bmad_step || defaultPhase;
+  const defaultPhase = needsBranchPrep ? STATES.PREPARE_STORY_BRANCH : flowStart;
+  let phase = persisted.current_bmad_step || defaultPhase;
+
+  // Phase enum validation: if persisted state has a garbage phase (typo
+  // / manual edit / pre-rename leftover), don't pass it through to
+  // nextAction which would throw "unknown phase" with a stack trace.
+  // Emit a clear warning and reset to the profile-aware default; the
+  // user can re-run after fixing the file or accept the reset.
+  const KNOWN_PHASES = new Set(Object.values(STATES));
+  if (!KNOWN_PHASES.has(phase)) {
+    process.stderr.write(
+      `[autopilot] WARN persisted current_bmad_step "${phase}" is not a known phase — resetting to ${defaultPhase}. Edit autopilot-state.yaml or run \`autopilot start\` to override.\n`,
+    );
+    phase = defaultPhase;
+  }
+
+  // Migration: a sprint that was started before PREPARE_STORY_BRANCH
+  // shipped will have persisted `current_bmad_step: create_story` (or
+  // `nano_quick_dev`) with no story-level state set yet. On upgrade,
+  // route those fresh-story-start phases through PREPARE_STORY_BRANCH
+  // so the bug we fixed actually applies to existing sprints.
+  //
+  // Bail out if there's any sign of an in-flight story:
+  //   - persisted.current_story set → story_key is being tracked
+  //   - persisted.story_file_path set AND the file actually exists →
+  //     bmad-create-story already wrote it; we'd lose work by re-routing
+  //   - prior_diagnosis / retry_count_this_phase → mid-retry of this phase
+  // The file-exists check guards against stale persisted paths (e.g.
+  // when `coalesce_state_writes` persisted the field optimistically
+  // before the skill ran). Any genuine in-flight marker means mid-cycle.
+  const storyFileExists =
+    !!persisted.story_file_path && safeExistsSync(persisted.story_file_path);
+  const midStorySignals =
+    !!persisted.current_story ||
+    storyFileExists ||
+    !!persisted.prior_diagnosis ||
+    (persisted.retry_count_this_phase || 0) > 0;
+  if (
+    needsBranchPrep &&
+    !midStorySignals &&
+    (phase === STATES.CREATE_STORY || phase === STATES.NANO_QUICK_DEV)
+  ) {
+    phase = STATES.PREPARE_STORY_BRANCH;
+  }
   return {
     phase,
     story_key: persisted.current_story || null,
@@ -225,14 +298,122 @@ function logSkillTiming(projectRoot, event, story, skillName, profile) {
 // Inline the planned argv steps from git-plan.js so the LLM doesn't have
 // to interpret the op — it just executes `action.steps` in order.
 // Without this, live-LLM sessions silently skip `git push` after STORY_DONE.
-function decorateGitOp(action, state, profile) {
+function decorateGitOp(action, state, profile, projectRoot) {
   if (!action || action.type !== 'git_op') return action;
+  // git.enabled: false — emit the git_op with an empty step list so the
+  // LLM's "execute steps in order" loop trivially succeeds and signals
+  // back, advancing the state machine without touching git. A bare
+  // `type: noop` would loop here because cmdNext re-emits the same phase
+  // until a success signal is recorded.
+  if (profile && profile.enabled === false) {
+    return {
+      ...action,
+      branch: null,
+      steps: [],
+      git_disabled: true,
+    };
+  }
   try {
-    const planned = gitPlan.plan(state, profile, action);
+    // For create_branch: probe git locally to detect whether the planned
+    // branch already exists (resume after partial failure, second story
+    // on an epic branch under granularity=epic). The plan uses this to
+    // emit `git switch <branch>` (idempotent) instead of `git switch -c`
+    // (which would fail on collision). Probe is best-effort — failure
+    // leaves branch_exists false and the plan defaults to the create
+    // path (the safer default for fresh stories).
+    // Threading project_root onto the state so pure-ish helpers in
+    // git-plan.js can load files (pr_template_path) without taking it
+    // as a separate arg. The plan itself is still deterministic given
+    // the same inputs.
+    let enrichedState = { ...state, project_root: projectRoot || process.cwd() };
+    if (action.op === 'create_branch') {
+      const branch = gitPlan.branchName(profile, state.story_key, state.current_epic, state);
+      const branchExists = probeBranchExists(enrichedState.project_root, branch);
+      enrichedState = { ...enrichedState, branch_exists: branchExists };
+    }
+    const planned = gitPlan.plan(enrichedState, profile, action);
+    // Surface plan-level warnings (e.g. pr_template_path not found) via
+    // the orchestrator's stderr so the LLM context sees them, without
+    // git-plan.js itself writing to stderr from a pure-ish function.
+    if (Array.isArray(planned.warnings)) {
+      for (const w of planned.warnings) {
+        process.stderr.write(`[git-plan] WARN: ${w}\n`);
+      }
+    }
+    // Some plans (e.g. epic merge on unsupported platforms) return a
+    // `halt_action` field instead of executable steps. Convert it into
+    // a top-level user_prompt action so the orchestrator pauses instead
+    // of silently running zero steps and advancing.
+    if (planned.halt_action) {
+      return { ...planned.halt_action, phase: action.phase };
+    }
     return { ...action, branch: planned.branch, steps: planned.steps };
   } catch (e) {
     log.warn(`git-plan failed for op=${action.op}: ${e.message}`);
     return action;
+  }
+}
+
+// Detect whether a branch exists, locally OR on origin. Used by
+// decorateGitOp so the create_branch plan can degrade to a plain switch
+// when the branch is already known. Checking remote refs avoids the
+// failure mode where a teammate / prior worktree pushed the branch but
+// it's not in our local refs — `git switch -c` would either fail or
+// later collide on push. Returns false on any error so the create path
+// (the safer default for fresh stories) is selected.
+//
+// Refreshes the local mirror of the specific remote ref via `git fetch
+// origin <branch>` before checking refs/remotes/origin/<branch> — without
+// this, a stale local clone can miss a recently-pushed remote branch.
+// The fetch is best-effort and capped at 5s.
+function probeBranchExists(projectRoot, branch) {
+  if (!branch || typeof branch !== 'string') return false;
+  const { execFileSync } = require('node:child_process');
+  // Local ref?
+  try {
+    execFileSync(
+      'git',
+      ['-C', projectRoot, 'show-ref', '--verify', '--quiet', `refs/heads/${branch}`],
+      { stdio: 'ignore', timeout: 5_000 },
+    );
+    return true;
+  } catch (_e) {
+    /* fall through */
+  }
+  // Skip the remote-ref dance entirely when there's no origin
+  // configured — every emit on a local-only repo would otherwise pay
+  // ~5s of fetch timeout for no gain. `git remote get-url origin`
+  // exits non-zero (~50ms) when origin is absent.
+  try {
+    execFileSync('git', ['-C', projectRoot, 'remote', 'get-url', 'origin'], {
+      stdio: 'ignore',
+      timeout: 2_000,
+    });
+  } catch (_e) {
+    return false; // no origin → no remote ref to check
+  }
+  // Best-effort: refresh the remote ref before checking. Fetching a
+  // specific branch ref is much cheaper than `git fetch origin` (no
+  // tag/all-branch traffic) and is silent on a non-existent ref.
+  try {
+    execFileSync(
+      'git',
+      ['-C', projectRoot, 'fetch', 'origin', branch, '--quiet', '--no-tags'],
+      { stdio: 'ignore', timeout: 5_000 },
+    );
+  } catch (_e) {
+    /* network / branch absent — fall through to local check */
+  }
+  // Remote ref now (possibly) up to date.
+  try {
+    execFileSync(
+      'git',
+      ['-C', projectRoot, 'show-ref', '--verify', '--quiet', `refs/remotes/origin/${branch}`],
+      { stdio: 'ignore', timeout: 5_000 },
+    );
+    return true;
+  } catch (_e) {
+    return false;
   }
 }
 
@@ -312,6 +493,44 @@ function applySideEffects(sideEffects, runtime, profile, projectRoot) {
 
 // ------------------------------------------------------------ subcommands
 
+// Detect + lock the user's working branch under `reuse_user_branch:
+// true`. Returns null if the runtime is already locked, or `{ halt }`
+// with a halt/user_prompt action when the environment is invalid. Side-
+// effect: mutates `runtime.user_branch` on success and appends a ledger
+// entry. Used by both cmdStart and cmdNext so the LLM-direct path
+// (workflow.orchestrator.md tells LLMs to call `next` without `start`)
+// gets the same enforcement.
+function lockUserBranchIfNeeded(runtime, profile, projectRoot) {
+  if (!profile.reuse_user_branch || runtime.user_branch) return null;
+  const current = detectCurrentBranch(projectRoot);
+  const base = profile.base_branch || 'main';
+  if (!current) {
+    return {
+      halt: {
+        type: 'halt',
+        reason: 'reuse_user_branch_no_git',
+        prompt:
+          'reuse_user_branch is on but git is not available / no current branch detected. Initialize a git repo and check out the branch you want autopilot to use.',
+      },
+    };
+  }
+  if (current === base) {
+    return {
+      halt: {
+        type: 'user_prompt',
+        reason: 'reuse_user_branch_on_base',
+        prompt: `reuse_user_branch is on but you're on the base branch (${base}). Create + checkout the branch you want autopilot to commit on, then re-run.`,
+      },
+    };
+  }
+  runtime.user_branch = current;
+  ledger.append(
+    { kind: 'state_transition', detail: { user_branch_detected: current } },
+    { projectRoot },
+  );
+  return null;
+}
+
 function cmdStart(opts) {
   const projectRoot = resolveProjectRoot(opts);
   const { typed: profile } = resolveProfile(projectRoot, opts.profile);
@@ -337,41 +556,19 @@ function cmdStart(opts) {
   // profile-aware initial phase when persisted state is empty.
   const runtime = composeRuntimeState(persisted, profile);
 
-  // Branch reuse: on first boot under reuse_user_branch=true, detect the
-  // current git branch and lock it in. The state machine + git-plan then
-  // commit every story onto this branch.
-  if (profile.reuse_user_branch && !runtime.user_branch) {
-    const current = detectCurrentBranch(projectRoot);
-    const base = profile.base_branch || 'main';
-    if (!current) {
-      const halt = {
-        type: 'halt',
-        reason: 'reuse_user_branch_no_git',
-        prompt:
-          'reuse_user_branch is on but git is not available / no current branch detected. Initialize a git repo and check out the branch you want autopilot to use.',
-      };
-      ledger.append({ kind: 'action_emitted', phase: runtime.phase, action: halt }, { projectRoot });
-      process.stdout.write(`${JSON.stringify({ action: halt, phase: runtime.phase }, null, 2)}\n`);
-      return 0;
-    }
-    if (current === base) {
-      const halt = {
-        type: 'user_prompt',
-        reason: 'reuse_user_branch_on_base',
-        prompt: `reuse_user_branch is on but you're on the base branch (${base}). Create + checkout the branch you want autopilot to commit on, then re-run.`,
-      };
-      ledger.append({ kind: 'action_emitted', phase: runtime.phase, action: halt }, { projectRoot });
-      process.stdout.write(`${JSON.stringify({ action: halt, phase: runtime.phase }, null, 2)}\n`);
-      return 0;
-    }
-    runtime.user_branch = current;
+  const lockResult = lockUserBranchIfNeeded(runtime, profile, projectRoot);
+  if (lockResult && lockResult.halt) {
     ledger.append(
-      { kind: 'state_transition', detail: { user_branch_detected: current } },
+      { kind: 'action_emitted', phase: runtime.phase, action: lockResult.halt },
       { projectRoot },
     );
+    process.stdout.write(
+      `${JSON.stringify({ action: lockResult.halt, phase: runtime.phase }, null, 2)}\n`,
+    );
+    return 0;
   }
 
-  const action = decorateGitOp(stateMachine.nextAction(runtime, profile), runtime, profile);
+  const action = decorateGitOp(stateMachine.nextAction(runtime, profile), runtime, profile, projectRoot);
   ledger.append({ kind: 'action_emitted', phase: runtime.phase, action }, { projectRoot });
   persistRuntimeState(runtime, profile, projectRoot);
   if (profile.coalesce_state_writes) stateStore.flush(profile, { projectRoot, story: runtime.story_key });
@@ -384,8 +581,28 @@ function cmdNext(opts) {
   const { typed: profile } = resolveProfile(projectRoot, opts.profile);
   const persisted = loadState(projectRoot);
   const runtime = composeRuntimeState(persisted, profile);
-  const action = decorateGitOp(stateMachine.nextAction(runtime, profile), runtime, profile);
+
+  // The LLM-driven workflow (workflow.orchestrator.md) tells the LLM to
+  // call `next` directly without `start` — apply the same branch-reuse
+  // enforcement here so a missed `start` doesn't bypass it.
+  const lockResult = lockUserBranchIfNeeded(runtime, profile, projectRoot);
+  if (lockResult && lockResult.halt) {
+    ledger.append(
+      { kind: 'action_emitted', phase: runtime.phase, action: lockResult.halt },
+      { projectRoot },
+    );
+    process.stdout.write(
+      `${JSON.stringify({ action: lockResult.halt, phase: runtime.phase }, null, 2)}\n`,
+    );
+    return 0;
+  }
+
+  const action = decorateGitOp(stateMachine.nextAction(runtime, profile), runtime, profile, projectRoot);
   ledger.append({ kind: 'action_emitted', phase: runtime.phase, action }, { projectRoot });
+  // Persist any mutations done by lockUserBranchIfNeeded — without this
+  // every cmdNext under reuse_user_branch=true re-detects the branch and
+  // emits a redundant `state_transition` ledger entry forever.
+  persistRuntimeState(runtime, profile, projectRoot);
   // Skill timing: emit a `skill.<name>` start event when we hand off an
   // invoke_skill action. The matching end event is emitted on `record`
   // when the signal advances the phase. This makes parallelism +
@@ -423,9 +640,17 @@ function cmdRecord(opts) {
     { projectRoot },
   );
 
-  // Verify only on `success` and `verify_override`.
+  // Verify only on `success` and `verify_override`. Under `git.enabled:
+  // false`, git-op phases skip verify entirely — there's no commit_sha/
+  // branch to assert and verify would reject every success in a loop.
+  // The state machine still routes through these phases so the BMad
+  // cycle stays intact; only the bookkeeping check is bypassed. The
+  // phase list is centralized in state-machine.js#isGitOpPhase so a
+  // future git-op phase automatically gets the bypass.
+  const isGitDisabledPhase =
+    profile.enabled === false && stateMachine.shouldSkipVerifyWhenGitDisabled(runtime.phase);
   let verifyResult;
-  if (signal.status === 'success') {
+  if (signal.status === 'success' && !isGitDisabledPhase) {
     verifyResult = verifyMod.verify(runtime, signal.output, { projectRoot });
     ledger.append(
       { kind: 'verify_result', phase: runtime.phase, ok: verifyResult.ok, issues: verifyResult.issues || [] },
@@ -499,7 +724,7 @@ function cmdRecord(opts) {
   }
 
   const payload = {
-    action: decorateGitOp(result.nextAction, result.newState, result.newProfile),
+    action: decorateGitOp(result.nextAction, result.newState, result.newProfile, projectRoot),
     verdict: result.verdict,
     phase: result.newState.phase,
     profile: result.newProfile.name,
@@ -588,4 +813,4 @@ if (require.main === module) {
   process.exit(main(process.argv.slice(2)));
 }
 
-module.exports = { main, SUBCOMMANDS };
+module.exports = { main, SUBCOMMANDS, decorateGitOp, composeRuntimeState };
