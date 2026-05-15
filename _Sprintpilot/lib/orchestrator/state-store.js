@@ -27,6 +27,11 @@ const CRITICAL_KEYS = new Set([
   'current_bmad_step',
   'in_worktree',
   'patch_commits',
+  // Explicit story queue populated by `autopilot start --stories <csv>`
+  // / `--epic <id>`. composeRuntimeState reads queue[0] as the next
+  // story_key; adapt.advanceState pops the head when a story completes.
+  // When empty, the orchestrator falls back to resolveNextStoryKey.
+  'story_queue',
 ]);
 
 // In-memory pending buffer. Process-scoped — flushed at story boundary or

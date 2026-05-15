@@ -31,6 +31,17 @@ npx @ikunin/sprintpilot@latest
 /sprint-autopilot-on
 ```
 
+**Start at a specific story or epic** (v2.2.0+):
+
+```
+/sprint-autopilot-on epic 4
+/sprint-autopilot-on stories 3.1, 3.2, 4.5
+/sprint-autopilot-on 4-8-realm-wide-matcher-and-session-lock
+/sprint-autopilot-on voice identity matcher
+```
+
+The skill resolves the natural-language directive against your `sprint-status.yaml` and queues the matching stories. The autopilot runs them in order, then falls back to the normal next-pending-story flow. Ambiguous matches surface a candidate list — never picks arbitrarily.
+
 Non-interactive install:
 
 ```bash

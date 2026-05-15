@@ -548,6 +548,23 @@ function advanceState(state, profile, newPhase, signal) {
     }
   }
 
+  // Story-completion boundary: STORY_DONE → EPIC_BOUNDARY_CHECK means
+  // the current story is committed and pushed. Pop the explicit story
+  // queue (if any) — its head was THIS story — and clear story_key so
+  // composeRuntimeState picks queue[1] (now queue[0]) on the next
+  // emission. Without this pop, composeRuntimeState would re-pick the
+  // just-completed story (via the signal-output propagation above) and
+  // loop. This block runs AFTER propagation so the clearing wins.
+  if (state.phase === STATES.STORY_DONE && newPhase === STATES.EPIC_BOUNDARY_CHECK) {
+    if (Array.isArray(state.story_queue) && state.story_queue.length > 0) {
+      next.story_queue = state.story_queue.slice(1);
+    }
+    next.story_key = null;
+    next.story_file_path = null;
+    next.current_epic = null;
+    next.ac_summary = null;
+  }
+
   return next;
 }
 

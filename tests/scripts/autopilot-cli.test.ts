@@ -317,3 +317,102 @@ describe('autopilot help / unknown subcommand', () => {
     expect(r.status).toBe(1);
   });
 });
+
+// Helper: seed a sprint-status.yaml with the given keys/statuses.
+function seedSprintStatus(entries: Record<string, string>) {
+  const dir = join(projectRoot, '_bmad-output', 'implementation-artifacts');
+  mkdirSync(dir, { recursive: true });
+  const lines = ['development_status:'];
+  for (const [k, v] of Object.entries(entries)) {
+    lines.push(`  ${k}: ${v}`);
+  }
+  writeFileSync(join(dir, 'sprint-status.yaml'), lines.join('\n') + '\n', 'utf8');
+}
+
+function readPersistedState(): string {
+  const p = join(projectRoot, '_bmad-output', 'implementation-artifacts', 'autopilot-state.yaml');
+  return readFileSync(p, 'utf8');
+}
+
+describe('autopilot start --stories / --epic', () => {
+  it('--stories <csv> queues the keys verbatim and persists story_queue', () => {
+    seedSprintStatus({
+      'epic-4': 'in-progress',
+      '4-2b-foo': 'done',
+      '4-5-bar': 'ready-for-dev',
+      '4-8-baz': 'backlog',
+    });
+    const r = runCli(['start', '--stories', '4-8-baz,4-5-bar']);
+    expect(r.status).toBe(0);
+    const state = readPersistedState();
+    expect(state).toMatch(/story_queue:.*4-8-baz/);
+    expect(state).toMatch(/story_queue:.*4-5-bar/);
+  });
+
+  it('--stories rejects keys missing from sprint-status.yaml', () => {
+    seedSprintStatus({ '4-5-bar': 'ready-for-dev' });
+    const r = runCli(['start', '--stories', '4-5-bar,99-does-not-exist']);
+    expect(r.status).toBe(2);
+    expect(r.stdout).toMatch(/not in sprint-status/);
+    expect(r.stdout).toMatch(/99-does-not-exist/);
+  });
+
+  it('--stories rejects keys that are already done', () => {
+    seedSprintStatus({ '4-2b-foo': 'done', '4-5-bar': 'ready-for-dev' });
+    const r = runCli(['start', '--stories', '4-2b-foo,4-5-bar']);
+    expect(r.status).toBe(2);
+    expect(r.stdout).toMatch(/already done.*4-2b-foo/);
+  });
+
+  it('--epic expands to all non-done stories of that epic, in order', () => {
+    seedSprintStatus({
+      'epic-4': 'in-progress',
+      '4-2b-foo': 'done',
+      '4-5-bar': 'ready-for-dev',
+      '4-8-baz': 'backlog',
+      '5-1-other-epic': 'backlog',
+    });
+    const r = runCli(['start', '--epic', '4']);
+    expect(r.status).toBe(0);
+    const state = readPersistedState();
+    // 4-2b-foo done → skipped. 4-5-bar then 4-8-baz queued, in order.
+    // epic-4 header itself filtered out by looksLikeStoryKey.
+    expect(state).toMatch(/story_queue:.*4-5-bar.*4-8-baz/);
+    expect(state).not.toMatch(/story_queue:.*epic-4/);
+    expect(state).not.toMatch(/story_queue:.*5-1-other-epic/);
+  });
+
+  it('--epic with no remaining stories exits 2', () => {
+    seedSprintStatus({ 'epic-4': 'done', '4-1-foo': 'done' });
+    const r = runCli(['start', '--epic', '4']);
+    expect(r.status).toBe(2);
+    expect(r.stdout).toMatch(/no non-done stories/);
+  });
+
+  it('--stories / --epic without sprint-status.yaml exits 2 with planning hint', () => {
+    const r = runCli(['start', '--stories', '4-1-foo']);
+    expect(r.status).toBe(2);
+    expect(r.stdout).toMatch(/sprint-status\.yaml is missing or empty/);
+    expect(r.stdout).toMatch(/sprint-planning/);
+  });
+
+  it('--stories refuses to overwrite an in-flight queue without --force', () => {
+    seedSprintStatus({ '4-1-foo': 'ready-for-dev', '4-2-bar': 'ready-for-dev' });
+    // First start: queue 4-1.
+    expect(runCli(['start', '--stories', '4-1-foo']).status).toBe(0);
+    // Second start without --force: error.
+    const r = runCli(['start', '--stories', '4-2-bar']);
+    expect(r.status).toBe(2);
+    expect(r.stdout).toMatch(/Sprint already in progress/);
+  });
+
+  it('--stories --force overwrites an in-flight queue and clears prior story identity', () => {
+    seedSprintStatus({ '4-1-foo': 'ready-for-dev', '4-2-bar': 'ready-for-dev' });
+    expect(runCli(['start', '--stories', '4-1-foo']).status).toBe(0);
+    const r = runCli(['start', '--stories', '4-2-bar', '--force']);
+    expect(r.status).toBe(0);
+    const state = readPersistedState();
+    expect(state).toMatch(/story_queue:.*4-2-bar/);
+    expect(state).not.toMatch(/story_queue:.*4-1-foo/);
+  });
+});

@@ -1,5 +1,38 @@
 # Changelog
 
+## [2.2.0] - 2026-05-15
+
+**Specify the epic or stories to run, in natural language.** Previously the autopilot picked the first non-`done` story from `sprint-status.yaml` and you had no way to override short of manually editing state files. v2.2.0 splits this into two layers: the orchestrator gets a deterministic `--stories <csv>` / `--epic <id>` CLI surface; the skill resolves natural-language directives like `/sprint-autopilot-on epic 4` or `/sprint-autopilot-on stories 3.1, 4.5` against `sprint-status.yaml` and invokes the orchestrator with canonical keys.
+
+### Added
+
+- **`autopilot start --stories <k1,k2,...>` flag.** Explicit queue of canonical story keys. Validates every key exists in `sprint-status.yaml` and isn't `done`. Persists `story_queue` in `autopilot-state.yaml` so subsequent `next` calls see it.
+- **`autopilot start --epic <id>` flag.** Expands to all non-`done` stories of the given epic, in `sprint-status.yaml` order. The epic id matches either `epic-N` or bare `N`.
+- **`autopilot start --force` flag.** Overwrites an in-flight queue (clears the prior `current_story` identity). Without `--force`, `--stories`/`--epic` refuses to overwrite to prevent accidentally abandoning a story mid-cycle.
+- **Natural-language entry in `sprint-autopilot-on/SKILL.md`.** The skill instructs the LLM to parse user directives like:
+  - `/sprint-autopilot-on epic 4`
+  - `/sprint-autopilot-on stories 3.1, 3.2, 4.5`
+  - `/sprint-autopilot-on 4-8-realm-wide-matcher-and-session-lock`
+  - `/sprint-autopilot-on voice identity matcher` (fuzzy name match)
+  - `/sprint-autopilot-on starting from 4.5` (resolve + all-subsequent)
+  
+  The LLM matches the directive against sprint-status, validates, and invokes `autopilot start --stories <csv>` (or `--epic <id>`) with canonical keys. Ambiguous matches surface a candidate list — the LLM never picks arbitrarily.
+- **Queue consumption in `adapt.advanceState`.** On `STORY_DONE → EPIC_BOUNDARY_CHECK`, the queue head is popped and `story_key`/`story_file_path`/`current_epic`/`ac_summary` cleared so `composeRuntimeState` picks `queue[1]` (now `queue[0]`) on the next emission.
+- **Fall-through to normal flow.** Once the explicit queue exhausts, `composeRuntimeState` resumes the standard `resolveNextStoryKey` flow — so `/sprint-autopilot-on epic 4` finishes epic 4 then continues with epic 5+ unless the user halts manually.
+- **`story_queue_set` ledger entry kind** logged once per `autopilot start` invocation so resume/audit can see why a queue head differs from sprint-status's natural order.
+- **`story_queue` in `CRITICAL_KEYS`** (`state-store.js`) — atomic persistence under `coalesce_state_writes`.
+- **8 new CLI integration tests** covering: valid queue persistence, missing-key validation, done-key validation, --epic expansion, empty-epic error, missing sprint-status error, mid-sprint guard, --force override.
+
+### Changed
+
+- **`composeRuntimeState` prefers the queue over `resolveNextStoryKey`.** When `persisted.current_story` is null and `story_queue` is non-empty, the head becomes the resolved story_key. Falls back to the linear scan only when the queue is exhausted.
+- **CLI `--help` documents the new story-selection flags** with usage examples.
+- **README's Quick Start adds a "start at a specific story or epic" block** with directive examples.
+
+### Forward-compat note
+
+Parallel execution (`ma.parallel_stories: true`) — the queue is the source the parallel-batch consumer will pull multiple heads from when that path is wired into the state machine. Today's sequential consumption is correct under both `parallel_stories: true` and `false`; the queue shape doesn't change when parallel arrives.
+
 ## [2.1.5] - 2026-05-15
 
 **Hotfix for v2.1.4.** `resolveNextStoryKey` used BMad's `parseStatuses` directly, which returns every entry under `development_status:` — including epic rollup headers (`epic-4: in-progress`) and retrospective bookkeeping entries (`4-retrospective: pending`). The resolver picked the first non-`done` entry without filtering, so a real-world sprint emitted `git_op create_branch story/epic-4` (epic header) instead of `story/4-8-realm-wide-matcher` (the next pending story).

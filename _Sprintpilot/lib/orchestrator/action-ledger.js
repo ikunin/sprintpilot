@@ -35,6 +35,10 @@ const VALID_KINDS = [
   'lock_acquired',
   'lock_released',
   'flush',
+  // Explicit story queue installed via `autopilot start --stories` /
+  // `--epic`. Logged once per start invocation so resume/audit can see
+  // why a queue head differs from sprint-status's natural order.
+  'story_queue_set',
 ];
 
 function isPlainObject(v) {

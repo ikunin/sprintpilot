@@ -115,7 +115,13 @@ describe('write (coalesce path)', () => {
 
   it('CRITICAL_KEYS exposes the documented set', () => {
     expect(CRITICAL_KEYS.sort()).toEqual(
-      ['current_bmad_step', 'current_story', 'in_worktree', 'patch_commits'].sort(),
+      [
+        'current_bmad_step',
+        'current_story',
+        'in_worktree',
+        'patch_commits',
+        'story_queue',
+      ].sort(),
     );
   });
 

@@ -65,6 +65,25 @@ function help() {
       '  --profile <nano|small|medium|large|legacy>',
       '                               Override resolved profile',
       '  --help                       Show this help',
+      '',
+      'Story-selection flags (on `start` only):',
+      '  --stories <k1,k2,...>        Explicit queue of story keys to run, in',
+      '                               order. Keys must exist in sprint-status.yaml',
+      '                               and not be already done. Once the queue',
+      '                               exhausts, the orchestrator falls back to',
+      '                               its normal next-pending-story flow.',
+      '  --epic <id>                  Queue all non-done stories of the given',
+      '                               epic (id matches `epic-N` or bare `N`),',
+      '                               in sprint-status.yaml order. --stories',
+      '                               takes priority when both are given.',
+      '  --force                      Overwrite an in-flight queue. Without',
+      '                               this, --stories/--epic refuses to run',
+      '                               when current_story is set or a queue',
+      '                               already exists.',
+      '',
+      'Natural-language entry: `/sprint-autopilot-on epic 4` /',
+      '`/sprint-autopilot-on stories 3.1, 4.5` — the skill resolves the NL',
+      'directive to canonical keys and invokes `autopilot start --stories`.',
     ].join('\n'),
   );
 }
@@ -167,6 +186,125 @@ function looksLikeStoryKey(key) {
   // `4-8-realm-wide-matcher` → unchanged → has hyphen → story (accept).
   const withoutEpicPrefix = key.replace(/^epic-/i, '');
   return withoutEpicPrefix.includes('-');
+}
+
+// Build an explicit story queue from CLI opts (--stories / --epic).
+// Returns { queue: [], error?: string }. Either or both flags can be
+// provided; --stories is the canonical list and --epic expands to all
+// non-done stories under that epic. When both are given, --stories
+// takes priority. When neither is given, returns an empty queue
+// (orchestrator falls back to resolveNextStoryKey).
+//
+// Validation:
+//   - Every key listed in --stories must exist in sprint-status.yaml.
+//   - Every key must NOT have status 'done'.
+//   - For --epic, the epic must have at least one non-done story.
+function buildExplicitQueueFromOpts(opts, projectRoot) {
+  const rawStories = typeof opts.stories === 'string' ? opts.stories : null;
+  const rawEpic = opts.epic !== undefined && opts.epic !== null ? String(opts.epic) : null;
+  if (!rawStories && !rawEpic) return { queue: [] };
+
+  const sprintStories = readSprintStatuses(projectRoot);
+  if (!sprintStories || Object.keys(sprintStories).length === 0) {
+    return {
+      queue: [],
+      error:
+        '--stories / --epic given but sprint-status.yaml is missing or empty. ' +
+        'Run BMad sprint-planning to populate it before queuing stories.',
+    };
+  }
+
+  if (rawStories) {
+    const requested = rawStories
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (requested.length === 0) {
+      return { queue: [], error: '--stories was empty after parsing the comma-separated list.' };
+    }
+    const missing = [];
+    const alreadyDone = [];
+    const queue = [];
+    for (const key of requested) {
+      if (!Object.prototype.hasOwnProperty.call(sprintStories, key)) {
+        missing.push(key);
+        continue;
+      }
+      const status = String(sprintStories[key].status || '').trim().toLowerCase();
+      if (status === 'done') {
+        alreadyDone.push(key);
+        continue;
+      }
+      queue.push(key);
+    }
+    if (missing.length > 0 || alreadyDone.length > 0) {
+      const parts = [];
+      if (missing.length > 0) {
+        parts.push(
+          `not in sprint-status.yaml: ${missing.join(', ')}. ` +
+            'Use canonical keys (e.g. 4-8-realm-wide-matcher), not story numbers (e.g. 4.8).',
+        );
+      }
+      if (alreadyDone.length > 0) {
+        parts.push(`already done: ${alreadyDone.join(', ')}`);
+      }
+      return { queue: [], error: `--stories rejected: ${parts.join(' | ')}` };
+    }
+    return { queue };
+  }
+
+  // --epic only
+  const expanded = resolveStoriesForEpic(projectRoot, rawEpic);
+  if (expanded.length === 0) {
+    return {
+      queue: [],
+      error: `--epic ${rawEpic}: no non-done stories found in sprint-status.yaml`,
+    };
+  }
+  return { queue: expanded };
+}
+
+// Read and parse sprint-status.yaml. Returns { stories } where stories
+// is a map of {key: {status: string|null}}. Returns null on any failure
+// (missing file, parse error). Callers handle null gracefully.
+function readSprintStatuses(projectRoot) {
+  if (!projectRoot) return null;
+  const p = path.join(
+    projectRoot,
+    '_bmad-output',
+    'implementation-artifacts',
+    'sprint-status.yaml',
+  );
+  if (!safeExistsSync(p)) return null;
+  try {
+    const raw = fs.readFileSync(p, 'utf8');
+    return parseSprintStatuses(raw);
+  } catch (_e) {
+    return null;
+  }
+}
+
+// Resolve all non-done story keys for the given epic id, in
+// sprint-status.yaml insertion order. Used by `autopilot start
+// --epic <id>` to expand into an explicit queue. Returns [] when:
+//   - sprint-status doesn't exist or fails to parse
+//   - no stories match the epic
+//   - all matching stories are already done
+function resolveStoriesForEpic(projectRoot, epicId) {
+  if (!epicId) return [];
+  const stories = readSprintStatuses(projectRoot);
+  if (!stories) return [];
+  const keys = Object.keys(stories);
+  const out = [];
+  for (const key of keys) {
+    if (!looksLikeStoryKey(key)) continue;
+    const derivedEpic = deriveEpicFromStoryKey(key);
+    if (derivedEpic !== epicId && derivedEpic !== `epic-${epicId}`) continue;
+    const status = String(stories[key].status || '').trim().toLowerCase();
+    if (status === 'done') continue;
+    out.push(key);
+  }
+  return out;
 }
 
 // Derive the epic identifier from a BMad story key. Convention:
@@ -284,6 +422,20 @@ function composeRuntimeState(persisted, profile, projectRoot) {
   let resolvedStoryKey = persisted.current_story || null;
   let resolvedEpic = persisted.current_epic || null;
   let resolvedStoryFilePath = persisted.story_file_path || null;
+  // Explicit queue (populated by `autopilot start --stories` / `--epic`)
+  // takes priority over the linear resolveNextStoryKey scan: when a
+  // user specifies "start with stories 4-1, 4-2, 4-5" we honor that
+  // order regardless of what comes first in sprint-status.yaml.
+  // Forward-compat for ma.parallel_stories: the queue is the source
+  // multiple workers will pull from when the parallel-batch path is
+  // wired into the state machine.
+  const persistedQueue = Array.isArray(persisted.story_queue)
+    ? persisted.story_queue.filter((k) => typeof k === 'string' && k.length > 0)
+    : [];
+  if (!resolvedStoryKey && persistedQueue.length > 0) {
+    resolvedStoryKey = persistedQueue[0];
+    if (!resolvedEpic) resolvedEpic = deriveEpicFromStoryKey(resolvedStoryKey);
+  }
   if (phase === STATES.PREPARE_STORY_BRANCH && !resolvedStoryKey) {
     const next = resolveNextStoryKey(projectRoot);
     if (next) {
@@ -317,6 +469,10 @@ function composeRuntimeState(persisted, profile, projectRoot) {
     escalation_note: persisted.escalation_note || null,
     // Branch reuse: persisted across resumes once detected on first boot.
     user_branch: persisted.user_branch || null,
+    // Explicit story queue from `autopilot start --stories` / `--epic`.
+    // Head is the current pick; adapt.advanceState pops on story
+    // completion. Empty array means "no override; use resolveNextStoryKey."
+    story_queue: persistedQueue,
     // Land-as-you-go: pending land state survives rebase-conflict halts.
     land_pending: persisted.land_pending || null,
     // Pending alternative (propose_alternative → user_prompt) survives
@@ -348,6 +504,7 @@ function persistRuntimeState(runtime, profile, projectRoot) {
     verify_reject_count: runtime.verify_reject_count,
     consecutive_test_failures: runtime.consecutive_test_failures,
     user_branch: runtime.user_branch,
+    story_queue: Array.isArray(runtime.story_queue) ? runtime.story_queue : [],
     land_pending: runtime.land_pending,
     pending_alternative: runtime.pending_alternative || null,
   };
@@ -654,6 +811,37 @@ function cmdStart(opts) {
   const { typed: profile } = resolveProfile(projectRoot, opts.profile);
   const persisted = loadState(projectRoot);
 
+  // Build an explicit story queue from --stories / --epic flags. The
+  // user (or the LLM via /sprint-autopilot-on natural-language args)
+  // tells the orchestrator EXACTLY which stories to run, and in what
+  // order. Queue head is consumed first; resolveNextStoryKey takes
+  // over once the queue exhausts.
+  const queueBuildResult = buildExplicitQueueFromOpts(opts, projectRoot);
+  if (queueBuildResult.error) {
+    log.error(queueBuildResult.error);
+    process.stdout.write(
+      `${JSON.stringify({ error: queueBuildResult.error, kind: 'queue_validation_error' }, null, 2)}\n`,
+    );
+    return 2;
+  }
+  const explicitQueue = queueBuildResult.queue; // may be []
+
+  // Mid-sprint guard: refuse to overwrite an in-flight queue without
+  // --force. The user almost certainly wants to finish what's running
+  // before pivoting; a silent overwrite would lose state.
+  if (
+    explicitQueue.length > 0 &&
+    (persisted.current_story || (persisted.story_queue || []).length > 0) &&
+    !opts.force
+  ) {
+    const err =
+      `Sprint already in progress (current_story=${persisted.current_story || '<queue head>'}). ` +
+      `Pass --force to overwrite the queue, or finish the current story first.`;
+    log.error(err);
+    process.stdout.write(`${JSON.stringify({ error: err, kind: 'mid_sprint_queue_overwrite' }, null, 2)}\n`);
+    return 2;
+  }
+
   // Resume detection: if a prior session left a fingerprint, diff.
   const lastHalt = ledger.last({ projectRoot }, 'halt');
   if (lastHalt && lastHalt.fingerprint) {
@@ -668,6 +856,25 @@ function cmdStart(opts) {
       process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
       return 0;
     }
+  }
+
+  // Persist the new queue BEFORE composing runtime state so the queue
+  // head is visible to composeRuntimeState's resolver.
+  if (explicitQueue.length > 0) {
+    persisted.story_queue = explicitQueue;
+    // --force overwrite also clears the prior story identity so the
+    // queue head is selected cleanly. Without this, persisted.current_
+    // story would short-circuit the queue read.
+    if (opts.force) {
+      persisted.current_story = null;
+      persisted.story_file_path = null;
+      persisted.current_epic = null;
+      persisted.current_bmad_step = null;
+    }
+    ledger.append(
+      { kind: 'story_queue_set', queue: explicitQueue, force: !!opts.force },
+      { projectRoot },
+    );
   }
 
   // Fresh start or clean resume. `composeRuntimeState` applies the
@@ -886,7 +1093,7 @@ function cmdStatus(opts) {
 // ------------------------------------------------------------ main
 
 function main(argv) {
-  const { opts, positional } = parseArgs(argv, { booleanFlags: ['help'] });
+  const { opts, positional } = parseArgs(argv, { booleanFlags: ['help', 'force'] });
   if (opts.help) {
     help();
     return 0;
