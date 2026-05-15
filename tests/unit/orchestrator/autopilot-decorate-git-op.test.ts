@@ -457,6 +457,89 @@ describe('composeRuntimeState — persisted current_story validation (poisoned s
     }
   });
 
+  it("does NOT nullify current_story when sprint-status shows 'done' AND phase is story-bound (STORY_DONE is the expected state)", () => {
+    // Regression v2.2.9: pre-2.2.9 the "marked done" rejection fired
+    // regardless of phase. At STORY_DONE the story IS expected to be
+    // done in sprint-status (verifyStoryDone enforces it). Nullifying
+    // mid-record produced branch "story/unknown" on commit_and_push_story.
+    const { projectRoot, cleanup } = makeProjectWithSprintStatus(
+      null,
+      [
+        'development_status:',
+        '  4-9-foo: done  # PR #99 merged',
+        '',
+      ].join('\n'),
+    );
+    try {
+      const r = composeRuntimeState(
+        { current_bmad_step: 'story_done', current_story: '4-9-foo', current_epic: '4' },
+        flatToProfile({}, 'medium'),
+        projectRoot,
+      );
+      // story_key preserved → branch resolves correctly downstream.
+      expect(r.story_key).toBe('4-9-foo');
+      expect(r.phase).toBe('story_done');
+    } finally {
+      cleanup();
+    }
+  });
+
+  it('rejects current_story marked done when phase IS story-start (poisoned state from prior session)', () => {
+    // The "done" rejection still fires at story-start phases — that
+    // means we're picking up state where the previous story finished
+    // but state wasn't reset.
+    const { projectRoot, cleanup } = makeProjectWithSprintStatus(
+      null,
+      [
+        'development_status:',
+        '  4-8-old: done',
+        '  4-9-next: ready-for-dev',
+        '',
+      ].join('\n'),
+    );
+    try {
+      const r = composeRuntimeState(
+        { current_bmad_step: 'prepare_story_branch', current_story: '4-8-old' },
+        flatToProfile({}, 'medium'),
+        projectRoot,
+      );
+      // 4-8-old rejected → falls through to resolveNextStoryKey → 4-9-next.
+      expect(r.story_key).toBe('4-9-next');
+    } finally {
+      cleanup();
+    }
+  });
+
+  it('rejects + resets phase to flowStart when current_story is poisoned AND phase is story-bound (non-done rejection)', () => {
+    // Epic-rollup poison at story-bound phase: orchestrator can't emit
+    // a coherent action with story_key=null at dev_red. Reset to
+    // flowStart so the next emission re-enters story-start cleanly.
+    const { projectRoot, cleanup } = makeProjectWithSprintStatus(
+      null,
+      [
+        'development_status:',
+        '  epic-4: in-progress',
+        '  4-9-real: ready-for-dev',
+        '',
+      ].join('\n'),
+    );
+    try {
+      const r = composeRuntimeState(
+        { current_bmad_step: 'dev_red', current_story: 'epic-4', current_epic: 'epic' },
+        flatToProfile({}, 'medium'),
+        projectRoot,
+      );
+      // epic-4 rejected (poisoned shape), phase reset to create_story (flowStart),
+      // story_key re-resolved via resolveNextStoryKey at prepare_story_branch...
+      // actually flowStart=create_story so resolveNextStoryKey doesn't fire here.
+      // Either way: phase advanced past dev_red so the emission isn't broken.
+      expect(r.phase).not.toBe('dev_red');
+      expect(['create_story', 'prepare_story_branch']).toContain(r.phase);
+    } finally {
+      cleanup();
+    }
+  });
+
   it("nullifies persisted current_story when sprint-status shows it as 'done'", () => {
     const { projectRoot, cleanup } = makeProjectWithSprintStatus(
       null,

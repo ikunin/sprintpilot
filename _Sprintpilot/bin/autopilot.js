@@ -499,15 +499,50 @@ function composeRuntimeState(persisted, profile, projectRoot) {
       projectRoot,
     );
     if (rejection) {
-      process.stderr.write(
-        `[autopilot] WARN persisted current_story "${persistedCurrentStory}" rejected: ${rejection}. ` +
-          'Treating as null and falling through to queue / sprint-status resolution. ' +
-          'This typically means state was poisoned by an older orchestrator version (v2.1.3 / v2.1.4 pre-filter); ' +
-          'next emission will clean it up.\n',
-      );
-      resolvedStoryKey = null;
-      resolvedEpic = null;
-      resolvedStoryFilePath = null;
+      // Phase-aware rejection gate. The "marked done" rejection is NOT
+      // a poisoned-state signal when state.phase is a story-bound phase
+      // (CHECK_READINESS through STORY_LAND) — at STORY_DONE the story
+      // IS expected to be marked done in sprint-status (verifyStoryDone
+      // enforces it). Pre-2.2.9 fix: any "done" rejection nulled
+      // story_key mid-record, producing branch "story/unknown" on
+      // commit_and_push_story.
+      //
+      // Epic-rollup-header / retrospective / not-in-sprint-status
+      // rejections are ALWAYS poison and fire regardless of phase.
+      const STORY_BOUND_PHASES = new Set([
+        STATES.CHECK_READINESS,
+        STATES.DEV_RED,
+        STATES.DEV_GREEN,
+        STATES.CODE_REVIEW,
+        STATES.PATCH_APPLY,
+        STATES.PATCH_RETEST,
+        STATES.STORY_DONE,
+        STATES.STORY_LAND,
+      ]);
+      const isDoneRejection = /already complete/.test(rejection);
+      const skipDoneRejection = isDoneRejection && STORY_BOUND_PHASES.has(phase);
+      if (!skipDoneRejection) {
+        process.stderr.write(
+          `[autopilot] WARN persisted current_story "${persistedCurrentStory}" rejected: ${rejection}. ` +
+            'Treating as null and falling through to queue / sprint-status resolution. ' +
+            'This typically means state was poisoned by an older orchestrator version (v2.1.3 / v2.1.4 pre-filter); ' +
+            'next emission will clean it up.\n',
+        );
+        resolvedStoryKey = null;
+        resolvedEpic = null;
+        resolvedStoryFilePath = null;
+        // When the rejected story was at a phase that REQUIRES a story_key
+        // to emit a coherent action, also reset state.phase to flowStart.
+        // Otherwise the next emission produces a story-bound action (e.g.,
+        // commit_and_push_story) with null story_key → branch resolves to
+        // "story/unknown" → execution fails or corrupts the working tree.
+        if (STORY_BOUND_PHASES.has(phase)) {
+          process.stderr.write(
+            `[autopilot] WARN phase was "${phase}" (requires story_key) — resetting to ${flowStart} so next emission re-enters story-start.\n`,
+          );
+          phase = flowStart;
+        }
+      }
     }
   }
   // Explicit queue (populated by `autopilot start --stories` / `--epic`)
