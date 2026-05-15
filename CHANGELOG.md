@@ -1,5 +1,32 @@
 # Changelog
 
+## [2.2.2] - 2026-05-15
+
+**Three bugs found during a post-2.2.1 audit of the orchestrator's state-management flow.** All three interact at the `STORY_DONE → EPIC_BOUNDARY_CHECK → RETROSPECTIVE → next-story` transition and were latent for multiple releases.
+
+### Fixed
+
+- **Bug #1: `remaining_stories_in_epic` is never populated → every story triggers a retrospective.** The state machine reads `state.remaining_stories_in_epic` at `EPIC_BOUNDARY_CHECK` to decide between RETROSPECTIVE (end-of-epic) and next-story (more stories remain). But the field was passthrough-only — never written by the orchestrator runtime. Default value 0 → `EPIC_BOUNDARY_CHECK` always treated every story as end-of-epic and routed to RETROSPECTIVE. Latent since v2.1.0; the "more stories in epic" branch in `deterministicNext` was unreachable in production despite being explicitly tested. **Fix**: `composeRuntimeState` now recomputes the count from `sprint-status.yaml` each emission, using the existing `resolveStoriesForEpic` helper (filters out done stories, epic rollup headers, and `-retrospective` entries).
+
+- **Bug #2: `current_epic` cleared too early → `verifyRetrospective` would fail.** v2.2.0's queue cleanup cleared `state.current_epic = null` at the `STORY_DONE → EPIC_BOUNDARY_CHECK` transition (intended for cross-epic queue traversal). But `verifyRetrospective` reads `state.current_epic` to locate `_bmad-output/retrospectives/<epic>.md` — and the cleared field made it look for `retrospectives/unknown.md`. **Fix**: `adapt.advanceState` no longer clears `current_epic` at the STORY_DONE boundary. The clearing/refresh moves into `composeRuntimeState` (Bug #3) where it can re-derive from the new story_key when the queue actually advances.
+
+- **Bug #3: Queue consumption pollutes non-story phases.** `composeRuntimeState` pulled `queue[0]` as `runtime.story_key` whenever `persisted.current_story` was null AND the queue was non-empty — regardless of `phase`. So at `EPIC_BOUNDARY_CHECK` and `RETROSPECTIVE` (where story_key was cleared at STORY_DONE), state.story_key would get set to the NEXT queued story, and `adapt.advanceState`'s propagation block would derive `current_epic` from that next story, overwriting the just-completed-epic's context BEFORE retrospective ran. Compounds Bug #2 — even with un-cleared current_epic, the queue pull at EPIC_BOUNDARY_CHECK would still pollute. **Fix**: Queue consumption is now gated to story-start phases only (`CREATE_STORY`, `NANO_QUICK_DEV`, `PREPARE_STORY_BRANCH`). When the queue head IS consumed, `current_epic` is unconditionally re-derived from the new story_key (so cross-epic queues update epic correctly).
+
+### Added
+
+- 8 new regression tests in `tests/unit/orchestrator/autopilot-decorate-git-op.test.ts` and `tests/unit/orchestrator/adapt.test.ts`:
+  - `remaining_stories_in_epic` counts non-done stories under current_epic (excludes done + epic headers + retrospectives)
+  - returns 0 when all epic stories are done (end-of-epic signal works)
+  - falls back to persisted value when current_epic is null
+  - queue NOT consumed at `EPIC_BOUNDARY_CHECK` / `RETROSPECTIVE` phases
+  - queue IS consumed at `CREATE_STORY` / `PREPARE_STORY_BRANCH`
+  - cross-epic queue re-derives `current_epic` from new story_key
+  - `STORY_DONE → EPIC_BOUNDARY_CHECK` preserves `current_epic` (clears story_key/story_file_path/ac_summary, pops queue head)
+
+### Impact for existing v2.x users
+
+Anyone running multi-story sprints (granularity=story, the default) hit Bug #1 — every story spawned a retrospective. Cleanup is automatic on the next emission after upgrading: `composeRuntimeState` recomputes `remaining_stories_in_epic` from sprint-status, the state machine routes correctly, and only the actual end-of-epic story triggers RETROSPECTIVE.
+
 ## [2.2.1] - 2026-05-15
 
 **Hotfix for v2.2.0** (and every v2.x before it). The first `CREATE_STORY` success of a fresh sprint was rejected by verify with `"story_file_path not set"` — even though the LLM had correctly reported the path in `signal.output.story_file_path`. Caused by an ordering issue in `cmdRecord`: `verify()` runs against the persisted `runtime`, but `adapt.advanceState` (which propagates identity fields from `signal.output` onto state) doesn't run until AFTER verify. Result: the very first emission of `bmad-create-story` always failed verify, retried, and produced confusing ledger entries (`verify_rejected`, then a `verify_result ok:false` on the next try, eventually passing only after retries when state had drifted).

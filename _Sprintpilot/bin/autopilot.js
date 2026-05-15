@@ -426,21 +426,40 @@ function composeRuntimeState(persisted, profile, projectRoot) {
   // takes priority over the linear resolveNextStoryKey scan: when a
   // user specifies "start with stories 4-1, 4-2, 4-5" we honor that
   // order regardless of what comes first in sprint-status.yaml.
+  //
+  // Queue consumption is GATED to story-start phases. Without this gate,
+  // composeRuntimeState would pull the queue head as runtime.story_key
+  // during EPIC_BOUNDARY_CHECK / RETROSPECTIVE / STORY_LAND — phases
+  // where the orchestrator isn't starting a new story yet. That would
+  // pollute state and (via adapt.advanceState's signal-output
+  // propagation) overwrite current_epic with the next story's epic
+  // BEFORE retrospective runs.
+  //
   // Forward-compat for ma.parallel_stories: the queue is the source
   // multiple workers will pull from when the parallel-batch path is
   // wired into the state machine.
   const persistedQueue = Array.isArray(persisted.story_queue)
     ? persisted.story_queue.filter((k) => typeof k === 'string' && k.length > 0)
     : [];
-  if (!resolvedStoryKey && persistedQueue.length > 0) {
+  const isNewStoryStartPhase =
+    phase === STATES.CREATE_STORY ||
+    phase === STATES.NANO_QUICK_DEV ||
+    phase === STATES.PREPARE_STORY_BRANCH;
+  if (isNewStoryStartPhase && !resolvedStoryKey && persistedQueue.length > 0) {
     resolvedStoryKey = persistedQueue[0];
-    if (!resolvedEpic) resolvedEpic = deriveEpicFromStoryKey(resolvedStoryKey);
+    // Unconditional re-derive: when picking a new story_key, current_epic
+    // MUST match. A queue spanning multiple epics (e.g. [4-1, 5-1]) needs
+    // to update current_epic when crossing the boundary. The previous
+    // story's epic — preserved through EPIC_BOUNDARY_CHECK + RETROSPECTIVE
+    // by adapt.advanceState — would otherwise carry over and mislabel
+    // commits/branches.
+    resolvedEpic = deriveEpicFromStoryKey(resolvedStoryKey) || resolvedEpic;
   }
   if (phase === STATES.PREPARE_STORY_BRANCH && !resolvedStoryKey) {
     const next = resolveNextStoryKey(projectRoot);
     if (next) {
       resolvedStoryKey = next;
-      if (!resolvedEpic) resolvedEpic = deriveEpicFromStoryKey(next);
+      resolvedEpic = deriveEpicFromStoryKey(next) || resolvedEpic;
     } else {
       process.stderr.write(
         `[autopilot] WARN PREPARE_STORY_BRANCH needs a next-story key but sprint-status.yaml has none pending — falling back to ${flowStart}. ` +
@@ -448,6 +467,23 @@ function composeRuntimeState(persisted, profile, projectRoot) {
       );
       phase = flowStart;
     }
+  }
+
+  // Count non-done stories in the current epic. state-machine.js's
+  // EPIC_BOUNDARY_CHECK reads this to decide between RETROSPECTIVE (end
+  // of epic, count === 0) and next-story-start (count > 0). Pre-2.2.2
+  // this field was passthrough-only — never written by the orchestrator
+  // — so the count stayed at 0 and EVERY story triggered a
+  // retrospective. Now: recompute from sprint-status.yaml each emission
+  // when current_epic is known.
+  //
+  // Count semantics: excludes done stories AND non-story entries (epic
+  // rollup headers, -retrospective entries) via the same looksLikeStoryKey
+  // filter resolveNextStoryKey uses.
+  let remainingStoriesInEpic = persisted.remaining_stories_in_epic || 0;
+  if (resolvedEpic && projectRoot) {
+    const epicStories = resolveStoriesForEpic(projectRoot, resolvedEpic);
+    remainingStoriesInEpic = epicStories.length;
   }
 
   return {
@@ -461,7 +497,7 @@ function composeRuntimeState(persisted, profile, projectRoot) {
     prior_signals_summary: persisted.prior_signals_summary || null,
     patch_findings: persisted.patch_findings || null,
     tests_to_rerun: persisted.tests_to_rerun || null,
-    remaining_stories_in_epic: persisted.remaining_stories_in_epic || 0,
+    remaining_stories_in_epic: remainingStoriesInEpic,
     sprint_is_complete: !!persisted.sprint_is_complete,
     retry_count_this_phase: persisted.retry_count_this_phase || 0,
     verify_reject_count: persisted.verify_reject_count || 0,

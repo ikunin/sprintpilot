@@ -319,3 +319,154 @@ describe('composeRuntimeState — migration of legacy current_bmad_step', () => 
     expect(r.phase).toBe('create_story');
   });
 });
+
+describe('composeRuntimeState — bug #1: remaining_stories_in_epic populated from sprint-status', () => {
+  const medium = () => flatToProfile({}, 'medium');
+
+  it('counts non-done stories in the current epic (excludes done + epic headers + retrospectives)', () => {
+    const { projectRoot, cleanup } = makeProjectWithSprintStatus(
+      null,
+      [
+        'development_status:',
+        '  epic-4: in-progress',
+        '  4-1-foo: done',          // excluded: done
+        '  4-2-bar: ready-for-dev', // counted
+        '  4-3-baz: backlog',       // counted
+        '  4-retrospective: pending', // excluded: retro entry
+        '  5-1-other: backlog',     // excluded: different epic
+        '',
+      ].join('\n'),
+    );
+    try {
+      // Mid-story in epic 4. composeRuntimeState should count remaining
+      // non-done stories under epic 4: 4-2-bar, 4-3-baz = 2.
+      const r = composeRuntimeState(
+        { current_bmad_step: 'dev_red', current_story: '4-2-bar', current_epic: '4' },
+        medium(),
+        projectRoot,
+      );
+      expect(r.remaining_stories_in_epic).toBe(2);
+    } finally {
+      cleanup();
+    }
+  });
+
+  it('returns 0 when all epic stories are done (end-of-epic signal for state machine)', () => {
+    const { projectRoot, cleanup } = makeProjectWithSprintStatus(
+      null,
+      [
+        'development_status:',
+        '  4-1-foo: done',
+        '  4-2-bar: done',
+        '',
+      ].join('\n'),
+    );
+    try {
+      const r = composeRuntimeState(
+        { current_bmad_step: 'epic_boundary_check', current_epic: '4' },
+        medium(),
+        projectRoot,
+      );
+      expect(r.remaining_stories_in_epic).toBe(0);
+    } finally {
+      cleanup();
+    }
+  });
+
+  it('falls back to persisted value when current_epic is null (no resolution possible)', () => {
+    const r = composeRuntimeState(
+      { current_bmad_step: 'create_story', remaining_stories_in_epic: 7 },
+      medium(),
+    );
+    expect(r.remaining_stories_in_epic).toBe(7);
+  });
+});
+
+describe('composeRuntimeState — bug #3: queue consumption gated to story-start phases', () => {
+  const medium = () => flatToProfile({}, 'medium');
+
+  it('does NOT consume queue at EPIC_BOUNDARY_CHECK (would pollute state)', () => {
+    const r = composeRuntimeState(
+      {
+        current_bmad_step: 'epic_boundary_check',
+        current_story: null,
+        current_epic: '4',
+        story_queue: ['5-1-next-epic-first', '5-2-next-epic-second'],
+      },
+      medium(),
+    );
+    expect(r.phase).toBe('epic_boundary_check');
+    expect(r.story_key).toBeNull();
+    expect(r.current_epic).toBe('4');
+  });
+
+  it('does NOT consume queue at RETROSPECTIVE (preserves current_epic for verify)', () => {
+    const r = composeRuntimeState(
+      {
+        current_bmad_step: 'retrospective',
+        current_story: null,
+        current_epic: '4',
+        story_queue: ['5-1-next'],
+      },
+      medium(),
+    );
+    expect(r.phase).toBe('retrospective');
+    expect(r.story_key).toBeNull();
+    expect(r.current_epic).toBe('4');
+  });
+
+  it('DOES consume queue at CREATE_STORY (story-start phase)', () => {
+    const { projectRoot, cleanup } = makeProjectWithSprintStatus(
+      null,
+      [
+        'development_status:',
+        '  5-1-next: ready-for-dev',
+        '',
+      ].join('\n'),
+    );
+    try {
+      const r = composeRuntimeState(
+        {
+          current_bmad_step: 'create_story',
+          current_story: null,
+          current_epic: '4',
+          story_queue: ['5-1-next'],
+        },
+        medium(),
+        projectRoot,
+      );
+      expect(r.story_key).toBe('5-1-next');
+      // Cross-epic queue: current_epic re-derived from new story_key.
+      expect(r.current_epic).toBe('5');
+    } finally {
+      cleanup();
+    }
+  });
+
+  it('cross-epic queue at PREPARE_STORY_BRANCH re-derives current_epic from new story_key', () => {
+    const { projectRoot, cleanup } = makeProjectWithSprintStatus(
+      null,
+      [
+        'development_status:',
+        '  5-1-next: ready-for-dev',
+        '',
+      ].join('\n'),
+    );
+    try {
+      const r = composeRuntimeState(
+        {
+          current_bmad_step: 'prepare_story_branch',
+          current_story: null,
+          current_epic: '4', // stale from previous story; should not carry
+          story_queue: ['5-1-next'],
+        },
+        medium(),
+        projectRoot,
+      );
+      expect(r.story_key).toBe('5-1-next');
+      expect(r.current_epic).toBe('5');
+    } finally {
+      cleanup();
+    }
+  });
+});

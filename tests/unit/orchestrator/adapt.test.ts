@@ -653,3 +653,42 @@ describe('user_input pause halts the loop (Bug C regression)', () => {
     expect((r.nextAction as Record<string, unknown>).reason).toBe('user_pause');
   });
 });
+
+describe('advanceState — bug #2: current_epic preserved through STORY_DONE → EPIC_BOUNDARY_CHECK', () => {
+  it('clears story_key / story_file_path / ac_summary but KEEPS current_epic', () => {
+    // Regression: v2.2.0 cleared current_epic at STORY_DONE → EPIC_BOUNDARY_
+    // CHECK, which made verifyRetrospective look for retrospectives/unknown.md
+    // because state.current_epic was null by the time RETROSPECTIVE ran.
+    // current_epic must survive through EPIC_BOUNDARY_CHECK + RETROSPECTIVE
+    // for both the state-machine end-of-epic check and the retro verifier.
+    const stateAtStoryDone = st(STATES.STORY_DONE, {
+      story_key: '4-8-realm',
+      current_epic: '4',
+      story_file_path: '/repo/_bmad-output/stories/4-8.md',
+      ac_summary: 'lock the realm session',
+      story_queue: ['4-8-realm', '4-9-next-in-epic-4'],
+    });
+    const r = interpretSignal(
+      stateAtStoryDone,
+      {
+        status: 'success',
+        output: {
+          commit_sha: 'abc123',
+          branch: 'story/4-8-realm',
+          git_steps_completed: true,
+          story_key: '4-8-realm',
+        },
+      },
+      medium(),
+    );
+    expect(r.newState.phase).toBe(STATES.EPIC_BOUNDARY_CHECK);
+    // Cleared:
+    expect(r.newState.story_key).toBeNull();
+    expect(r.newState.story_file_path).toBeNull();
+    expect(r.newState.ac_summary).toBeNull();
+    // Preserved (this is the regression fix):
+    expect(r.newState.current_epic).toBe('4');
+    // Queue popped:
+    expect(r.newState.story_queue).toEqual(['4-9-next-in-epic-4']);
+  });
+});

@@ -550,18 +550,26 @@ function advanceState(state, profile, newPhase, signal) {
 
   // Story-completion boundary: STORY_DONE → EPIC_BOUNDARY_CHECK means
   // the current story is committed and pushed. Pop the explicit story
-  // queue (if any) — its head was THIS story — and clear story_key so
-  // composeRuntimeState picks queue[1] (now queue[0]) on the next
-  // emission. Without this pop, composeRuntimeState would re-pick the
-  // just-completed story (via the signal-output propagation above) and
-  // loop. This block runs AFTER propagation so the clearing wins.
+  // queue (if any) — its head was THIS story — and clear story_key /
+  // story_file_path / ac_summary so composeRuntimeState picks
+  // queue[1] (now queue[0]) on the next emission. Without this pop,
+  // composeRuntimeState would re-pick the just-completed story (via the
+  // signal-output propagation above) and loop. This block runs AFTER
+  // propagation so the clearing wins.
+  //
+  // current_epic is intentionally NOT cleared here. EPIC_BOUNDARY_CHECK
+  // and (downstream) RETROSPECTIVE both need it: state-machine reads
+  // current_epic to compute remaining_stories_in_epic, and
+  // verifyRetrospective uses it to locate `_bmad-output/retrospectives/
+  // <epic>.md`. composeRuntimeState re-derives current_epic from the
+  // new story_key when the queue head changes epics on next-story-start
+  // (CREATE_STORY / PREPARE_STORY_BRANCH / NANO_QUICK_DEV).
   if (state.phase === STATES.STORY_DONE && newPhase === STATES.EPIC_BOUNDARY_CHECK) {
     if (Array.isArray(state.story_queue) && state.story_queue.length > 0) {
       next.story_queue = state.story_queue.slice(1);
     }
     next.story_key = null;
     next.story_file_path = null;
-    next.current_epic = null;
     next.ac_summary = null;
   }
 
