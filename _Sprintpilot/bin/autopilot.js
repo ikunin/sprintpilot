@@ -526,9 +526,32 @@ function composeRuntimeState(persisted, profile, projectRoot) {
   // Forward-compat for ma.parallel_stories: the queue is the source
   // multiple workers will pull from when the parallel-batch path is
   // wired into the state machine.
-  const persistedQueue = Array.isArray(persisted.story_queue)
+  // Validate persisted.story_queue entries against sprint-status. Same
+  // rejection rules as current_story (epic-rollup shape / retrospective
+  // / missing from sprint-status / marked done) — applies to every queue
+  // member. Without this, a legacy queue persisted by an older
+  // orchestrator (or after a sprint-status edit that removed entries)
+  // would feed garbage keys to subsequent emissions.
+  //
+  // Defensive: if sprint-status can't be read, only the shape-based
+  // rejections (epic-N, retrospective) apply; presence/status checks
+  // are skipped. Same don't-punish-missing-artifact policy as
+  // current_story validation.
+  const rawPersistedQueue = Array.isArray(persisted.story_queue)
     ? persisted.story_queue.filter((k) => typeof k === 'string' && k.length > 0)
     : [];
+  const persistedQueue = [];
+  for (const k of rawPersistedQueue) {
+    const reason = persistedStoryRejectionReason(k, projectRoot);
+    if (reason) {
+      process.stderr.write(
+        `[autopilot] WARN story_queue entry "${k}" rejected: ${reason}. ` +
+          'Dropping from queue.\n',
+      );
+      continue;
+    }
+    persistedQueue.push(k);
+  }
   const isNewStoryStartPhase =
     phase === STATES.CREATE_STORY ||
     phase === STATES.NANO_QUICK_DEV ||

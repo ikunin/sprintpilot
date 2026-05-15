@@ -537,6 +537,175 @@ describe('composeRuntimeState — persisted current_story validation (poisoned s
   });
 });
 
+describe('composeRuntimeState — story_queue validation (poisoned entries dropped)', () => {
+  const medium = () => flatToProfile({}, 'medium');
+
+  it('filters out epic-header entries from persisted story_queue', () => {
+    const { projectRoot, cleanup } = makeProjectWithSprintStatus(
+      null,
+      [
+        'development_status:',
+        '  4-8-realm: ready-for-dev',
+        '  4-9-next: ready-for-dev',
+        '',
+      ].join('\n'),
+    );
+    try {
+      const r = composeRuntimeState(
+        {
+          current_bmad_step: 'create_story',
+          story_queue: ['epic-4', '4-8-realm', 'epic-5', '4-9-next'],
+        },
+        medium(),
+        projectRoot,
+      );
+      expect(r.story_queue).toEqual(['4-8-realm', '4-9-next']);
+    } finally {
+      cleanup();
+    }
+  });
+
+  it('filters out retrospective entries from persisted story_queue', () => {
+    const { projectRoot, cleanup } = makeProjectWithSprintStatus(
+      null,
+      [
+        'development_status:',
+        '  4-8-realm: ready-for-dev',
+        '',
+      ].join('\n'),
+    );
+    try {
+      const r = composeRuntimeState(
+        {
+          current_bmad_step: 'create_story',
+          story_queue: ['4-retrospective', '4-8-realm', 'epic-4-retrospective'],
+        },
+        medium(),
+        projectRoot,
+      );
+      expect(r.story_queue).toEqual(['4-8-realm']);
+    } finally {
+      cleanup();
+    }
+  });
+
+  it('filters out entries marked done in sprint-status', () => {
+    const { projectRoot, cleanup } = makeProjectWithSprintStatus(
+      null,
+      [
+        'development_status:',
+        '  4-7-old: done  # PR #99 merged',
+        '  4-8-realm: ready-for-dev',
+        '',
+      ].join('\n'),
+    );
+    try {
+      const r = composeRuntimeState(
+        {
+          current_bmad_step: 'create_story',
+          story_queue: ['4-7-old', '4-8-realm'],
+        },
+        medium(),
+        projectRoot,
+      );
+      expect(r.story_queue).toEqual(['4-8-realm']);
+    } finally {
+      cleanup();
+    }
+  });
+
+  it('filters out entries not present in sprint-status', () => {
+    const { projectRoot, cleanup } = makeProjectWithSprintStatus(
+      null,
+      [
+        'development_status:',
+        '  4-8-realm: ready-for-dev',
+        '',
+      ].join('\n'),
+    );
+    try {
+      const r = composeRuntimeState(
+        {
+          current_bmad_step: 'create_story',
+          story_queue: ['4-7-deleted-story', '4-8-realm', '99-never-existed'],
+        },
+        medium(),
+        projectRoot,
+      );
+      expect(r.story_queue).toEqual(['4-8-realm']);
+    } finally {
+      cleanup();
+    }
+  });
+
+  it('preserves valid queue entries as-is', () => {
+    const { projectRoot, cleanup } = makeProjectWithSprintStatus(
+      null,
+      [
+        'development_status:',
+        '  4-8-realm: ready-for-dev',
+        '  4-9-next: backlog',
+        '  4-10-after: ready-for-dev',
+        '',
+      ].join('\n'),
+    );
+    try {
+      const r = composeRuntimeState(
+        {
+          current_bmad_step: 'create_story',
+          story_queue: ['4-8-realm', '4-9-next', '4-10-after'],
+        },
+        medium(),
+        projectRoot,
+      );
+      expect(r.story_queue).toEqual(['4-8-realm', '4-9-next', '4-10-after']);
+    } finally {
+      cleanup();
+    }
+  });
+
+  it('all-invalid queue empties safely (orchestrator falls through to resolveNextStoryKey)', () => {
+    const { projectRoot, cleanup } = makeProjectWithSprintStatus(
+      null,
+      [
+        'development_status:',
+        '  4-8-realm: ready-for-dev',
+        '',
+      ].join('\n'),
+    );
+    try {
+      const r = composeRuntimeState(
+        {
+          current_bmad_step: 'prepare_story_branch',
+          story_queue: ['epic-4', 'epic-5', '4-retrospective'],
+        },
+        medium(),
+        projectRoot,
+      );
+      expect(r.story_queue).toEqual([]);
+      // Falls through to resolveNextStoryKey → picks 4-8-realm.
+      expect(r.story_key).toBe('4-8-realm');
+    } finally {
+      cleanup();
+    }
+  });
+
+  it('preserves queue shape-based filtering when sprint-status is missing (defensive)', () => {
+    // Without sprint-status, presence/status checks defer. Only shape-
+    // based rejections (epic-N, retrospective) fire.
+    const r = composeRuntimeState(
+      {
+        current_bmad_step: 'create_story',
+        story_queue: ['epic-4', '4-8-realm', '4-retrospective', 'S1.2'],
+      },
+      medium(),
+    );
+    // epic-4 + 4-retrospective dropped; 4-8-realm + S1.2 preserved
+    // (can't verify they exist without sprint-status, so trust them).
+    expect(r.story_queue).toEqual(['4-8-realm', 'S1.2']);
+  });
+});
+
 describe('composeRuntimeState — bug #3: queue consumption gated to story-start phases', () => {
   const medium = () => flatToProfile({}, 'medium');
 

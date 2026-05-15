@@ -1,5 +1,19 @@
 # Changelog
 
+## [2.2.5] - 2026-05-15
+
+**Extends v2.2.4's poisoned-state self-heal to `story_queue` entries.** A legacy queue persisted by an older orchestrator (or a queue built before sprint-status was edited to remove/complete entries) could contain epic headers, retrospectives, missing keys, or already-done stories. v2.2.4 only validated the head (`current_story`); v2.2.5 sweeps every queue member with the same rules.
+
+### Fixed
+
+- **`composeRuntimeState` validates every `story_queue` entry against sprint-status.** Same rules as `current_story` (epic-rollup shape / retrospective shape / missing-from-sprint-status / marked done). Invalid entries are dropped with a stderr warning naming each rejected key and the reason. The remaining queue is what the orchestrator consumes.
+
+- **Defensive missing-artifact behavior.** When sprint-status can't be read, only the shape-based rejections (epic-N, retrospective) fire — presence/status checks are skipped. Same don't-punish-missing-artifact policy as v2.2.4.
+
+### Added
+
+- 7 regression tests covering: epic-header filtering, retrospective filtering, done-status filtering, missing-key filtering, valid-queue preservation, all-invalid-empties-safely (falls through to `resolveNextStoryKey`), and the missing-sprint-status defensive behavior.
+
 ## [2.2.4] - 2026-05-15
 
 **Self-heals poisoned `current_story` state from older orchestrator versions.** Users who ran the autopilot on v2.1.3 or v2.1.4 (before the `looksLikeStoryKey` filter shipped in v2.1.5) could end up with `current_story: epic-4` (or another epic-rollup header) persisted in `autopilot-state.yaml`. Every subsequent session emitted `branch: story/epic-4` because `composeRuntimeState` trusted persisted values blindly. v2.2.4 validates persisted `current_story` against sprint-status before using it and falls through to re-resolution when it's poisoned.
