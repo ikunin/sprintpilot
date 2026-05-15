@@ -110,8 +110,29 @@ function verify(state, signalOutput, context) {
     projectRoot: (context && context.projectRoot) || '.',
     augmented: (context && context.augmented) || null,
   };
+  const out = signalOutput || {};
+  // Effective state: fall forward to signal.output for identity fields
+  // that composeRuntimeState couldn't pre-populate (only story_file_path
+  // and ac_summary — story_key + current_epic are already resolved from
+  // sprint-status before verify runs). Without this, the FIRST successful
+  // CREATE_STORY signal always fails verify with "story_file_path not
+  // set" because adapt.advanceState propagates the path AFTER verify, not
+  // before.
+  //
+  // Precedence: state wins when set; signal.output is fallback. This
+  // preserves verifyStoryDone's explicit out.story_key !== state.story_key
+  // mismatch check at line 273 — that comparison still sees the
+  // original state value (which is non-null by STORY_DONE).
+  const effectiveState =
+    state.story_file_path && state.ac_summary
+      ? state
+      : {
+          ...state,
+          story_file_path: state.story_file_path || out.story_file_path || null,
+          ac_summary: state.ac_summary || out.ac_summary || null,
+        };
   try {
-    return fn(state, signalOutput || {}, ctx);
+    return fn(effectiveState, out, ctx);
   } catch (e) {
     return { ok: false, issues: [`verifier threw: ${e.message}`] };
   }

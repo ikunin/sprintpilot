@@ -117,6 +117,45 @@ describe('verify CREATE_STORY', () => {
     expect(r.ok).toBe(false);
     expect(r.issues.join(' ')).toContain('checkbox');
   });
+
+  it('falls back to signal.output.story_file_path when state.story_file_path is null (first-success regression)', () => {
+    // Real-world bug from a v2.2.0 session ledger:
+    //   {"kind":"verify_result","phase":"create_story","ok":false,
+    //    "issues":["story_file_path not set"]}
+    // Cause: adapt.advanceState propagates story_file_path AFTER verify
+    // runs, so the first successful create_story signal fails verify
+    // even though the LLM correctly reported the path in signal.output.
+    // Fix: verify() merges signal.output's identity fields onto an
+    // effective state when state's values are null.
+    const path = makeStoryFile(
+      `---\nstory_key: 4-8-realm\n---\n\n## Acceptance Criteria\n- AC1\n\n## Tasks\n- [ ] x\n`,
+    );
+    const r = verify(
+      // state has no story_file_path (first emission after composeRuntimeState
+      // resolved only story_key from sprint-status)
+      { phase: STATES.CREATE_STORY, story_key: '4-8-realm', story_file_path: null },
+      // signal.output reports the path the LLM just wrote
+      { story_file_path: path },
+      { projectRoot },
+    );
+    expect(r.ok).toBe(true);
+    expect(r.issues).toEqual([]);
+  });
+
+  it('state.story_file_path still wins when both state and signal.output are set', () => {
+    // Precedence guard: an in-flight retry with stale signal.output
+    // must not clobber the authoritative state path. Verify uses
+    // state's value, not signal's.
+    const stateFile = makeStoryFile(
+      `---\nstory_key: S1\n---\n\n## Acceptance Criteria\n- AC1\n\n## Tasks\n- [ ] x\n`,
+    );
+    const r = verify(
+      { phase: STATES.CREATE_STORY, story_key: 'S1', story_file_path: stateFile },
+      { story_file_path: '/nope/wrong.md' },
+      { projectRoot },
+    );
+    expect(r.ok).toBe(true);
+  });
 });
 
 describe('verify CHECK_READINESS', () => {

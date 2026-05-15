@@ -1,5 +1,28 @@
 # Changelog
 
+## [2.2.1] - 2026-05-15
+
+**Hotfix for v2.2.0** (and every v2.x before it). The first `CREATE_STORY` success of a fresh sprint was rejected by verify with `"story_file_path not set"` — even though the LLM had correctly reported the path in `signal.output.story_file_path`. Caused by an ordering issue in `cmdRecord`: `verify()` runs against the persisted `runtime`, but `adapt.advanceState` (which propagates identity fields from `signal.output` onto state) doesn't run until AFTER verify. Result: the very first emission of `bmad-create-story` always failed verify, retried, and produced confusing ledger entries (`verify_rejected`, then a `verify_result ok:false` on the next try, eventually passing only after retries when state had drifted).
+
+Reproduced in the wild on a real session — ledger seq 25 from a user's sprint:
+```
+{"kind":"verify_result","phase":"create_story","ok":false,"issues":["story_file_path not set"]}
+```
+
+### Fixed
+
+- **`verify()` dispatcher falls forward to `signal.output` for identity fields that `composeRuntimeState` can't pre-populate.** Specifically `story_file_path` and `ac_summary` — `story_key` and `current_epic` are already resolved from sprint-status before verify runs (v2.1.4), so they're not affected. Precedence: state wins when set; signal.output is fallback only. This preserves `verifyStoryDone`'s explicit `out.story_key !== state.story_key` mismatch check at line 273.
+
+### Added
+
+- 2 new regression tests in `tests/unit/orchestrator/verify.test.ts`:
+  - first-success path: `state.story_file_path: null`, `signal.output.story_file_path: <valid>` → verify ok
+  - precedence guard: state and signal both set → state wins (mid-cycle retry can't be tricked by stale signal data)
+
+### Why not in cmdRecord
+
+An alternative fix is to pre-merge identity fields onto `runtime` before calling verify (mirror `adapt.advanceState`'s propagation block). That works but splits state management across two places — adapt.js owns canonical propagation, cmdRecord would own a "verify-prep" shadow copy. Putting the fall-forward in `verify()` itself keeps state mutation in adapt and lets verify treat `signal.output` as an authoritative hint when state hasn't caught up yet.
+
 ## [2.2.0] - 2026-05-15
 
 **Specify the epic or stories to run, in natural language.** Previously the autopilot picked the first non-`done` story from `sprint-status.yaml` and you had no way to override short of manually editing state files. v2.2.0 splits this into two layers: the orchestrator gets a deterministic `--stories <csv>` / `--epic <id>` CLI surface; the skill resolves natural-language directives like `/sprint-autopilot-on epic 4` or `/sprint-autopilot-on stories 3.1, 4.5` against `sprint-status.yaml` and invokes the orchestrator with canonical keys.
