@@ -1,5 +1,38 @@
 # Changelog
 
+## [2.2.4] - 2026-05-15
+
+**Self-heals poisoned `current_story` state from older orchestrator versions.** Users who ran the autopilot on v2.1.3 or v2.1.4 (before the `looksLikeStoryKey` filter shipped in v2.1.5) could end up with `current_story: epic-4` (or another epic-rollup header) persisted in `autopilot-state.yaml`. Every subsequent session emitted `branch: story/epic-4` because `composeRuntimeState` trusted persisted values blindly. v2.2.4 validates persisted `current_story` against sprint-status before using it and falls through to re-resolution when it's poisoned.
+
+### Fixed
+
+- **`composeRuntimeState` validates `persisted.current_story`.** When the persisted value:
+  - matches the epic-rollup shape `epic-N` or bare numeric `N` (v2.1.3/v2.1.4 poison), OR
+  - matches `*-retrospective` (retrospective bookkeeping shape, not a story), OR
+  - exists in `sprint-status.yaml` but is marked `done`, OR
+  - is absent from `sprint-status.yaml` entirely
+  
+  → it's treated as null, logged to stderr with a clear "poisoned state from older version" warning, and the orchestrator falls through to queue / sprint-status resolution as if no story was persisted. Cleanup is automatic on the next emission.
+
+- **Narrow filter, not the strict `looksLikeStoryKey`.** The strict filter (used at sprint-status scan time) requires the BMad `<epic>-<story>-<slug>` shape with at least one hyphen. Persisted-state validation uses a narrower predicate that only catches the documented poisoned shapes — short test keys like `S1` / `S1.2` and other non-canonical conventions still pass.
+
+- **Defensive when sprint-status is missing.** If the orchestrator can't read sprint-status.yaml, persisted `current_story` is preserved — the user shouldn't have their session reset just because the artifact is missing or unreadable.
+
+### Added
+
+- 7 regression tests in `tests/unit/orchestrator/autopilot-decorate-git-op.test.ts`:
+  - epic-rollup poisoning (`current_story: epic-4`) → nullified + falls through
+  - retrospective shape → nullified
+  - key absent from sprint-status → nullified
+  - key marked done in sprint-status → nullified
+  - valid persisted key preserved (no false positive)
+  - sprint-status missing → preserves persisted (no false positive on missing artifact)
+  - short keys like `S1` pass the narrow filter (not the strict one)
+
+### Recovery for existing poisoned sessions
+
+After upgrading: the next `autopilot next` / `autopilot start` emission auto-cleans the poisoned `current_story`. No manual state file edit required. The warning message on stderr names the rejected value and the reason so the user can confirm the right thing happened.
+
 ## [2.2.3] - 2026-05-15
 
 **Sprint-status regex tolerates inline `# comment`** — fixes a real-repo pattern where merged stories carry a trailing PR-merge note.

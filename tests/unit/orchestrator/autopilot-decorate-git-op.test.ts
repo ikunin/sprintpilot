@@ -382,6 +382,161 @@ describe('composeRuntimeState — bug #1: remaining_stories_in_epic populated fr
   });
 });
 
+describe('composeRuntimeState — persisted current_story validation (poisoned state recovery)', () => {
+  const medium = () => flatToProfile({}, 'medium');
+
+  it('nullifies persisted current_story when it matches epic-rollup shape (v2.1.3/v2.1.4 poison)', () => {
+    // Real-world bug: a user's autopilot-state.yaml had current_story: epic-4
+    // (poisoned by pre-v2.1.5 resolveNextStoryKey before the filter shipped).
+    // composeRuntimeState used to pass this through verbatim, producing
+    // `branch: story/epic-4` on every emission. v2.2.4: validate and drop.
+    const { projectRoot, cleanup } = makeProjectWithSprintStatus(
+      null,
+      [
+        'development_status:',
+        '  epic-4: in-progress',
+        '  4-8-realm: ready-for-dev',
+        '',
+      ].join('\n'),
+    );
+    try {
+      const r = composeRuntimeState(
+        { current_bmad_step: 'prepare_story_branch', current_story: 'epic-4', current_epic: 'epic' },
+        medium(),
+        projectRoot,
+      );
+      // current_story rejected; orchestrator falls through to sprint-status
+      // resolution and picks the next real story.
+      expect(r.story_key).toBe('4-8-realm');
+      expect(r.current_epic).toBe('4');
+    } finally {
+      cleanup();
+    }
+  });
+
+  it('nullifies persisted current_story when it matches retrospective shape', () => {
+    const { projectRoot, cleanup } = makeProjectWithSprintStatus(
+      null,
+      [
+        'development_status:',
+        '  4-retrospective: pending',
+        '  4-8-realm: ready-for-dev',
+        '',
+      ].join('\n'),
+    );
+    try {
+      const r = composeRuntimeState(
+        { current_bmad_step: 'prepare_story_branch', current_story: '4-retrospective' },
+        medium(),
+        projectRoot,
+      );
+      expect(r.story_key).toBe('4-8-realm');
+    } finally {
+      cleanup();
+    }
+  });
+
+  it('nullifies persisted current_story when it is not in sprint-status.yaml', () => {
+    const { projectRoot, cleanup } = makeProjectWithSprintStatus(
+      null,
+      [
+        'development_status:',
+        '  4-8-realm: ready-for-dev',
+        '',
+      ].join('\n'),
+    );
+    try {
+      const r = composeRuntimeState(
+        { current_bmad_step: 'prepare_story_branch', current_story: '4-7-deleted-story' },
+        medium(),
+        projectRoot,
+      );
+      expect(r.story_key).toBe('4-8-realm');
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("nullifies persisted current_story when sprint-status shows it as 'done'", () => {
+    const { projectRoot, cleanup } = makeProjectWithSprintStatus(
+      null,
+      [
+        'development_status:',
+        '  4-7-foo: done  # already shipped',
+        '  4-8-realm: ready-for-dev',
+        '',
+      ].join('\n'),
+    );
+    try {
+      const r = composeRuntimeState(
+        { current_bmad_step: 'prepare_story_branch', current_story: '4-7-foo' },
+        medium(),
+        projectRoot,
+      );
+      expect(r.story_key).toBe('4-8-realm');
+    } finally {
+      cleanup();
+    }
+  });
+
+  it('preserves valid persisted current_story', () => {
+    const { projectRoot, cleanup } = makeProjectWithSprintStatus(
+      null,
+      [
+        'development_status:',
+        '  4-8-realm: ready-for-dev',
+        '',
+      ].join('\n'),
+    );
+    try {
+      const r = composeRuntimeState(
+        { current_bmad_step: 'dev_red', current_story: '4-8-realm', current_epic: '4' },
+        medium(),
+        projectRoot,
+      );
+      expect(r.story_key).toBe('4-8-realm');
+      expect(r.phase).toBe('dev_red');
+    } finally {
+      cleanup();
+    }
+  });
+
+  it('preserves persisted current_story when sprint-status is missing (defensive — no artifact ≠ poison)', () => {
+    // No sprint-status.yaml. The validator returns null (defer); the
+    // orchestrator preserves persisted state so the user can keep working
+    // even before/without sprint-planning.
+    const r = composeRuntimeState(
+      { current_bmad_step: 'dev_red', current_story: 'S1.2', current_epic: 'E1' },
+      medium(),
+    );
+    expect(r.story_key).toBe('S1.2');
+  });
+
+  it('preserves short test-style keys like S1 / S1.2 (narrow filter, not the strict looksLikeStoryKey)', () => {
+    const { projectRoot, cleanup } = makeProjectWithSprintStatus(
+      null,
+      [
+        'development_status:',
+        '  S1: ready-for-dev',
+        '',
+      ].join('\n'),
+    );
+    try {
+      const r = composeRuntimeState(
+        { current_bmad_step: 'dev_red', current_story: 'S1' },
+        medium(),
+        projectRoot,
+      );
+      // S1 has no hyphen so strict looksLikeStoryKey would reject; the
+      // narrow validator must accept it (it's in sprint-status, not done,
+      // doesn't match epic-N / bare-N / -retrospective shapes).
+      expect(r.story_key).toBe('S1');
+    } finally {
+      cleanup();
+    }
+  });
+});
+
 describe('composeRuntimeState — bug #3: queue consumption gated to story-start phases', () => {
   const medium = () => flatToProfile({}, 'medium');
 

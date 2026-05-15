@@ -158,6 +158,58 @@ function resolveNextStoryKey(projectRoot) {
   }
 }
 
+// Validate a persisted current_story key against sprint-status.yaml.
+// Returns null when the key is valid (the orchestrator should keep it).
+// Returns a short reason string when the key is poisoned or stale (the
+// orchestrator should drop it and re-resolve).
+//
+// NARROW filter (vs looksLikeStoryKey which is strict). Only rejects:
+//   - `epic-N` shape (epic-rollup header) — the v2.1.3/v2.1.4 poison
+//   - bare numeric `N` (legacy bare-id epic form)
+//   - `*-retrospective` shape
+// Accepts everything else as a plausible story key (including short test
+// keys like `S1`, `S1.2`, and non-BMad-canonical naming conventions).
+// The orchestrator should not nuke valid state just because the key
+// doesn't match the strict BMad `<epic>-<story>-<slug>` shape.
+//
+// Defensive: when sprint-status can't be read, returns null so the
+// orchestrator preserves persisted value. The user shouldn't have their
+// session reset just because the artifact is missing.
+function persistedStoryRejectionReason(key, projectRoot) {
+  if (typeof key !== 'string' || !key) return 'not a string';
+  if (isObviouslyEpicHeader(key)) {
+    return 'matches epic-rollup header shape (epic-N or bare N) — v2.1.3/v2.1.4 poisoned state';
+  }
+  if (/-retrospective$/i.test(key)) {
+    return 'matches retrospective entry shape — not a story';
+  }
+  const stories = readSprintStatuses(projectRoot);
+  if (!stories) return null; // sprint-status absent → defer to caller; don't reject.
+  if (!Object.prototype.hasOwnProperty.call(stories, key)) {
+    return 'not present in sprint-status.yaml';
+  }
+  const status = String(stories[key].status || '').trim().toLowerCase();
+  if (status === 'done') {
+    return `sprint-status shows status='done'; story already complete`;
+  }
+  return null;
+}
+
+// Catch only the documented poisoned shapes that pre-v2.1.5 orchestrator
+// versions could write to persisted.current_story:
+//   - `epic-N` with no further hyphen-separated segments (epic rollup
+//     header — composeRuntimeState in v2.1.3/v2.1.4 picked this as the
+//     first non-done entry before the looksLikeStoryKey filter shipped).
+//   - bare numeric `N` (legacy BMad bare-id epic form).
+// Does NOT reject short test keys like `S1` / `S1.2` or other non-BMad
+// naming conventions — those are valid persisted state.
+function isObviouslyEpicHeader(key) {
+  if (typeof key !== 'string' || !key) return false;
+  if (/^epic-[A-Za-z0-9_]+$/i.test(key)) return true;
+  if (/^\d+$/.test(key)) return true;
+  return false;
+}
+
 // Tell story keys apart from non-story bookkeeping entries in
 // sprint-status.yaml. BMad development_status: holds three kinds of
 // entries that parseStatuses returns side-by-side:
@@ -419,9 +471,45 @@ function composeRuntimeState(persisted, profile, projectRoot) {
   // failure), fall back to flowStart so the LLM gets a meaningful
   // skill invocation. PREPARE_STORY_BRANCH with no story_key would be
   // a confusing emission to act on.
-  let resolvedStoryKey = persisted.current_story || null;
+  // Validate persisted.current_story against sprint-status before
+  // trusting it. Older orchestrator versions (v2.1.3 / v2.1.4) could
+  // poison this field with an epic-rollup header (e.g. `epic-4`) when
+  // resolveNextStoryKey scanned sprint-status without filtering. The
+  // v2.1.5 hotfix added looksLikeStoryKey but only at resolution time —
+  // already-persisted poisoned values ride forward through every
+  // upgrade, producing emissions like `branch: story/epic-4` on every
+  // session boot.
+  //
+  // Treat persisted.current_story as null when:
+  //   - it doesn't look like a real story key (epic header, retro, garbage)
+  //   - sprint-status.yaml exists but the key isn't in it (deleted/renamed)
+  //   - sprint-status shows the key as 'done' (already complete; advancing
+  //     past STORY_DONE should have cleared it, so something is stale)
+  //
+  // Defensive: if sprint-status can't be read, preserve persisted value
+  // (don't punish the user for a missing artifact). The warning is on
+  // stderr so the user sees what was rejected and why.
+  const persistedCurrentStory = persisted.current_story || null;
+  let resolvedStoryKey = persistedCurrentStory;
   let resolvedEpic = persisted.current_epic || null;
   let resolvedStoryFilePath = persisted.story_file_path || null;
+  if (persistedCurrentStory) {
+    const rejection = persistedStoryRejectionReason(
+      persistedCurrentStory,
+      projectRoot,
+    );
+    if (rejection) {
+      process.stderr.write(
+        `[autopilot] WARN persisted current_story "${persistedCurrentStory}" rejected: ${rejection}. ` +
+          'Treating as null and falling through to queue / sprint-status resolution. ' +
+          'This typically means state was poisoned by an older orchestrator version (v2.1.3 / v2.1.4 pre-filter); ' +
+          'next emission will clean it up.\n',
+      );
+      resolvedStoryKey = null;
+      resolvedEpic = null;
+      resolvedStoryFilePath = null;
+    }
+  }
   // Explicit queue (populated by `autopilot start --stories` / `--epic`)
   // takes priority over the linear resolveNextStoryKey scan: when a
   // user specifies "start with stories 4-1, 4-2, 4-5" we honor that
