@@ -52,6 +52,17 @@ Single-story layers continue sequentially (no benefit from parallelism). Cross-e
 
 ## Git-Enhanced Autopilot
 
+### How the orchestrator drives execution
+
+Flow control is owned by `_Sprintpilot/bin/autopilot.js` — a deterministic Node.js state machine that enforces the BMad 7-step sequence. Each turn:
+
+1. The skill body calls `node _Sprintpilot/bin/autopilot.js next` → JSON Action.
+2. The LLM executes the Action (`invoke_skill` / `run_script` / `git_op` / `parallel_batch` / `user_prompt` / `halt`) — for `git_op`, it runs the pre-planned argv steps verbatim, no shell interpolation.
+3. The LLM signals the outcome via `autopilot record --signal <json>` (`success` / `failure` / `blocked` / `propose_alternative` / `user_input` / `verify_override`).
+4. `verify.js` enforces BMad bookkeeping (acceptance-criteria bullets exist, task boxes flipped to `[x]`, `commit_sha` + `branch` reported, `git_steps_completed: true` after every `git push`). A failed verify produces a `verify_rejected` ledger entry and the orchestrator re-emits the same action with the issues threaded into the template slot — up to the per-profile reject budget, then it pauses for the user.
+
+The LLM keeps in-skill execution, diagnosis, triage, and small-judgment decisions. The state machine owns sequencing.
+
 ### Starting the Autopilot
 
 In the coding agent of your choice, invoke:
@@ -62,24 +73,44 @@ In the coding agent of your choice, invoke:
 
 The autopilot will:
 1. Acquire a lock (prevents concurrent sessions)
-2. Detect your git platform (GitHub/GitLab/git_only)
+2. Detect your git platform (GitHub/GitLab/Bitbucket/Gitea/git_only)
 3. Check for orphaned worktrees from previous sessions
-4. Resume from saved state or assess the project fresh
+4. Fingerprint the project and resume from saved state, or assess fresh
 5. Execute stories with automatic git operations
 
 ### What Happens During a Story
 
-For each story, the autopilot:
+For each story (full 7-step flow; nano profile takes the `bmad-quick-dev` one-shot path):
 
-1. **Creates a worktree** via `git worktree add` — isolates the story's code changes on branch `story/{sanitized-key}`
-3. **Runs `bmad-dev-story`** in the worktree — writes code and tests
-4. **Lints** changed files (language-aware, errors-first output)
-5. **Stages** files explicitly (never `git add -A`) with pre-commit checks
-6. **Commits** with a conventional message: `feat({epic}): {title} ({key})`
-7. **Runs `bmad-code-review`** — applies all patch findings as separate commits
-8. **Pushes** the branch and creates a PR/MR
-9. **Exits the worktree** and syncs status to the project root
-10. At epic completion: runs retrospective, lists all PRs, suggests merge
+1. **Creates a worktree** via `git worktree add` — isolates the story's code changes on `<branch_prefix><story-key>`.
+2. **Runs `bmad-create-story`**, then **`bmad-check-implementation-readiness`** to ensure no blockers.
+3. **Runs `bmad-dev-story` (RED → GREEN)** in the worktree — writes failing tests first, then implementation until tests pass.
+4. **Lints** changed files (language-aware, errors-first output).
+5. **Runs `bmad-code-review`** — three parallel reviewers (Blind Hunter, Edge Case Hunter, Acceptance Auditor). Findings are classified as `block` (halt), `patch` (auto-apply), or `defer`.
+6. **PATCH_APPLY → PATCH_RETEST** — each `patch` finding is applied and committed separately; tests re-run after patches.
+7. **Stages and commits** with a conventional message (`feat({epic}): {title} ({story-key})`). Staging is explicit (never `git add -A`) with secrets / size / binary pre-commit checks.
+8. **Pushes** the branch and (if `create_pr: true`) creates a PR/MR.
+9. **Syncs `_bmad-output/` to the base branch** so BMad planning artifacts land on `main` regardless of merge strategy.
+10. **Optionally lands the PR** when `merge_strategy: land_as_you_go` (gated by `land_when` / `land_wait_minutes`).
+11. **Exits the worktree** and moves on; at epic completion, runs the retrospective and lists all PRs ready to merge.
+
+Decision audit: small judgment calls (architecture, test-strategy, dependency, review-triage, scope, workaround) attach as `decisions[]` on any signal and are appended to `decision-log.yaml` with id + timestamp + story stamped automatically.
+
+### Git Workflow Knobs
+
+These live in `_Sprintpilot/modules/git/config.yaml` and change what the orchestrator emits as `git_op` actions:
+
+| Knob | Values | Behavior |
+|---|---|---|
+| `granularity` | `story` (default) / `epic` | Per-unit branch creation. Suppressed when `reuse_user_branch=true`. Nano profile defaults to `epic`. |
+| `reuse_user_branch` | `false` (default) / `true` | If `true`, autopilot detects the current non-base branch on boot and commits **every** story onto it. No `story/*` or `epic/*` branches are created. One PR opens at sprint-end. |
+| `merge_strategy` | `stacked` (default) / `land_as_you_go` | `stacked` keeps every story branch open until sprint-end. `land_as_you_go` runs `STORY_LAND` right after `STORY_DONE` to merge the PR immediately. |
+| `land_when` | `no_wait` / `ci_pass` (default) / `ci_and_review` | Under `land_as_you_go`: merge synchronously, after CI is green, or after CI + an approved review. |
+| `land_wait_minutes` | int (default `30`) | Max wait for CI / review under `land_as_you_go`. After this the orchestrator halts and prompts. |
+| `branch_prefix` | string (default `story/`) | Prefix for autopilot-created branches (e.g., `story/1-3-add-auth`, `story/epic-1`). |
+| `push.create_pr` | `true` (default) / `false` | `false` merges directly to `base_branch` after push, no PR opened. |
+
+On `STORY_LAND` rebase conflicts (base moved during the story), the orchestrator auto-rebases the story branch onto the latest base. If the rebase has conflicts, the orchestrator halts with a `user_prompt`; resume reads `state.land_pending` and retries the land step.
 
 ### Stopping the Autopilot
 
@@ -101,32 +132,23 @@ This compares your installed version against npm, shows what's new, and asks for
 
 ### Session Management
 
-The autopilot checkpoints after every 3 stories (configurable; nano profile: 5). It saves state to `_bmad-output/implementation-artifacts/autopilot-state.yaml` and asks you to start a new session:
+The autopilot checkpoints after every 3 stories (configurable via `autopilot.session_story_limit`; nano profile: 5; `0` = unlimited). The orchestrator persists state to `_bmad-output/implementation-artifacts/autopilot-state.yaml` and an append-only `ledger.jsonl` (action history) so resume is exact:
 
 ```
 /sprint-autopilot-on    # resumes exactly where it left off
 ```
 
-The state file tracks:
-- Current story and BMad Method step in progress
-- Stories completed this session
-- Remaining stories in the sprint
-- Next skill to invoke
-- Git platform detected
-- Whether a worktree is active
-- PR target branch (for stacked PRs)
+State tracks the current story + BMad step, the active state-machine node, the ledger fingerprint, the patch_findings queue (between PATCH_APPLY and PATCH_RETEST), `land_pending` state (for `land_as_you_go`), and the per-story branch HEADs at the last halt.
 
-All fields are persisted on every state write to prevent data loss across sessions. If `next_skill` is empty on resume, the autopilot recovers by re-reading `sprint-status.yaml` and determining the correct next step for the first undone story.
+On the next `autopilot start`, the orchestrator fingerprints `_bmad-output/`, sprint-status.yaml, and per-story branch HEADs against the fingerprint recorded at the last halt. Any divergence is surfaced as a `resume_divergence` action so you can resolve it (`force_continue` or `override_decision` via `user_input`) before the next state-machine transition.
 
-This file is deleted automatically when the sprint completes.
+State + ledger are deleted automatically when the sprint completes.
 
 #### Fresh-context finalize (mandatory)
 
-When the last story is done, the autopilot **does not** run its cleanup step (step 10) in the same session that detected sprint-complete. Instead it writes `current_bmad_step = sprint-finalize-pending` to the state file, releases the lock, and asks you to run `/sprint-autopilot-on` one more time. That fresh session reads the pending marker, jumps straight to step 10, and runs the deterministic cleanup script calls (mark-done-stories task checkboxes, worktree removal, artifact commits, final report) with a clean context window.
+When the last story is done, the orchestrator **does not** run sprint cleanup in the same session. Instead the state machine transitions to `sprint_finalize_pending` (a terminal halt state), writes the marker, releases the lock, and asks you to run `/sprint-autopilot-on` one more time. That fresh session reads the pending marker, jumps straight to the finalize state, and runs the deterministic cleanup script calls (mark-done-stories task checkboxes, worktree removal, artifact commits, final report) with a clean context window.
 
 This trades one short extra session (~60-100 turns, usually under $2) for reliable end-of-sprint hygiene — without it, the tail of a long session regularly drops the CRITICAL cleanup actions. The test harness handles this automatically; you only notice it as an extra "All stories are done, pausing for finalization" checkpoint report.
-
-If step 10 is interrupted after writing `current_bmad_step = sprint-complete` but before deleting the state file, the next `/sprint-autopilot-on` detects it in step 1 and cleans up with an "already complete" message rather than looping.
 
 ### Dependency Inference
 

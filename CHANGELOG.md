@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [2.1.0] - 2026-05-15
 
 **Orchestrator-driven autopilot is now the only path.** Flow control lives in a deterministic Node.js state machine at `_Sprintpilot/bin/autopilot.js`. The LLM keeps in-skill execution, diagnosis, triage, and small-judgment decisions; the orchestrator owns sequencing and BMad-step enforcement. The v2.0.x prose `workflow.md` (1,388 lines) is gone — `workflow.orchestrator.md` is the single shipped workflow.
 

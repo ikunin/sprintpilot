@@ -35,6 +35,17 @@ _Sprintpilot/
 │           ├── large.yaml     # Parallel stories, state-sharding always
 │           └── legacy.yaml    # v1.0.5 byte-for-byte (version_pinned)
 │
+├── bin/
+│   └── autopilot.js           # Orchestrator CLI: start | next | record | state | report | validate-config | status
+│                              # Emits typed Actions, consumes typed Signals; drives the BMad 7-step state machine
+│
+├── lib/
+│   ├── orchestrator/          # 15 pure modules — state-machine, adapt, profile-rules, verify, impact-classifier,
+│   │   │                      # decision-log, state-store, action-ledger, divergence, user-commands,
+│   │   │                      # user-command-applier, parallel-batch, git-plan, report, land
+│   │   └── ...
+│   └── runtime/               # Shared zero-dep helpers for scripts (args, git, http, log, secrets, spawn, text, yaml-lite)
+│
 ├── scripts/                   # Node.js helpers invoked by the orchestrator (zero runtime deps)
 │   ├── # — Core git / commit pipeline —
 │   ├── lock.js                # Mutex with stale timeout
@@ -66,11 +77,7 @@ _Sprintpilot/
 │   ├── dispatch-layer.js      # Worktree-per-story preflight + .layer-plan.json
 │   ├── preflight-merge.js     # Cross-epic merge-conflict probe
 │   ├── submodule-lock.js      # Per-submodule lock to serialize init
-│   ├── with-retry.js          # Ref-lock-pattern jittered backoff (3 attempts)
-│
-├── lib/runtime/               # Shared zero-dep helpers for scripts
-│   ├── args.js, git.js, http.js, log.js, secrets.js,
-│   ├── spawn.js, text.js, yaml-lite.js
+│   └── with-retry.js          # Ref-lock-pattern jittered backoff (3 attempts)
 │
 └── skills/                    # Installed to <tool>/skills/ by bin/sprintpilot.js install
     ├── sprint-autopilot-on/   # Enhanced autopilot (profile-aware, parallel-capable)
@@ -154,7 +161,7 @@ For the `git-status.yaml` schema and field reference, see [Configuration Referen
 
 ### Lock File
 
-Prevents concurrent autopilot sessions. Uses epoch timestamp + UUID (no PID — unreliable in Claude Code). All time math in Bash, not the LLM.
+Prevents concurrent autopilot sessions. `_Sprintpilot/scripts/lock.js` (Node) writes an epoch timestamp + UUID — no PID (unreliable in Claude Code) and no LLM-interpreted time math.
 
 ```
 .autopilot.lock contents:

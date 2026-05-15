@@ -1,5 +1,29 @@
 # Component Inventory
 
+## Orchestrator (the deterministic flow-control layer)
+
+`_Sprintpilot/bin/autopilot.js` is a Node CLI that drives the BMad 7-step sequence as an explicit state machine. The skill body calls `autopilot next` to fetch the next Action, executes it, and signals the outcome via `autopilot record --signal <json>`. Actions and Signals are typed; flow control never lives in LLM-interpreted prose.
+
+| Module (`_Sprintpilot/lib/orchestrator/`) | Purpose |
+|---|---|
+| `state-machine.js` | BMad 7-step state graph (CREATE_STORY → DEV_RED → DEV_GREEN → CODE_REVIEW → PATCH_APPLY → PATCH_RETEST → STORY_DONE → STORY_LAND → RETROSPECTIVE → terminal halts incl. `sprint_finalize_pending`). |
+| `adapt.js` | Signal-driven transitions (incl. nano `NANO_QUICK_DEV` routing for `implementation_flow: quick`). |
+| `profile-rules.js` | Per-profile policy (verify reject budgets, parallel caps, default flow). |
+| `verify.js` | BMad bookkeeping gate per phase: AC bullets exist, task boxes flipped, story marked `done` in sprint-status, `commit_sha`+`branch` reported, `git_steps_completed: true` only after every step in `action.steps` (including `git push`) exits 0. |
+| `impact-classifier.js` | Maps decisions / failures to severity (drives halt logic). |
+| `decision-log.js` | Appends `decisions[]` entries with id + timestamp + story stamped automatically. |
+| `state-store.js` | Atomic read/write of `autopilot-state.yaml`. |
+| `action-ledger.js` | Append-only `ledger.jsonl` audit trail of every action + signal. |
+| `divergence.js` | Fingerprints `_bmad-output/` + sprint-status + branch HEADs; surfaces `resume_divergence` on mismatch. |
+| `user-commands.js` | Validates `user_input.commands[]` (e.g. `force_continue`, `override_decision`). |
+| `user-command-applier.js` | Applies validated user commands back into the state machine. |
+| `parallel-batch.js` | `parallel_batch` action resolver — DAG-layer dispatch with profile-aware fallback. |
+| `git-plan.js` | Pre-plans every `git_op` as inlined argv `steps` (`git add`, `git commit`, `git push`, …). LLM executes verbatim. |
+| `report.js` | End-of-session and end-of-sprint reports. |
+| `land.js` | `STORY_LAND` state machinery for `merge_strategy: land_as_you_go` (incl. rebase + halt-on-conflict). |
+
+The autopilot CLI exposes: `start | next | record | state | report | validate-config | status`.
+
 ## Node.js Scripts
 
 The operational backbone of the addon. All scripts live in `_Sprintpilot/scripts/` and run on Node.js 18+ with **zero third-party runtime dependencies**.

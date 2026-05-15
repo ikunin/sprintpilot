@@ -4,6 +4,8 @@ Status: Concept / Design doc
 Branch: `claude/optimize-dev-workflow-D0U4w`
 Constraint: All optimizations live in Sprintpilot-owned code (`_Sprintpilot/*`, configs, `AGENTS.md`). BMAD skill internals are off-limits. Sprintpilot supports **9 coding agents** (Claude Code, Cursor, Windsurf, Gemini CLI, Cline, Roo, Trae, Kiro, GitHub Copilot); no optimization may depend on agent-specific APIs.
 
+> **Historical note (v2.1+):** This doc was authored when the concept was still numbered "v4" and the `legacy` profile was planned to pin `version_pinned: v0.9.0`. The shipped numbering is **v2.x**, and the `legacy` profile pins **`v1.0.5`** (see `_Sprintpilot/modules/autopilot/profiles/legacy.yaml`). Treat the body below as the design record — the behaviors landed roughly as described, but the numbering, profile snapshots, and the locus of enforcement (now `_Sprintpilot/bin/autopilot.js` + `_Sprintpilot/lib/orchestrator/` rather than `workflow.md` prose) have moved on. For the current truth on knobs and defaults, see [CONFIGURATION.md](./CONFIGURATION.md) and [ARCHITECTURE.md](./ARCHITECTURE.md).
+
 ---
 
 ## 1. Problem

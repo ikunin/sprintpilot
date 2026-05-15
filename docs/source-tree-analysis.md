@@ -55,6 +55,28 @@ sprintpilot/
 │   │   └── ma/
 │   │       └── config.yaml             # Multi-agent + parallelism config
 │   │
+│   ├── bin/
+│   │   └── autopilot.js                # Orchestrator CLI: start | next | record | state | report | validate-config | status
+│   │                                   # Emits typed Actions; consumes typed Signals. Drives the BMad 7-step state machine.
+│   │
+│   ├── lib/orchestrator/               # 15 pure modules owned by the autopilot CLI:
+│   │   ├── state-machine.js            #   BMad 7-step state graph (CREATE_STORY → DEV_RED → DEV_GREEN → CODE_REVIEW
+│   │   │                               #     → PATCH_APPLY → PATCH_RETEST → STORY_DONE → STORY_LAND → RETROSPECTIVE → …)
+│   │   ├── adapt.js                    #   Signal → next state transitions (incl. nano routing)
+│   │   ├── profile-rules.js            #   Profile-aware policy (reject budgets, parallel caps, …)
+│   │   ├── verify.js                   #   BMad bookkeeping enforcement (AC bullets, task boxes, git_steps_completed)
+│   │   ├── impact-classifier.js        #   Maps decisions / failures to severity for halt logic
+│   │   ├── decision-log.js             #   Appends to decision-log.yaml with id + timestamp + story stamping
+│   │   ├── state-store.js              #   autopilot-state.yaml read/write (atomic)
+│   │   ├── action-ledger.js            #   ledger.jsonl append-only audit trail
+│   │   ├── divergence.js               #   Fingerprint + resume_divergence detection
+│   │   ├── user-commands.js            #   user_input signal validation (force_continue, override_decision, …)
+│   │   ├── user-command-applier.js     #   Applies validated user commands back into the state machine
+│   │   ├── parallel-batch.js           #   parallel_batch action resolver (DAG-layer dispatch)
+│   │   ├── git-plan.js                 #   Pre-plans every git_op as inlined argv steps for verbatim LLM execution
+│   │   ├── report.js                   #   End-of-session / end-of-sprint reports
+│   │   └── land.js                     #   STORY_LAND state (land_as_you_go merge + rebase recovery)
+│   │
 │   ├── scripts/                        # Node.js helpers invoked by the orchestrator + skills (zero third-party deps)
 │   │   │ # — Core git / commit pipeline —
 │   │   ├── lock.js                     # Mutex with stale timeout

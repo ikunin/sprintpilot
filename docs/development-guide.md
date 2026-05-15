@@ -52,31 +52,33 @@ Each test creates a temp git repo + temp project state, runs the code under test
 
 Tests the full autopilot workflow by spawning Claude Code CLI sessions.
 
+E2e tests invoke Claude Code and cost real API credits. They are **gated behind env vars** so `npm test` no longer accidentally spawns `claude`:
+
+- `RUN_LLM_E2E=1` — unlocks the canonical `nano` test (cheapest reliable end-to-end gate).
+- `RUN_LLM_E2E_FULL=1` — additionally unlocks the broader greenfield / sudoku / brownfield / medium-parallel / orchestrator-mode-live suites.
+
 ```bash
 cd tests
 
-# Run greenfield test (builds Tic Tac Toe from scratch)
-npm run test:e2e:greenfield
+# Canonical nano e2e (RUN_LLM_E2E=1 is set automatically)
+npm run test:e2e:live
 
-# Run brownfield test (analyzes json-server)
-npm run test:e2e:brownfield
-
-# Run all e2e tests
-npm run test:e2e
+# Everything (both gates set automatically)
+npm run test:e2e:live:full
 ```
 
-**Important:** E2e tests invoke Claude Code and cost real API credits. They are gated on `claude-cli` presence (the `ANTHROPIC_API_KEY` gate from earlier was widened in 2.0.1).
+Worst-case ceiling for `test:e2e:live:full` is ~$120 with the tightened budgets.
 
 | Test | Strategy | Notes |
 |------|----------|-------|
 | `greenfield.test.ts` | Build Tic Tac Toe / sudoku from scratch | Full autopilot, multi-session |
-| `brownfield.test.ts` | Multi-agent analysis pipeline on json-server | 4 phases |
+| `brownfield.test.ts` | Multi-agent analysis pipeline on json-server | Self-skips on environments where `git commit` can't sign |
 | `sudoku.test.ts` | Web-game e2e exercising parallel dispatch | POSIX-only by design |
 | `medium-parallel.test.ts` | Asserts overlapping skill intervals in `.timings/*.jsonl` | Detects parallelism |
 | `nano.test.ts` | Asserts quick-dev invocation + no `bmad-dev-story` | Validates nano routing |
 
 **Environment variables:**
-- `BMAD_TEST_MODEL` — Override model (default: `sonnet`)
+- `BMAD_TEST_MODEL` — Override model (default: `haiku`; pass `sonnet` for higher-fidelity runs). These tests measure autopilot flow completion, not code quality.
 - `BMAD_TEST_REMOTE_URL` — Override git remote for greenfield test
 
 ### All Tests
