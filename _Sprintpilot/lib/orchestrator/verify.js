@@ -57,6 +57,12 @@ function escapeRe(s) {
 // Extract a story's status from sprint-status.yaml without pulling in a
 // full YAML parser. Supports both inline form (`<key>: <status>`) and
 // block form (`<key>:\n  status: <status>\n  title: ...`).
+//
+// Tolerates trailing `# comment` on inline status lines — the BMad
+// convention is `<key>: done  # PR #N merged ...` and the previous
+// regex required `\s*$` immediately after the status token, rejecting
+// every commented entry. The block-form inner status regex never
+// anchored to end-of-line, so it always tolerated comments.
 function storyStatusFromSprintStatus(text, storyKey) {
   if (!text || !storyKey) return null;
   const k = escapeRe(storyKey);
@@ -69,7 +75,12 @@ function storyStatusFromSprintStatus(text, storyKey) {
     if (sm) return sm[1];
   }
   // Inline form: `  story-key: done` (status as scalar value).
-  const inlineRe = new RegExp(`^\\s+${k}:\\s*["']?([\\w-]+)["']?\\s*$`, 'm');
+  // Optional trailing `# comment` is allowed so `done  # PR #N merged`
+  // matches `done` instead of failing the whole line.
+  const inlineRe = new RegExp(
+    `^\\s+${k}:\\s*["']?([\\w-]+)["']?\\s*(?:#.*)?$`,
+    'm',
+  );
   const im = text.match(inlineRe);
   return im ? im[1] : null;
 }

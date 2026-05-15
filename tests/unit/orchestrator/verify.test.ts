@@ -427,6 +427,47 @@ describe('verify STORY_DONE', () => {
     expect(r.issues.join(' ')).toContain('no entry for story S1');
   });
 
+  it('passes when inline status has a trailing `# comment` (BMad PR-merge convention)', () => {
+    // Regression: pre-v2.2.3 storyStatusFromSprintStatus required `\s*$`
+    // immediately after the status token, so `  S1: done  # PR #123 merged`
+    // failed to match and verifyStoryDone rejected the story as
+    // "shows S1 as 'null', expected 'done'". The repo's convention is
+    // `<key>: done  # PR #N merged ...` for every merged story.
+    seedSprintStatus(
+      'development_status:\n  S1: done  # PR #123 merged 2026-05-15\n',
+    );
+    const storyPath = seedStoryFileWithTasks(0, 1);
+    const r = verify(
+      { phase: STATES.STORY_DONE, story_key: 'S1', story_file_path: storyPath },
+      {
+        commit_sha: 'abc',
+        branch: 'story/S1',
+        story_key: 'S1',
+        git_steps_completed: true,
+      },
+      { projectRoot },
+    );
+    expect(r.ok).toBe(true);
+  });
+
+  it('passes when inline status uses quoted value + trailing comment', () => {
+    seedSprintStatus(
+      'development_status:\n  S1: "done"  # PR #99 merged\n',
+    );
+    const storyPath = seedStoryFileWithTasks(0, 1);
+    const r = verify(
+      { phase: STATES.STORY_DONE, story_key: 'S1', story_file_path: storyPath },
+      {
+        commit_sha: 'abc',
+        branch: 'story/S1',
+        story_key: 'S1',
+        git_steps_completed: true,
+      },
+      { projectRoot },
+    );
+    expect(r.ok).toBe(true);
+  });
+
   it('fails when unchecked task boxes remain', () => {
     seedSprintStatus('development_status:\n  S1:\n    status: done\n');
     const storyPath = seedStoryFileWithTasks(2, 1);

@@ -1,5 +1,23 @@
 # Changelog
 
+## [2.2.3] - 2026-05-15
+
+**Sprint-status regex tolerates inline `# comment`** — fixes a real-repo pattern where merged stories carry a trailing PR-merge note.
+
+### Fixed
+
+- **`storyStatusFromSprintStatus` regex now tolerates trailing `# comment`.** The inline-form regex anchored `\s*$` immediately after the status token, so a line like `  4-3-foo: done  # PR #99 merged 2026-05-15` failed to match `done` and the verifier reported `shows X as 'null', expected 'done'`. The BMad convention in this user's repo (and likely others) is to annotate merged stories with a PR reference inline — every merged story would trip this. Block-form `<key>:\n  status: <X>\n  ...` was already comment-tolerant via its inner regex; only inline form needed the fix. New regex: `^\s+<key>:\s*["']?([\w-]+)["']?\s*(?:#.*)?$`.
+
+### Added
+
+- 2 regression tests in `verify.test.ts`:
+  - `S1: done  # PR #123 merged` passes verifyStoryDone
+  - quoted variant `S1: "done"  # PR #99 merged` also passes
+
+### Not in this release
+
+YAML front-matter remains strictly required by `verifyCreateStory`. Legacy stories in the existing repo's `Status: x` markdown format must re-run `bmad-create-story` to regenerate with proper front-matter — the BMad skill enforces the convention; the orchestrator delegates to it.
+
 ## [2.2.2] - 2026-05-15
 
 **Three bugs found during a post-2.2.1 audit of the orchestrator's state-management flow.** All three interact at the `STORY_DONE → EPIC_BOUNDARY_CHECK → RETROSPECTIVE → next-story` transition and were latent for multiple releases.
