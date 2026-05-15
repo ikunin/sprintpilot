@@ -42,6 +42,6 @@
 7. **Verify.** Read `_Sprintpilot/manifest.yaml` again and confirm the version updated:
    ```
    Updated to v{latest}
-   Previous version backed up to .claude/.addon-backups/
+   Previous version backed up to .claude/.sprintpilot-backups/
    ```
    If the version did not change, warn the user that the update may have failed.

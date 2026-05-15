@@ -405,18 +405,39 @@ function handleUserInput(state, signal, profile, sideEffects) {
   // a specific story but autopilot-state.yaml still shows
   // `current_story: null` — subsequent emissions / persists / verify
   // checks all reference the wrong story.
+  //
+  // Phase advance: when the alternative carries `phase` and it's a
+  // valid STATES value, also advance state.phase. Pre-v2.2.6 the
+  // dispatch was one-shot — the alternative ran for ONE emission then
+  // state.phase reverted, defeating use cases like "skip dev_red /
+  // dev_green / code_review because the work is already done on the
+  // branch from a prior session." The user explicitly proposes the
+  // alternative including a target phase; they accept the consequences
+  // (e.g. verify may reject the new phase if its preconditions aren't
+  // met). Without this, accept_alternative is useless for cycle skips.
   const dispatch = applied.sideEffects.find((e) => e && e.kind === 'dispatch_action');
   if (dispatch && dispatch.action) {
     const a = dispatch.action;
     const slots = a.template_slots || {};
+    const KNOWN_PHASES = new Set(Object.values(STATES));
+    const phaseAdvance =
+      typeof a.phase === 'string' && KNOWN_PHASES.has(a.phase) && a.phase !== newState.phase
+        ? a.phase
+        : null;
     const enrichedState = {
       ...newState,
+      phase: phaseAdvance || newState.phase,
       story_key: newState.story_key || slots.story_key || a.story_key || null,
       current_epic:
         newState.current_epic || slots.current_epic || a.epic_key || null,
       story_file_path:
         newState.story_file_path || slots.story_file_path || null,
       ac_summary: newState.ac_summary || slots.ac_summary || null,
+      // Reset retry counters on phase advance so the new phase isn't
+      // immediately throttled by a stale retry budget from the phase
+      // we just skipped.
+      retry_count_this_phase: phaseAdvance ? 0 : newState.retry_count_this_phase,
+      verify_reject_count: phaseAdvance ? 0 : newState.verify_reject_count,
     };
     return {
       newState: enrichedState,

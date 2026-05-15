@@ -169,7 +169,7 @@ Upgrade to the latest version:
 npx @ikunin/sprintpilot@latest
 ```
 
-This backs up existing skills before overwriting. Your configuration in `_Sprintpilot/modules/` is preserved. Previous skill versions are kept in `.claude/.addon-backups/` (last 3 per skill).
+This backs up existing skills before overwriting. Your configuration in `_Sprintpilot/modules/` is preserved. Previous skill versions are kept in `.claude/.sprintpilot-backups/` (last 3 per skill). Pre-v2.2.6 installs used `.addon-backups/`; upgrades auto-rename the directory on first run.
 
 The installer also shows an update notice after installation if a newer version exists on npm.
 

@@ -172,7 +172,7 @@ sprintpilot/
 │
 ├── .github/workflows/publish.yml       # npm publish on GitHub release (OIDC trusted publisher)
 ├── .githooks/pre-push                  # Runs biome ci + fast test suite before push
-├── .claude/                            # Dev's Claude Code config (skills/ + .addon-backups/ are .gitignored)
+├── .claude/                            # Dev's Claude Code config (skills/ + .sprintpilot-backups/ are .gitignored)
 ├── _bmad/                              # Upstream BMad Method installation (.gitignored except bmm/)
 ├── _bmad-output/                       # BMad Method artifacts (.gitignored)
 │

@@ -1,5 +1,19 @@
 # Changelog
 
+## [2.2.6] - 2026-05-15
+
+### Fixed
+
+- **`accept_alternative` now advances `state.phase` when the alternative carries one.** Pre-2.2.6 a propose_alternative + accept_alternative round-trip ran the alternative as a one-shot — `nextAction` was the alternative, but `state.phase` stayed at the original (e.g., `dev_red`). The next `autopilot next` emission re-emitted from the original phase, defeating use cases like "skip dev_red / dev_green / code_review because the work is already complete on the branch from a prior session." Now: when the dispatched alternative carries `phase` and it's a valid STATES value, `state.phase` advances to that value AND retry/verify counters reset. Caller accepts the consequences (e.g., verify may reject the new phase if its preconditions aren't met).
+
+### Changed
+
+- **`.addon-backups/` → `.sprintpilot-backups/` directory rename.** The skill-rollback backup directory now uses a Sprintpilot-branded name. **Auto-migration on install**: if `.addon-backups/` exists and the new dir doesn't, the installer renames it (preserves all existing backups). `.gitignore` is updated to add the new entry; the old entry remains harmless (no-op). Uninstall removes both names. Documentation updated across README, ARCHITECTURE.md, CONFIGURATION.md, INSTALLATION.md, source-tree-analysis.md, and the sprintpilot-update skill.
+
+### Added
+
+- 3 regression tests in `adapt.test.ts` covering: phase-advance happy path, invalid phase value ignored (defense), no-phase alternative keeps original phase (back-compat).
+
 ## [2.2.5] - 2026-05-15
 
 **Extends v2.2.4's poisoned-state self-heal to `story_queue` entries.** A legacy queue persisted by an older orchestrator (or a queue built before sprint-status was edited to remove/complete entries) could contain epic headers, retrospectives, missing keys, or already-done stories. v2.2.4 only validated the head (`current_story`); v2.2.5 sweeps every queue member with the same rules.

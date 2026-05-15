@@ -192,7 +192,7 @@ Before every commit the orchestrator runs deterministic checks against the stage
 | **Secrets scan** | Greps staged content for `API_KEY`, `SECRET`, `TOKEN`, `PASSWORD`, `aws_access`, `private_key`. WARN severity by default — surfaced in the log but does not block the commit. Allowlist patterns live in `.secrets-allowlist`. |
 | **File size** | Rejects files larger than `staging.max_file_size_mb` (default `1`). |
 | **Binary detection** | Warns on binary files detected via `file --mime-encoding`. |
-| **Gitignore check** | Verifies `.gitignore` covers `.autopilot.lock` and `.claude/.addon-backups/`. |
+| **Gitignore check** | Verifies `.gitignore` covers `.autopilot.lock` and `.claude/.sprintpilot-backups/`. |
 
 For each story, every commit (the main story commit + each code-review patch commit) runs the full check chain.
 

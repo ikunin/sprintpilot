@@ -86,7 +86,7 @@ Placeholder resolution chain: sprint-status.yaml → story file → fallback val
 | Check | Behavior |
 |-------|----------|
 | `verify_no_secrets` | Grep for API_KEY, SECRET, TOKEN, PASSWORD, aws_access, private_key. WARN severity. |
-| `verify_gitignore_covers_addon` | Verify .gitignore has .autopilot.lock and .claude/.addon-backups/ |
+| `verify_gitignore_covers_addon` | Verify .gitignore has .autopilot.lock and .claude/.sprintpilot-backups/ |
 | `verify_file_size` | Reject files > `max_file_size_mb` |
 | `verify_no_binaries` | Warn on binary files detected via `file --mime-encoding` |
 

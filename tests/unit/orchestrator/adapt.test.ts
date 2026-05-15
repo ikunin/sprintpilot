@@ -562,6 +562,84 @@ describe('propose_alternative + accept_alternative round-trip (Bug B regression)
     expect(r.newState.ac_summary).toBe('Lock the realm session');
   });
 
+  it('accept_alternative ADVANCES state.phase when the dispatched action carries phase (v2.2.6 fix)', () => {
+    // Real-world stuck session: story 4-8 was implemented end-to-end on
+    // its branch in a prior session (impl + tests + code review + sprint-
+    // status flip), but the orchestrator's state was still at dev_red.
+    // User proposed an alternative with `phase: story_done` to skip the
+    // unnecessary cycle. Pre-2.2.6 the dispatch ran as a one-shot (noop)
+    // and state.phase reverted to dev_red on next emission. Now: phase
+    // advances if the alternative carries a valid STATES value.
+    const dispatchedAction = {
+      type: 'noop',
+      phase: STATES.STORY_DONE,
+      reason: 'already implemented + committed + pushed on the branch',
+    };
+    const stateWithPending = st(STATES.DEV_RED, {
+      story_key: '4-8-realm',
+      pending_alternative: {
+        action: dispatchedAction,
+        impact: 'high',
+        reason: 'work already done on branch',
+        prompted_at: '2026-05-15T20:00:00Z',
+      },
+    });
+    const r = interpretSignal(
+      stateWithPending,
+      { status: 'user_input', commands: [{ kind: 'accept_alternative' }] },
+      medium(),
+    );
+    expect(r.verdict).toBe('advanced');
+    expect(r.newState.phase).toBe(STATES.STORY_DONE);
+    // Counters reset so the new phase isn't throttled by stale budgets.
+    expect(r.newState.retry_count_this_phase).toBe(0);
+    expect(r.newState.verify_reject_count).toBe(0);
+  });
+
+  it('accept_alternative IGNORES invalid phase values (defense against malformed alternatives)', () => {
+    const dispatchedAction = {
+      type: 'invoke_skill',
+      phase: 'mystery_phase_typo',
+      skill: 'bmad-dev-story',
+    };
+    const stateWithPending = st(STATES.DEV_RED, {
+      pending_alternative: {
+        action: dispatchedAction,
+        impact: 'high',
+        reason: 'bad input',
+        prompted_at: '2026-05-15T20:00:00Z',
+      },
+    });
+    const r = interpretSignal(
+      stateWithPending,
+      { status: 'user_input', commands: [{ kind: 'accept_alternative' }] },
+      medium(),
+    );
+    expect(r.newState.phase).toBe(STATES.DEV_RED); // unchanged
+  });
+
+  it('accept_alternative without phase keeps original state.phase (back-compat)', () => {
+    const dispatchedAction = {
+      type: 'invoke_skill',
+      skill: 'bmad-dev-story',
+      // no phase field
+    };
+    const stateWithPending = st(STATES.CODE_REVIEW, {
+      pending_alternative: {
+        action: dispatchedAction,
+        impact: 'medium',
+        reason: 'swap framework',
+        prompted_at: '2026-05-15T20:00:00Z',
+      },
+    });
+    const r = interpretSignal(
+      stateWithPending,
+      { status: 'user_input', commands: [{ kind: 'accept_alternative' }] },
+      medium(),
+    );
+    expect(r.newState.phase).toBe(STATES.CODE_REVIEW);
+  });
+
   it('accept_alternative does NOT overwrite existing story_key on state (caller priority)', () => {
     // If state already has a story_key (mid-cycle dispatch), the dispatch
     // shouldn't blow it away with the alternative's value.
