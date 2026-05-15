@@ -355,12 +355,16 @@ describe('markPhase', () => {
   });
 
   it('second mark emits a duration record for the previous phase', async () => {
+    // Sleep + assertion window: setTimeout(N) may fire ~1ms early on
+    // fast Linux/macOS runners due to its own granularity and Date.now()
+    // truncating to integer ms. Use 25ms with a ≥20ms assertion so the
+    // test isn't a CI flake (`expected 9 to be >= 10` was the failure).
     tmpRoot = seedProjectRoot({ phaseTimings: true });
     markPhase(tmpRoot, 'sprint', 'skill.bmad-help');
-    await new Promise((r) => setTimeout(r, 10));
+    await new Promise((r) => setTimeout(r, 25));
     const r2 = markPhase(tmpRoot, 'sprint', 'skill.bmad-create-story');
     expect(r2.prev_phase).toBe('skill.bmad-help');
-    expect(r2.duration_ms).toBeGreaterThanOrEqual(10);
+    expect(r2.duration_ms).toBeGreaterThanOrEqual(20);
     // Per-story shard now has one duration line for the PREVIOUS phase.
     const file = join(timingsDir(tmpRoot), 'sprint.jsonl');
     const lines = readFileSync(file, 'utf8').trim().split('\n');
@@ -368,7 +372,7 @@ describe('markPhase', () => {
     const obj = JSON.parse(lines[0]);
     expect(obj.event).toBe('duration');
     expect(obj.phase).toBe('skill.bmad-help');
-    expect(obj.duration_ms).toBeGreaterThanOrEqual(10);
+    expect(obj.duration_ms).toBeGreaterThanOrEqual(20);
     // Marker now holds the new phase.
     expect(readMarker(tmpRoot, 'sprint')?.phase).toBe('skill.bmad-create-story');
   });
