@@ -7,12 +7,18 @@
 // Pure module. No I/O.
 //
 // Command kinds (initial set; new kinds added via additive PR):
-//   skip_story        { story_key: string, reason?: string }
-//   abort_sprint      { reason?: string }
-//   force_continue    { reason?: string }
-//   override_decision { decision_id: string, new_value: string }
-//   change_profile    { profile: 'nano'|'small'|'medium'|'large'|'legacy' }
-//   pause             { reason?: string }
+//   skip_story         { story_key: string, reason?: string }
+//   abort_sprint       { reason?: string }
+//   force_continue     { reason?: string }
+//   override_decision  { decision_id: string, new_value: string }
+//   change_profile     { profile: 'nano'|'small'|'medium'|'large'|'legacy' }
+//   pause              { reason?: string }
+//   accept_alternative { reason?: string }
+//     Accepts the orchestrator's most recent `propose_alternative` that
+//     was escalated to a user_prompt at medium/high impact. Dispatches
+//     the stored alternative as the next action and clears the pending
+//     entry. Validation rejects this kind when no alternative is pending
+//     in state — see user-command-applier.js for the runtime check.
 //
 // Validation returns { ok: true, command } | { ok: false, errors: string[] }.
 
@@ -27,6 +33,7 @@ const COMMAND_KINDS = [
   'override_decision',
   'change_profile',
   'pause',
+  'accept_alternative',
 ];
 
 const STORY_KEY_RE = /^[A-Za-z0-9._-]{1,64}$/;
@@ -65,7 +72,8 @@ function validateOne(cmd) {
     }
     case 'abort_sprint':
     case 'force_continue':
-    case 'pause': {
+    case 'pause':
+    case 'accept_alternative': {
       if ('reason' in cmd && cmd.reason !== undefined && typeof cmd.reason !== 'string')
         errors.push(`${cmd.kind}.reason must be string when present`);
       break;

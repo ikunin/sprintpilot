@@ -1,5 +1,25 @@
 # Changelog
 
+## [2.1.2] - 2026-05-15
+
+**Three correctness fixes hit during real-world v2.1 use.** Each fix has unit + integration coverage and a regression test pinned to the symptom the user reported.
+
+### Fixed
+
+- **Installer preserves user-edited configs on upgrade.** Step 6 of `runInstall` (`lib/commands/install.js`) does `fs.remove(dest)` before copying `_Sprintpilot/modules/` from the bundled tree. Pre-2.1.2 this silently nuked user customizations on every upgrade — `merge_strategy`, `land_when`, `reuse_user_branch`, `.secrets-allowlist` entries, custom `pr-body.md` / `commit-*.txt` templates. Only three scalar keys in `modules/autopilot/config.yaml` survived (via `patchAutopilotConfig`). Now: a new `lib/core/config-merger.js` module + a `USER_OWNED_FILES` allow-list snapshot user files before step 6 and re-apply after. YAML configs get a line-aware merge that preserves the bundled file's structure and inline doc comments — user scalars patched in, new bundled keys added automatically, unknown user keys appended as a `# Preserved from prior install` footer. Templates (`.md` / `.txt` / `.secrets-allowlist`) use skip-if-exists with a `.bundled` sidecar so users can diff and merge by hand. A new `KEY_RENAMES` map is wired in for future explicit renames (empty for the 2.1.x baseline). A recovery banner at the top of every install scans for leftover `*.bak-sprintpilot-migration*` and `.sprintpilot-v1-snapshot*.json` files from prior accidental clobbers and surfaces them — read-only; the installer never deletes them.
+
+- **`propose_alternative` round-trip completes.** When the LLM signals `propose_alternative` at medium or high impact, `adapt.js:handleProposeAlternative` emits a `user_prompt`. Pre-2.1.2 the proposed alternative evaporated the moment the prompt was emitted — there was no `user_input` command kind that could accept it, no state field that held it across the turn, and the LLM-as-peer protocol was effectively broken at the medium/high-impact boundary. Now: the alternative is stored on `state.pending_alternative = { action, impact, reason, prompted_at }` and survives across halts. A new `user_input` command kind `accept_alternative` dispatches the stored alternative as the one-shot `nextAction` and clears `pending_alternative`. `force_continue` is extended to clear `pending_alternative` too — the explicit "no, keep the planned action" answer. Stale alternatives carried across sessions are re-prompted with the original `prompted_at` so the user sees they're old.
+
+- **`pause` user command actually halts the loop.** `user-command-applier.js`'s `pause` case emitted a `halt` side-effect that the CLI's `applySideEffects` logged but never acted on — `cmdRecord` always returned `result.nextAction`, so the orchestrator kept emitting the next planned action. The user's `pause` was a no-op. Now: `pause` sets `state.halt_requested = { reason, requested_at }` AND `adapt.handleUserInput` actually invokes `user-command-applier.apply()` (it was previously only emitting an `apply_user_commands` side-effect that nothing consumed). When `halt_requested` is set the resolver returns `{ type: 'halt', reason }` on the same turn; `cmdStart` clears it on the next session so resume works normally.
+
+### Added
+
+- **`lib/core/config-merger.js`** — pure module (`mergeYamlConfig`, `mergeTemplateFile`). Zero deps; line-aware indent walker handles 2-space YAML, nested paths, inline comments, container keys. Falls back to template-strategy on any parse failure rather than corrupting user data.
+- **`lib/core/v2-upgrade-recovery.js`** — `scanForLeftoverSnapshots(projectRoot)` returns leftover backup/snapshot files at the project root.
+- **`tests/unit/config-merger.test.ts`** (16 cases) — merger semantics: scalar preservation, nested paths, new bundled keys, comment preservation, rename map, orphan footer, parse fallback.
+- **`tests/scripts/upgrade-preserves-config.test.ts`** (5 cases) — end-to-end: install twice into a tempdir with edits between, assert user edits survive, `.bundled` sidecars appear for templates, recovery banner surfaces leftover backups.
+- **Orchestrator regression tests** — 6 new cases in `tests/unit/orchestrator/adapt.test.ts` covering `pending_alternative` storage, `accept_alternative` dispatch, `force_continue` clearing pending, `pause` halt action. 3 new cases in `tests/unit/orchestrator/user-commands.test.ts` covering `accept_alternative` validation. 1 new case in `tests/scripts/autopilot-cli.test.ts` covering `pause`-via-CLI returning a halt action.
+
 ## [2.1.1] - 2026-05-15
 
 **Hotfix for v2.1.0.** The orchestrator CLI directory was added to the repo (`_Sprintpilot/bin/autopilot.js`) and is bundled by npm, but the installer's `RUNTIME_RESOURCES` allow-list never included `bin`. Result: fresh installs and upgraders ended up with the orchestrator library at `_Sprintpilot/lib/orchestrator/*` but no CLI to drive it — `/sprint-autopilot-on` halted immediately because `workflow.orchestrator.md` requires `node _Sprintpilot/bin/autopilot.js next` / `record`. v2.1.0 is deprecated on npm.

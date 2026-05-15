@@ -13,6 +13,7 @@
 const { STATES, nextAction, nextStateAfterSuccess, nextStoryStart } = require('./state-machine');
 const { classifyImpact } = require('./impact-classifier');
 const { escalateOnFailure } = require('./profile-rules');
+const userCommandApplier = require('./user-command-applier');
 
 // Threshold for `consecutive_test_failures` — workflow.md:81 says 3.
 const CONSECUTIVE_TEST_FAILURE_THRESHOLD = 3;
@@ -328,8 +329,20 @@ function handleProposeAlternative(state, signal, profile, sideEffects) {
     };
   }
 
+  // Store the proposed alternative on state so a later `accept_alternative`
+  // user command can dispatch it. Without this, the alternative would
+  // evaporate the moment the prompt is emitted.
+  const newState = {
+    ...state,
+    pending_alternative: {
+      action: alternative,
+      impact,
+      reason: signal.reason || null,
+      prompted_at: new Date().toISOString(),
+    },
+  };
   return {
-    newState: state,
+    newState,
     newProfile: profile,
     nextAction: {
       type: 'user_prompt',
@@ -346,19 +359,59 @@ function handleProposeAlternative(state, signal, profile, sideEffects) {
 }
 
 function handleUserInput(state, signal, profile, sideEffects) {
-  // Adapt does not validate commands (that's user-commands.js' job at the CLI
-  // edge) but it does decide the structural response: a user_input signal
-  // always triggers a re-emission of nextAction under the new state. The
-  // CLI edge applies the commands first, then calls adapt with the new state.
+  // Apply the user's commands directly so the resulting state changes
+  // (halt_requested, cleared pending_alternative, dispatch_action effect)
+  // take effect on this same turn. Prior versions only emitted an
+  // apply_user_commands side-effect and the CLI never re-dispatched —
+  // pause never halted, accept_alternative had nowhere to land.
+  const commands = signal.commands || [];
+  const applied = userCommandApplier.apply(state, profile, commands);
+
+  // Mirror the legacy apply_user_commands side-effect so the ledger trail
+  // stays human-readable (kind: user_commands_applied).
   sideEffects.push({
     kind: 'apply_user_commands',
-    commands: signal.commands || [],
+    commands,
     phase: state.phase,
   });
+  for (const e of applied.sideEffects) sideEffects.push(e);
+
+  const newState = applied.newState;
+  const newProfile = applied.newProfile;
+
+  // Halt requested? Emit a halt action and let cmdRecord write the
+  // resume fingerprint.
+  if (newState.halt_requested) {
+    return {
+      newState,
+      newProfile,
+      nextAction: {
+        type: 'halt',
+        phase: newState.phase,
+        reason: newState.halt_requested.reason || 'user_pause',
+      },
+      sideEffects,
+      verdict: 'halt',
+    };
+  }
+
+  // One-shot dispatch (e.g. accept_alternative resolved a pending alt)?
+  // Return the dispatched action in place of the state-machine's default.
+  const dispatch = applied.sideEffects.find((e) => e && e.kind === 'dispatch_action');
+  if (dispatch && dispatch.action) {
+    return {
+      newState,
+      newProfile,
+      nextAction: { ...dispatch.action, _dispatched_via: dispatch.reason || 'user_input' },
+      sideEffects,
+      verdict: 'advanced',
+    };
+  }
+
   return {
-    newState: state,
-    newProfile: profile,
-    nextAction: nextAction(state, profile),
+    newState,
+    newProfile,
+    nextAction: nextAction(newState, newProfile),
     sideEffects,
     verdict: 'advanced',
   };

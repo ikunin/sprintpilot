@@ -61,12 +61,15 @@ function applyOne(state, profile, cmd) {
 
     case 'force_continue':
       // Clears verify-reject + retry counters so the orchestrator stops
-      // looping on a stuck transition. Phase is unchanged.
+      // looping on a stuck transition. Phase is unchanged. Also clears
+      // any pending_alternative — `force_continue` is the explicit "no,
+      // keep the planned action" answer to a propose_alternative prompt.
       newState = {
         ...state,
         retry_count_this_phase: 0,
         verify_reject_count: 0,
         consecutive_test_failures: 0,
+        pending_alternative: undefined,
       };
       effects.push({
         kind: 'state_transition',
@@ -74,6 +77,7 @@ function applyOne(state, profile, cmd) {
         to: state.phase,
         reason: 'user_force_continue',
         details: cmd.reason || null,
+        cleared_pending_alternative: !!state.pending_alternative,
       });
       break;
 
@@ -100,14 +104,57 @@ function applyOne(state, profile, cmd) {
       break;
 
     case 'pause':
-      // No state change. The CLI is expected to halt the loop and wait
-      // for the user to /sprint-autopilot-on again. Recorded for audit.
+      // Set `halt_requested` so adapt.nextAction returns a halt action
+      // on this same turn. Without this flag, prior versions of the
+      // applier only logged the halt side-effect and the orchestrator
+      // kept emitting the next planned action — the loop never stopped.
+      // `halt_requested` is cleared by `start` on the next session
+      // (same path that clears stale fingerprints on resume).
+      newState = {
+        ...state,
+        halt_requested: {
+          reason: cmd.reason || null,
+          requested_at: new Date().toISOString(),
+        },
+      };
       effects.push({
         kind: 'halt',
         reason: 'user_pause',
         details: cmd.reason || null,
       });
       break;
+
+    case 'accept_alternative': {
+      // Dispatches the orchestrator's stored `pending_alternative` (set
+      // when handleProposeAlternative escalated to a user_prompt at
+      // medium/high impact). The CLI edge / adapt's handleUserInput
+      // looks for this side-effect and uses `action` as the one-shot
+      // nextAction in place of the state-machine default.
+      const pending = state.pending_alternative;
+      if (!pending || !pending.action) {
+        effects.push({
+          kind: 'validation_error',
+          reason: 'accept_alternative: no pending alternative to accept',
+          phase: state.phase,
+          details: cmd.reason || null,
+        });
+        break;
+      }
+      newState = {
+        ...state,
+        pending_alternative: undefined,
+        retry_count_this_phase: 0,
+        verify_reject_count: 0,
+      };
+      effects.push({
+        kind: 'dispatch_action',
+        action: pending.action,
+        impact: pending.impact || null,
+        reason: 'user_accept_alternative',
+        details: cmd.reason || null,
+      });
+      break;
+    }
 
     case 'override_decision':
       // We don't apply a state mutation. The CLI records this so a

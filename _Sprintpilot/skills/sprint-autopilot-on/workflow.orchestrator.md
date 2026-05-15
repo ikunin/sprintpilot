@@ -49,8 +49,8 @@ Wrap everything in `{ "status": "...", ... }` and pass to
 | `success`             | `output?: object` (for `bmad-code-review` MUST include `findings[]` with `action: 'block'\|'patch'\|'defer'`); `next_skill_hint?` |
 | `failure`             | `reason`, `diagnosis` (first-class — fed back into next retry), `recoverable: boolean`           |
 | `blocked`             | `blocker_kind` (one of the 5 TRUE BLOCKERS or recoverable kinds), `details`, `user_input_needed`, `consecutive_count?` |
-| `propose_alternative` | `reason`, `alternative` (full Action object), `urgency_hint?` (raises impact only)               |
-| `user_input`          | `commands: UserCommand[]` (validated server-side; see user-commands.js)                          |
+| `propose_alternative` | `reason`, `alternative` (full Action object), `urgency_hint?` (raises impact only). Low impact → auto-accepted; medium / high → orchestrator stores the alternative in `state.pending_alternative` and emits `user_prompt`. The user accepts via `user_input` `{ kind: 'accept_alternative' }` or rejects via `force_continue` (both clear `pending_alternative`). |
+| `user_input`          | `commands: UserCommand[]` (validated server-side; see user-commands.js). Kinds: `skip_story`, `abort_sprint`, `force_continue`, `override_decision`, `change_profile`, `pause` (cleanly halts THIS session; next `/sprint-autopilot-on` resumes), `accept_alternative` (dispatches the stored `pending_alternative`). |
 | `verify_override`     | `evidence: { decision_log_ref?, explanation, expected_paths? }` — used when verify.js is wrong   |
 
 ## TRUE BLOCKER kinds (per AGENTS.md)

@@ -86,6 +86,19 @@ describe('validateOne', () => {
     expect(COMMAND_KINDS).toContain('override_decision');
     expect(COMMAND_KINDS).toContain('change_profile');
     expect(COMMAND_KINDS).toContain('pause');
+    expect(COMMAND_KINDS).toContain('accept_alternative');
+  });
+
+  it('accepts accept_alternative with no extra args', () => {
+    expect(validateOne({ kind: 'accept_alternative' }).ok).toBe(true);
+  });
+
+  it('accepts accept_alternative with optional reason', () => {
+    expect(validateOne({ kind: 'accept_alternative', reason: 'sounds right' }).ok).toBe(true);
+  });
+
+  it('rejects accept_alternative with non-string reason', () => {
+    expect(validateOne({ kind: 'accept_alternative', reason: 42 }).ok).toBe(false);
   });
 });
 

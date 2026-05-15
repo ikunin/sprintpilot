@@ -474,3 +474,118 @@ describe('input validation', () => {
     expect(() => interpretSignal(st(STATES.DEV_RED), { status: 'mystery' }, medium())).toThrow();
   });
 });
+
+describe('propose_alternative + accept_alternative round-trip (Bug B regression)', () => {
+  it('medium-impact propose_alternative stores pending_alternative on state', () => {
+    const r = interpretSignal(
+      st(STATES.DEV_GREEN),
+      {
+        status: 'propose_alternative',
+        reason: 'switch test framework',
+        alternative: {
+          type: 'invoke_skill',
+          skill: 'bmad-dev-story',
+          args: { test_framework: 'vitest' },
+        },
+      },
+      medium(),
+    );
+    expect(r.verdict).toBe('prompted');
+    expect(r.newState.pending_alternative).toEqual(
+      expect.objectContaining({
+        action: expect.objectContaining({ type: 'invoke_skill', skill: 'bmad-dev-story' }),
+        impact: 'medium',
+        reason: 'switch test framework',
+        prompted_at: expect.any(String),
+      }),
+    );
+  });
+
+  it('next user_input { accept_alternative } returns the stored alternative and clears state', () => {
+    const stateWithPending = st(STATES.DEV_GREEN, {
+      pending_alternative: {
+        action: { type: 'run_script', command: ['echo', 'hi'] },
+        impact: 'high',
+        reason: 'test',
+        prompted_at: '2026-05-15T12:00:00Z',
+      },
+    });
+    const r = interpretSignal(
+      stateWithPending,
+      { status: 'user_input', commands: [{ kind: 'accept_alternative' }] },
+      medium(),
+    );
+    expect(r.verdict).toBe('advanced');
+    expect((r.nextAction as Record<string, unknown>).type).toBe('run_script');
+    expect((r.nextAction as Record<string, unknown>)._dispatched_via).toBe(
+      'user_accept_alternative',
+    );
+    expect(r.newState.pending_alternative).toBeUndefined();
+  });
+
+  it('user_input { force_continue } clears pending_alternative and returns planned action', () => {
+    const stateWithPending = st(STATES.DEV_GREEN, {
+      pending_alternative: {
+        action: { type: 'run_script', command: ['rm', '-rf', '/'] },
+        impact: 'high',
+        reason: 'bad idea',
+        prompted_at: '2026-05-15T12:00:00Z',
+      },
+    });
+    const r = interpretSignal(
+      stateWithPending,
+      { status: 'user_input', commands: [{ kind: 'force_continue', reason: 'no thanks' }] },
+      medium(),
+    );
+    expect(r.verdict).toBe('advanced');
+    expect(r.newState.pending_alternative).toBeUndefined();
+    // Planned action for DEV_GREEN should be the state machine's normal next, not the dangerous alternative.
+    expect((r.nextAction as Record<string, unknown>).type).not.toBe('run_script');
+  });
+
+  it('accept_alternative without a pending alternative emits a validation_error side-effect', () => {
+    const r = interpretSignal(
+      st(STATES.DEV_GREEN),
+      { status: 'user_input', commands: [{ kind: 'accept_alternative' }] },
+      medium(),
+    );
+    expect(r.sideEffects).toContainEqual(
+      expect.objectContaining({
+        kind: 'validation_error',
+        reason: expect.stringContaining('no pending alternative'),
+      }),
+    );
+    // No dispatch happened — falls through to planned action.
+    expect((r.nextAction as Record<string, unknown>)._dispatched_via).toBeUndefined();
+  });
+});
+
+describe('user_input pause halts the loop (Bug C regression)', () => {
+  it('pause sets state.halt_requested and returns a halt action on the same turn', () => {
+    const r = interpretSignal(
+      st(STATES.DEV_GREEN),
+      { status: 'user_input', commands: [{ kind: 'pause', reason: 'switching focus' }] },
+      medium(),
+    );
+    expect(r.verdict).toBe('halt');
+    expect((r.nextAction as Record<string, unknown>).type).toBe('halt');
+    expect((r.nextAction as Record<string, unknown>).reason).toBe('switching focus');
+    expect(r.newState.halt_requested).toEqual(
+      expect.objectContaining({
+        reason: 'switching focus',
+        requested_at: expect.any(String),
+      }),
+    );
+  });
+
+  it('pause without an explicit reason still halts (reason becomes the default)', () => {
+    const r = interpretSignal(
+      st(STATES.CODE_REVIEW),
+      { status: 'user_input', commands: [{ kind: 'pause' }] },
+      medium(),
+    );
+    expect(r.verdict).toBe('halt');
+    expect((r.nextAction as Record<string, unknown>).type).toBe('halt');
+    expect((r.nextAction as Record<string, unknown>).reason).toBe('user_pause');
+  });
+});

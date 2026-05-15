@@ -204,6 +204,20 @@ describe('autopilot record', () => {
     expect(parsed.verdict).toBe('retry');
     expect(parsed.action.template_slots.prior_diagnosis).toBe('fixture missing');
   });
+
+  it('user_input pause halts the loop on the same turn (Bug C regression)', () => {
+    runCli(['start']);
+    const signal = JSON.stringify({
+      status: 'user_input',
+      commands: [{ kind: 'pause', reason: 'dev 4-8 next' }],
+    });
+    const r = runCli(['record', '--signal', signal]);
+    expect(r.status).toBe(0);
+    const parsed = JSON.parse(r.stdout);
+    expect(parsed.verdict).toBe('halt');
+    expect(parsed.action.type).toBe('halt');
+    expect(parsed.action.reason).toBe('dev 4-8 next');
+  });
 });
 
 describe('autopilot next: git_op decoration', () => {

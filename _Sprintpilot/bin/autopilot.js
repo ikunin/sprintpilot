@@ -128,6 +128,13 @@ function composeRuntimeState(persisted, profile) {
     user_branch: persisted.user_branch || null,
     // Land-as-you-go: pending land state survives rebase-conflict halts.
     land_pending: persisted.land_pending || null,
+    // Pending alternative (propose_alternative → user_prompt) survives
+    // across halts so the next session re-emits the prompt rather than
+    // silently dropping the LLM's proposal.
+    pending_alternative: persisted.pending_alternative || null,
+    // halt_requested is intentionally NOT carried forward here: cmdStart
+    // clears it on each new session (a `pause` cleanly halts THIS session
+    // and the next /sprint-autopilot-on resumes normally).
   };
 }
 
@@ -151,6 +158,7 @@ function persistRuntimeState(runtime, profile, projectRoot) {
     consecutive_test_failures: runtime.consecutive_test_failures,
     user_branch: runtime.user_branch,
     land_pending: runtime.land_pending,
+    pending_alternative: runtime.pending_alternative || null,
   };
   return persistState(updates, profile, projectRoot, runtime.story_key || 'sprint');
 }
@@ -272,10 +280,12 @@ function applySideEffects(sideEffects, runtime, profile, projectRoot) {
           },
           { projectRoot },
         );
-        // We log the commands; the CLI caller is responsible for actually
-        // applying them to the runtime state on the next `next` invocation.
-        // (e.g. skip_story would update sprint-status; this CLI doesn't
-        // touch sprint-status directly — that's BMad's domain.)
+        // adapt.handleUserInput now applies these commands itself (so
+        // pause halts on the same turn, accept_alternative dispatches the
+        // stored alternative, etc.). This branch is kept purely for the
+        // ledger entry — re-applying here would double-mutate state.
+        // BMad-owned mutations (e.g. skip_story → sprint-status) still
+        // live elsewhere; this CLI never touches sprint-status directly.
         break;
       }
       case 'profile_escalated':
