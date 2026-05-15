@@ -632,6 +632,39 @@ function composeRuntimeState(persisted, profile, projectRoot) {
     remainingStoriesInEpic = epicStories.length;
   }
 
+  // Catch-all guard: if state.phase REQUIRES a story_key to emit a
+  // coherent action AND we still don't have one after every resolution
+  // path (queue / validator / sprint-status), reset phase to flowStart.
+  //
+  // Real-world scenario: a previous orchestrator version nulled
+  // current_story (e.g., v2.2.4's overzealous rejection) but didn't
+  // reset state.phase. Persisted state ends up with current_story: null
+  // at story_done. v2.2.9's reset only fires inside the rejection branch,
+  // so a NULL story_key doesn't trigger it (no rejection to fire). This
+  // guard catches that case + any future bug class where story_key
+  // ends up null at a story-bound phase.
+  //
+  // The reset is safe: the next emission re-enters story-start (or
+  // PREPARE_STORY_BRANCH per the migration rule) and picks the next
+  // pending story from queue / sprint-status.
+  const STORY_BOUND_PHASES_CATCH_ALL = new Set([
+    STATES.CHECK_READINESS,
+    STATES.DEV_RED,
+    STATES.DEV_GREEN,
+    STATES.CODE_REVIEW,
+    STATES.PATCH_APPLY,
+    STATES.PATCH_RETEST,
+    STATES.STORY_DONE,
+    STATES.STORY_LAND,
+  ]);
+  if (!resolvedStoryKey && STORY_BOUND_PHASES_CATCH_ALL.has(phase)) {
+    process.stderr.write(
+      `[autopilot] WARN phase "${phase}" requires a story_key but none resolved (queue empty, sprint-status lookup didn't fire for this phase). ` +
+        `Resetting to ${flowStart} so next emission re-enters story-start.\n`,
+    );
+    phase = flowStart;
+  }
+
   return {
     phase,
     story_key: resolvedStoryKey,

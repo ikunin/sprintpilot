@@ -300,10 +300,30 @@ describe('composeRuntimeState — migration of legacy current_bmad_step', () => 
     expect(r.phase).toBe('create_story');
   });
 
-  it('does NOT migrate phases past create_story (mid-cycle states)', () => {
+  it('preserves mid-cycle phases when story_key is set (genuine in-flight story)', () => {
+    // The migration that bumps create_story → prepare_story_branch only
+    // applies to fresh-story-start. Past create_story, with story_key
+    // set, the phase is preserved — we're mid-cycle on a specific story.
     for (const phase of ['check_readiness', 'dev_red', 'dev_green', 'code_review']) {
-      const r = composeRuntimeState({ current_bmad_step: phase }, medium());
+      const r = composeRuntimeState(
+        { current_bmad_step: phase, current_story: 'S1.2' },
+        medium(),
+      );
       expect(r.phase).toBe(phase);
+    }
+  });
+
+  it('resets story-bound phases to flowStart when story_key is null (v2.2.10 catch-all)', () => {
+    // Real-world: a prior orchestrator version nulled current_story but
+    // didn't reset phase. Persisted state ends up with current_story:null
+    // at e.g. dev_red. The catch-all in composeRuntimeState resets phase
+    // to flowStart so the next emission re-enters story-start cleanly
+    // instead of emitting an invoke_skill bmad-dev-story with no story.
+    for (const phase of ['check_readiness', 'dev_red', 'dev_green', 'code_review', 'story_done']) {
+      const r = composeRuntimeState({ current_bmad_step: phase }, medium());
+      // flowStart for full flow is create_story; under needsBranchPrep
+      // the migration block bumps to prepare_story_branch.
+      expect(['create_story', 'prepare_story_branch']).toContain(r.phase);
     }
   });
 

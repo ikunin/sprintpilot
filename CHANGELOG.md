@@ -1,5 +1,20 @@
 # Changelog
 
+## [2.2.10] - 2026-05-15
+
+**Catch-all phase reset when a story-bound phase ends up with no story_key.** Real-world report: a user's session had `current_story: null` + `current_bmad_step: story_done` (nullified by an earlier v2.2.4 over-rejection that didn't reset phase). v2.2.9's reset only fires inside the rejection branch — null current_story means no rejection fires now, so no reset triggers either. The orchestrator emitted `commit_and_push_story` with `branch: story/unknown`.
+
+### Fixed
+
+- **`composeRuntimeState` catch-all guard.** After all resolution paths (queue head, validator rejection, sprint-status `resolveNextStoryKey`), if `story_key` is STILL null AND `state.phase` is story-bound (`CHECK_READINESS`/`DEV_RED`/`DEV_GREEN`/`CODE_REVIEW`/`PATCH_APPLY`/`PATCH_RETEST`/`STORY_DONE`/`STORY_LAND`), reset `state.phase` to `flowStart`. Safe: the next emission re-enters story-start (or PREPARE_STORY_BRANCH per the migration rule) and picks the next pending story from queue / sprint-status.
+- Generalizes v2.2.9's rejection-branch reset. Now catches: stale state from any prior orchestrator version, manual edits, or future bug classes that null `story_key` without also resetting phase.
+
+### Added
+
+- 1 regression test in `autopilot-decorate-git-op.test.ts`:
+  - story-bound phases (`check_readiness`, `dev_red`, `dev_green`, `code_review`, `story_done`) with null `current_story` → reset to `flowStart` or `prepare_story_branch`
+- Updated existing test ("preserves mid-cycle phases when story_key is set") to assert the catch-all does NOT fire when state is genuinely mid-cycle.
+
 ## [2.2.9] - 2026-05-15
 
 **Phase-aware `current_story` rejection + phase reset on rejection.** Two interacting fixes to v2.2.4's poisoned-state validator. Real-world report: a user's session had `current_story: 4-9, current_bmad_step: story_done, sprint-status[4-9]: done`. v2.2.4 rejected `4-9` as "already complete," nullified `story_key`, and the orchestrator emitted `commit_and_push_story` with `branch: story/unknown`.
