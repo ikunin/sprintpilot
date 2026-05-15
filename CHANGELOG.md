@@ -1,5 +1,22 @@
 # Changelog
 
+## [2.2.7] - 2026-05-15
+
+**Halt fingerprint no longer walks `.venv/` / `node_modules/` / `__pycache__/`.** Real-world report: a user had a 794MB Python virtual environment under `_bmad-output/spikes/<name>/.venv/`. Every halt's fingerprint captured every file path + size — the ledger entry ballooned to 100s of MB, and `.pyc` regeneration on resume produced spurious `resume_divergence` prompts because the file sizes changed.
+
+### Fixed
+
+- **`divergence.walkTree` prunes regenerable / large directories by name.** Hardcoded exclusion list: `.venv`, `venv`, `env`, `node_modules`, `__pycache__`, `.pytest_cache`, `.mypy_cache`, `.ruff_cache`, `.tox`, `.gradle`, `target`, `dist`, `build`, `.next`, `.nuxt`, `.cache`, `.parcel-cache`, `.turbo`, `.git`, `.svn`, `.hg`, `.idea`, `.vscode`, `.worktrees`.
+- **Suffix-based pruning for generated/binary files.** `.pyc`, `.pyo`, `.pyd`, `.so`, `.o`, `.class`, `.DS_Store` skipped at file-level so they don't show up in the fingerprint even when not under a pruned directory.
+- **Hard cap on fingerprint size.** `FINGERPRINT_MAX_ENTRIES = 5000` — when hit, the walk stops and `out.__truncated__ = true` is set so callers know the fingerprint is incomplete. Defense-in-depth against pathological cases the prune lists miss.
+
+### Added
+
+- 3 regression tests in `divergence.test.ts`:
+  - real story files preserved while `.venv`/`node_modules`/`__pycache__` trees pruned
+  - `.pyc`/`.so`/`.class`/`.DS_Store` suffix pruning works
+  - 5100-file tree hits the cap and emits `__truncated__`
+
 ## [2.2.6] - 2026-05-15
 
 ### Fixed

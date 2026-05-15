@@ -56,7 +56,65 @@ function canonicalizeYaml(text) {
   return `${lines.join('\n')}\n`;
 }
 
+// Directory names always pruned from fingerprint walks. These are
+// regenerable build/cache artifacts that change between sessions for
+// reasons unrelated to BMad state (Python bytecode, dependency
+// installs, transpiler output, OS metadata). Without pruning, a single
+// halt fingerprint can balloon to 100s of MB and a `.pyc` regen on
+// resume produces spurious divergence prompts.
+//
+// Real-world trigger: a user's `_bmad-output/spikes/<name>/.venv/` was
+// 794 MB; every halt entry captured every path inside it.
+const FINGERPRINT_PRUNE_DIRS = new Set([
+  '.venv',
+  'venv',
+  'env',
+  'node_modules',
+  '__pycache__',
+  '.pytest_cache',
+  '.mypy_cache',
+  '.ruff_cache',
+  '.tox',
+  '.gradle',
+  'target',
+  'dist',
+  'build',
+  '.next',
+  '.nuxt',
+  '.cache',
+  '.parcel-cache',
+  '.turbo',
+  '.git',
+  '.svn',
+  '.hg',
+  '.idea',
+  '.vscode',
+  // BMad/Sprintpilot internal — worktrees aren't fingerprinted; they're
+  // captured separately via context.worktreeScanner.
+  '.worktrees',
+]);
+
+// File suffixes always pruned. Generated / binary content that changes
+// for non-state reasons.
+const FINGERPRINT_PRUNE_SUFFIXES = [
+  '.pyc',
+  '.pyo',
+  '.pyd',
+  '.so',
+  '.o',
+  '.class',
+  '.DS_Store',
+];
+
+// Hard cap on number of entries in the fingerprint tree. Defends against
+// pathological cases where prune lists don't catch a large embedded
+// dependency tree. When hit, the walk stops and `out[__truncated__]`
+// is set so callers know the fingerprint is incomplete (treated as
+// divergent on diff to avoid false-negative resume).
+const FINGERPRINT_MAX_ENTRIES = 5000;
+
 function walkTree(fs, root, out, relBase) {
+  if (out.__truncated__) return;
   let entries;
   try {
     entries = fs.readdirSync(root, { withFileTypes: true });
@@ -64,14 +122,31 @@ function walkTree(fs, root, out, relBase) {
     return;
   }
   for (const ent of entries) {
+    if (out.__truncated__) return;
+    if (FINGERPRINT_PRUNE_DIRS.has(ent.name)) continue;
     const full = path.join(root, ent.name);
     const rel = path.join(relBase, ent.name);
     if (ent.isDirectory()) {
       walkTree(fs, full, out, rel);
     } else if (ent.isFile()) {
+      let prune = false;
+      for (const sfx of FINGERPRINT_PRUNE_SUFFIXES) {
+        if (ent.name.endsWith(sfx)) {
+          prune = true;
+          break;
+        }
+      }
+      if (prune) continue;
       try {
         const st = fs.statSync(full);
         out[rel.split(path.sep).join('/')] = st.size;
+        // -1 for the future __truncated__ marker; -2 below for the actual count
+        // (avoid counting the marker itself).
+        const count = Object.keys(out).length - (out.__truncated__ ? 1 : 0);
+        if (count >= FINGERPRINT_MAX_ENTRIES) {
+          out.__truncated__ = true;
+          return;
+        }
       } catch (_e) {
         // ignore unreadable
       }

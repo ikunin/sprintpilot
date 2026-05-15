@@ -92,6 +92,72 @@ describe('fingerprint', () => {
   it('requires projectRoot', () => {
     expect(() => fingerprint({})).toThrow();
   });
+
+  it('prunes regenerable / large directories from the tree walk (v2.2.7 fix)', () => {
+    // Real-world report: user had 794MB of Python .venv under
+    // _bmad-output/spikes/eot-1-smart-turn/.venv; every halt fingerprint
+    // dumped every path. Now: walkTree skips .venv / node_modules /
+    // __pycache__ / etc. by directory name.
+    seedStory('keep.md', 'real story content');
+    const dir = join(projectRoot, '_bmad-output');
+    // Seed a fake .venv with files that would otherwise show up.
+    mkdirSync(join(dir, 'spikes', 'x', '.venv', 'lib', 'site-packages'), { recursive: true });
+    writeFileSync(join(dir, 'spikes', 'x', '.venv', 'lib', 'site-packages', 'pkg.py'), '');
+    mkdirSync(join(dir, 'spikes', 'x', 'node_modules', 'foo'), { recursive: true });
+    writeFileSync(join(dir, 'spikes', 'x', 'node_modules', 'foo', 'index.js'), '');
+    mkdirSync(join(dir, 'spikes', 'x', '__pycache__'), { recursive: true });
+    writeFileSync(join(dir, 'spikes', 'x', '__pycache__', 'mod.cpython-314.pyc'), '');
+    // Seed a regular file that SHOULD appear.
+    writeFileSync(join(dir, 'spikes', 'x', 'README.md'), 'hi');
+
+    const fp = fingerprint({ projectRoot });
+    const tree = fp.bmadTree as Record<string, number>;
+
+    expect(tree['stories/keep.md']).toBeDefined();
+    expect(tree['spikes/x/README.md']).toBeDefined();
+    // None of the pruned trees should leak in.
+    for (const k of Object.keys(tree)) {
+      expect(k).not.toContain('/.venv/');
+      expect(k).not.toContain('/node_modules/');
+      expect(k).not.toContain('/__pycache__/');
+      expect(k).not.toMatch(/\.pyc$/);
+    }
+  });
+
+  it('prunes .pyc / .pyo / .so / .class files by suffix', () => {
+    const dir = join(projectRoot, '_bmad-output', 'spikes');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'real.md'), 'hi');
+    writeFileSync(join(dir, 'compiled.pyc'), 'bytecode');
+    writeFileSync(join(dir, 'native.so'), 'binary');
+    writeFileSync(join(dir, 'Foo.class'), 'java');
+    writeFileSync(join(dir, '.DS_Store'), '');
+
+    const fp = fingerprint({ projectRoot });
+    const tree = fp.bmadTree as Record<string, number>;
+
+    expect(tree['spikes/real.md']).toBeDefined();
+    expect(tree['spikes/compiled.pyc']).toBeUndefined();
+    expect(tree['spikes/native.so']).toBeUndefined();
+    expect(tree['spikes/Foo.class']).toBeUndefined();
+    expect(tree['spikes/.DS_Store']).toBeUndefined();
+  });
+
+  it('truncates fingerprint at FINGERPRINT_MAX_ENTRIES with a __truncated__ marker', () => {
+    // Defense-in-depth: even if exclusions miss a huge tree, we cap
+    // entries to avoid OOM-ing the ledger. With 5000 entry cap, seeding
+    // 5100 small files should produce a truncated fingerprint.
+    const dir = join(projectRoot, '_bmad-output', 'big');
+    mkdirSync(dir, { recursive: true });
+    for (let i = 0; i < 5100; i += 1) {
+      writeFileSync(join(dir, `f${i}.txt`), '');
+    }
+    const fp = fingerprint({ projectRoot });
+    const tree = fp.bmadTree as Record<string, unknown>;
+    expect(tree.__truncated__).toBe(true);
+    const realEntries = Object.keys(tree).filter((k) => k !== '__truncated__');
+    expect(realEntries.length).toBeLessThanOrEqual(5000);
+  });
 });
 
 describe('diff', () => {
