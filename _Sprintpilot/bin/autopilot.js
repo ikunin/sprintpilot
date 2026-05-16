@@ -343,6 +343,26 @@ function readSprintStatuses(projectRoot) {
 //   - sprint-status doesn't exist or fails to parse
 //   - no stories match the epic
 //   - all matching stories are already done
+// Terminal statuses for sprint-status entries — stories in these states
+// are NOT counted as "remaining" for epic-done routing. BMad's official
+// vocabulary only has `done`, but users frequently need to mark stories
+// out-of-scope without lying that they shipped:
+//   - skipped / wont_do / cancelled / deferred — explicit user intent
+//   - abandoned — alternate spelling seen in the wild
+// Pre-2.2.31 only `done` counted, so any deferred 4-N story trapped the
+// orchestrator on next-story routing instead of letting the user close
+// out the epic with a retrospective.
+const TERMINAL_STATUSES = new Set([
+  'done',
+  'skipped',
+  'wont_do',
+  "won't_do",
+  'cancelled',
+  'canceled',
+  'deferred',
+  'abandoned',
+]);
+
 function resolveStoriesForEpic(projectRoot, epicId) {
   if (!epicId) return [];
   const stories = readSprintStatuses(projectRoot);
@@ -354,7 +374,7 @@ function resolveStoriesForEpic(projectRoot, epicId) {
     const derivedEpic = deriveEpicFromStoryKey(key);
     if (derivedEpic !== epicId && derivedEpic !== `epic-${epicId}`) continue;
     const status = String(stories[key].status || '').trim().toLowerCase();
-    if (status === 'done') continue;
+    if (TERMINAL_STATUSES.has(status)) continue;
     out.push(key);
   }
   return out;

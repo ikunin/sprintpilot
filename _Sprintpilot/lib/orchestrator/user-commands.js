@@ -19,6 +19,13 @@
 //     the stored alternative as the next action and clears the pending
 //     entry. Validation rejects this kind when no alternative is pending
 //     in state — see user-command-applier.js for the runtime check.
+//   trigger_retrospective { reason?: string }
+//     Force-routes the orchestrator into RETROSPECTIVE for the current
+//     epic regardless of `remaining_stories_in_epic`. Used when the user
+//     explicitly wants to close out an epic with deferred stories still
+//     in the queue (BMad has no formal `skipped`/`deferred` status for
+//     stories, so the orchestrator otherwise counts them as remaining
+//     and routes to next-story instead of retro).
 //
 // Validation returns { ok: true, command } | { ok: false, errors: string[] }.
 
@@ -34,6 +41,7 @@ const COMMAND_KINDS = [
   'change_profile',
   'pause',
   'accept_alternative',
+  'trigger_retrospective',
 ];
 
 const STORY_KEY_RE = /^[A-Za-z0-9._-]{1,64}$/;
@@ -73,7 +81,8 @@ function validateOne(cmd) {
     case 'abort_sprint':
     case 'force_continue':
     case 'pause':
-    case 'accept_alternative': {
+    case 'accept_alternative':
+    case 'trigger_retrospective': {
       if ('reason' in cmd && cmd.reason !== undefined && typeof cmd.reason !== 'string')
         errors.push(`${cmd.kind}.reason must be string when present`);
       break;

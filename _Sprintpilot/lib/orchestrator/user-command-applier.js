@@ -169,6 +169,35 @@ function applyOne(state, profile, cmd) {
       });
       break;
 
+    case 'trigger_retrospective':
+      // Force-route to RETROSPECTIVE regardless of remaining_stories_in_epic.
+      // Used when the user explicitly wants to close out the current epic
+      // with deferred stories still showing as non-terminal in sprint-status.
+      // Story-bound fields cleared so the retro skill reads from current_epic.
+      newState = {
+        ...state,
+        phase: STATES.RETROSPECTIVE,
+        story_key: null,
+        story_file_path: null,
+        ac_summary: null,
+        prior_diagnosis: null,
+        patch_findings: null,
+        tests_to_rerun: null,
+        retry_count_this_phase: 0,
+        verify_reject_count: 0,
+        consecutive_test_failures: 0,
+        // current_epic intentionally preserved — retro skill needs it.
+      };
+      effects.push({
+        kind: 'state_transition',
+        from: state.phase,
+        to: STATES.RETROSPECTIVE,
+        reason: 'user_trigger_retrospective',
+        epic: state.current_epic || null,
+        details: cmd.reason || null,
+      });
+      break;
+
     default:
       effects.push({ kind: 'state_transition', reason: 'unknown_user_command', cmd });
   }

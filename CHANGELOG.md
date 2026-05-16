@@ -1,5 +1,34 @@
 # Changelog
 
+## [2.2.31] - 2026-05-17
+
+**Two paths to close out an epic when non-`done` stories remain.** Reported from a live session: the user explicitly asked to run the Epic 4 retrospective, but the state machine routed to next-story-start because deferred stories in Epic 4 (e.g. 4-7-deferred, 10-X-moved-to-future-epic) showed `backlog`/`in-progress` in sprint-status. The orchestrator counted them as remaining → `remaining_stories_in_epic > 0` → EPIC_BOUNDARY_CHECK → CREATE_STORY instead of RETROSPECTIVE. Workaround was running `bmad-retrospective` directly, bypassing the orchestrator.
+
+BMad's official status vocabulary (`backlog`, `ready-for-dev`, `in-progress`, `review`, `done`) has no formal way to mark a story out-of-scope — users either lie that it shipped or leave it in backlog forever, which traps the orchestrator on next-story routing.
+
+### Added
+
+- **Broader terminal-status set** in `resolveStoriesForEpic` and the wider epic-progress counting:
+  - `done` (BMad standard)
+  - `skipped`, `wont_do`, `won't_do`
+  - `cancelled`, `canceled`
+  - `deferred`
+  - `abandoned`
+  
+  Any of these statuses on a sprint-status entry causes the orchestrator to treat the story as non-remaining for epic-done routing. Lets users hand-edit sprint-status to flag deferred work without lying it shipped.
+
+- **`trigger_retrospective` user-input command.** Force-routes the orchestrator into RETROSPECTIVE for the current epic regardless of `remaining_stories_in_epic`. Catch-all for cases the status-broadening doesn't cover (multiple deferrals, time-boxed close-out, retrospectives mid-epic for milestone review). Validation accepts an optional `reason` for the audit trail; state effects emit `state_transition` with `to: RETROSPECTIVE` + `reason: user_trigger_retrospective` + `epic: <current_epic>`.
+
+### Changed
+
+- `workflow.orchestrator.md` user_input command list updated to include `trigger_retrospective` with the use-case description.
+
+### Added tests
+
+- 1 regression test on `resolveStoriesForEpic` (via the `--epic` CLI flag): mixed terminal statuses all treated as non-remaining.
+- 1 applier test: `trigger_retrospective` routes phase to RETROSPECTIVE, preserves `current_epic`, clears story-bound fields.
+- 2 validator tests: bare + with-reason accepted, non-string reason rejected.
+
 ## [2.2.30] - 2026-05-16
 
 **Resume divergence now auto-resolves when persisted story was completed externally.** Reported from a live session: user merged Story 4-6 manually outside the autopilot. After that, every `/sprint-autopilot-on` returned `resume_divergence` and refused to proceed — there was no escape hatch short of deleting `autopilot-state.yaml` by hand. The divergence detection (v2.1.0+) correctly flagged the state drift but had no remediation path for the most common cause: stories completed via direct PR merge / hotfix / UI action.

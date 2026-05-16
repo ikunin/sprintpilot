@@ -543,6 +543,26 @@ describe('autopilot start --stories / --epic', () => {
     expect(r.stdout).toMatch(/no non-done stories/);
   });
 
+  it('--epic treats skipped/deferred/cancelled stories as terminal (v2.2.31)', () => {
+    // Pre-2.2.31 only `done` counted as terminal. Users had no formal
+    // way to mark a story out-of-scope without lying that it shipped,
+    // and the orchestrator trapped them on next-story routing instead
+    // of letting them close the epic with a retro.
+    seedSprintStatus({
+      'epic-4': 'in-progress',
+      '4-1-foo': 'done',
+      '4-2-bar': 'skipped',
+      '4-3-baz': 'wont_do',
+      '4-4-qux': 'cancelled',
+      '4-5-quux': 'deferred',
+      '4-6-abandoned-one': 'abandoned',
+    });
+    const r = runCli(['start', '--epic', '4']);
+    // All stories are in terminal states → no remaining → exit 2.
+    expect(r.status).toBe(2);
+    expect(r.stdout).toMatch(/no non-done stories/);
+  });
+
   it('--stories / --epic without sprint-status.yaml exits 2 with planning hint', () => {
     const r = runCli(['start', '--stories', '4-1-foo']);
     expect(r.status).toBe(2);

@@ -134,6 +134,27 @@ describe('applyOne', () => {
     expect(r.newState.phase).toBe(STATES.DEV_RED);
     expect(r.effects[0].decision_id).toBe('DEC-007');
   });
+
+  it('trigger_retrospective → routes phase to RETROSPECTIVE regardless of remaining count', () => {
+    // Real-world: user wants to close out Epic 4 with a retro, but
+    // remaining_stories_in_epic > 0 because deferred stories still show
+    // backlog/in-progress in sprint-status. The state machine would
+    // otherwise route to next-story.
+    const r = applyOne(
+      st(STATES.EPIC_BOUNDARY_CHECK, {
+        current_epic: '4',
+        remaining_stories_in_epic: 3,
+      }),
+      medium(),
+      { kind: 'trigger_retrospective', reason: 'closing out epic 4' },
+    );
+    expect(r.newState.phase).toBe(STATES.RETROSPECTIVE);
+    expect(r.newState.current_epic).toBe('4'); // preserved — retro needs it
+    expect(r.newState.story_key).toBeNull();
+    expect(r.effects[0].reason).toBe('user_trigger_retrospective');
+    expect(r.effects[0].epic).toBe('4');
+    expect(r.effects[0].details).toBe('closing out epic 4');
+  });
 });
 
 describe('apply (batch)', () => {

@@ -100,6 +100,17 @@ describe('validateOne', () => {
   it('rejects accept_alternative with non-string reason', () => {
     expect(validateOne({ kind: 'accept_alternative', reason: 42 }).ok).toBe(false);
   });
+
+  it('accepts trigger_retrospective bare and with reason (v2.2.31)', () => {
+    expect(validateOne({ kind: 'trigger_retrospective' }).ok).toBe(true);
+    expect(
+      validateOne({ kind: 'trigger_retrospective', reason: 'closing out epic 4' }).ok,
+    ).toBe(true);
+  });
+
+  it('rejects trigger_retrospective with non-string reason', () => {
+    expect(validateOne({ kind: 'trigger_retrospective', reason: 99 }).ok).toBe(false);
+  });
 });
 
 describe('validate (batch)', () => {
