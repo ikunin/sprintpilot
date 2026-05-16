@@ -695,6 +695,13 @@ function composeRuntimeState(persisted, profile, projectRoot) {
     // across halts so the next session re-emits the prompt rather than
     // silently dropping the LLM's proposal.
     pending_alternative: persisted.pending_alternative || null,
+    // session_story_limit counter: per-session count of stories completed.
+    // adapt.advanceState increments on STORY_DONE → EPIC_BOUNDARY_CHECK;
+    // state-machine.nextAction emits a halt when this hits profile.session_story_limit.
+    // cmdStart resets to 0 on each new session boot (the limit is per-session,
+    // not lifetime). Persisted across in-session resumes so a `pause` mid-flow
+    // doesn't reset progress against the limit.
+    session_stories_completed: persisted.session_stories_completed || 0,
     // halt_requested is intentionally NOT carried forward here: cmdStart
     // clears it on each new session (a `pause` cleanly halts THIS session
     // and the next /sprint-autopilot-on resumes normally).
@@ -723,6 +730,7 @@ function persistRuntimeState(runtime, profile, projectRoot) {
     story_queue: Array.isArray(runtime.story_queue) ? runtime.story_queue : [],
     land_pending: runtime.land_pending,
     pending_alternative: runtime.pending_alternative || null,
+    session_stories_completed: runtime.session_stories_completed || 0,
   };
   return persistState(updates, profile, projectRoot, runtime.story_key || 'sprint');
 }
@@ -1132,6 +1140,12 @@ function cmdStart(opts) {
   // Fresh start or clean resume. `composeRuntimeState` applies the
   // profile-aware initial phase when persisted state is empty.
   const runtime = composeRuntimeState(persisted, profile, projectRoot);
+
+  // session_story_limit is per-session — a fresh `autopilot start`
+  // resets the counter so the next batch of N stories can run before
+  // the next halt. (state-machine.nextAction enforces the cap; adapt.js
+  // increments on STORY_DONE → EPIC_BOUNDARY_CHECK.)
+  runtime.session_stories_completed = 0;
 
   const lockResult = lockUserBranchIfNeeded(runtime, profile, projectRoot);
   if (lockResult && lockResult.halt) {

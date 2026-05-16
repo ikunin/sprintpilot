@@ -170,6 +170,37 @@ function nextAction(state, profile) {
       handoff: 'sprint_finalize_pending',
     };
   }
+  // session_story_limit: when this session has completed >= limit
+  // stories, halt cleanly. The next /sprint-autopilot-on resets the
+  // counter and continues. Skipped when limit === 0 (unlimited per
+  // Sprintpilot.md) or limit is unset.
+  const sessionLimit = profile && profile.session_story_limit;
+  const sessionDone = state.session_stories_completed || 0;
+  if (
+    typeof sessionLimit === 'number' &&
+    sessionLimit > 0 &&
+    sessionDone >= sessionLimit &&
+    // Don't halt when we're at a story-start phase — that would
+    // create an infinite halt loop on resume. The limit check should
+    // fire at the boundary between stories (epic_boundary_check or
+    // before the next story is picked). Most natural is to halt
+    // before emitting the next story-start action.
+    (state.phase === STATES.EPIC_BOUNDARY_CHECK ||
+      state.phase === STATES.RETROSPECTIVE ||
+      state.phase === STATES.PREPARE_STORY_BRANCH ||
+      state.phase === STATES.CREATE_STORY ||
+      state.phase === STATES.NANO_QUICK_DEV)
+  ) {
+    return {
+      type: 'halt',
+      reason: 'session_story_limit_reached',
+      prompt:
+        `Session story limit reached (${sessionDone}/${sessionLimit}). ` +
+        `Run /sprint-autopilot-on to start a new session and continue with the next pending story.`,
+      session_stories_completed: sessionDone,
+      session_story_limit: sessionLimit,
+    };
+  }
 
   switch (state.phase) {
     case STATES.PREPARE_STORY_BRANCH: {

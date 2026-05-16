@@ -195,6 +195,89 @@ describe('nextAction — sprint completion short-circuit', () => {
   });
 });
 
+describe('nextAction — session_story_limit halt', () => {
+  it('halts at EPIC_BOUNDARY_CHECK when counter >= limit', () => {
+    const a = nextAction(
+      baseState(STATES.EPIC_BOUNDARY_CHECK, { session_stories_completed: 3 }),
+      medium(),
+    );
+    expect(a.type).toBe('halt');
+    expect(a.reason).toBe('session_story_limit_reached');
+    expect(a.session_stories_completed).toBe(3);
+    expect(a.session_story_limit).toBe(3);
+  });
+
+  it('does not halt when counter < limit', () => {
+    const a = nextAction(
+      baseState(STATES.EPIC_BOUNDARY_CHECK, { session_stories_completed: 2 }),
+      medium(),
+    );
+    expect(a.type).not.toBe('halt');
+  });
+
+  it('respects session_story_limit=0 as unlimited (never halts)', () => {
+    const unlimited = { ...medium(), session_story_limit: 0 } as Profile;
+    const a = nextAction(
+      baseState(STATES.EPIC_BOUNDARY_CHECK, { session_stories_completed: 999 }),
+      unlimited,
+    );
+    expect(a.type).not.toBe('halt');
+  });
+
+  it('fires at story-start phases (PREPARE_STORY_BRANCH, CREATE_STORY, NANO_QUICK_DEV, RETROSPECTIVE)', () => {
+    for (const phase of [
+      STATES.PREPARE_STORY_BRANCH,
+      STATES.CREATE_STORY,
+      STATES.NANO_QUICK_DEV,
+      STATES.RETROSPECTIVE,
+    ]) {
+      const a = nextAction(
+        baseState(phase, { session_stories_completed: 3, story_key: null }),
+        medium(),
+      );
+      expect(a.type).toBe('halt');
+      expect(a.reason).toBe('session_story_limit_reached');
+    }
+  });
+
+  it('does NOT fire mid-story (e.g. DEV_RED, CODE_REVIEW) so an in-flight story finishes', () => {
+    for (const phase of [STATES.DEV_RED, STATES.CODE_REVIEW, STATES.PATCH_APPLY]) {
+      const a = nextAction(
+        baseState(phase, { session_stories_completed: 5 }),
+        medium(),
+      );
+      expect(a.type).not.toBe('halt');
+    }
+  });
+
+  it('sprint_complete short-circuit takes precedence over session limit halt', () => {
+    const a = nextAction(
+      baseState(STATES.EPIC_BOUNDARY_CHECK, {
+        session_stories_completed: 3,
+        sprint_is_complete: true,
+      }),
+      medium(),
+    );
+    expect(a.type).toBe('halt');
+    expect(a.handoff).toBe('sprint_finalize_pending');
+  });
+
+  it('respects a custom limit (e.g. 5 from nano.yaml override)', () => {
+    const five = { ...medium(), session_story_limit: 5 } as Profile;
+    const a4 = nextAction(
+      baseState(STATES.EPIC_BOUNDARY_CHECK, { session_stories_completed: 4 }),
+      five,
+    );
+    expect(a4.type).not.toBe('halt');
+    const a5 = nextAction(
+      baseState(STATES.EPIC_BOUNDARY_CHECK, { session_stories_completed: 5 }),
+      five,
+    );
+    expect(a5.type).toBe('halt');
+    expect(a5.session_story_limit).toBe(5);
+  });
+});
+
 describe('nextStateAfterSuccess — deterministic transitions', () => {
   const p = medium();
   const np = nano();

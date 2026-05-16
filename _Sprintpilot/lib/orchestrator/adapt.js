@@ -592,6 +592,10 @@ function advanceState(state, profile, newPhase, signal) {
     next.story_key = null;
     next.story_file_path = null;
     next.ac_summary = null;
+    // session_story_limit: increment per-session completion counter so
+    // state-machine.js#nextAction can emit the halt at the next
+    // emission. The counter resets on cmdStart (new session boundary).
+    next.session_stories_completed = (state.session_stories_completed || 0) + 1;
   }
 
   return next;

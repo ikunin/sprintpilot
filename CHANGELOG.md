@@ -1,5 +1,21 @@
 # Changelog
 
+## [2.2.13] - 2026-05-16
+
+**`session_story_limit` is now actually enforced.** Documented since 2.0.1 in `Sprintpilot.md` ("Stories fully implemented per autopilot run before checkpoint. `0` = unlimited") and parsed into the typed Profile by `profile-rules.js` (default `3`, nano `5`), but the orchestrator never read the value back. Sessions ran indefinitely against `resolveNextStoryKey` until the LLM either improvised a pause (the v2.2.11 contract violation) or hit a TRUE BLOCKER. The promised "checkpoint every N stories" was a no-op.
+
+### Added
+
+- **`state.session_stories_completed`** — per-session counter. Persisted across in-session resumes (a `pause`/halt doesn't reset progress against the limit), cleared on `cmdStart` (a fresh `/sprint-autopilot-on` starts a new session and lets the next N stories run before the next halt).
+- **`state-machine.nextAction` halt check** — fires at story-boundary phases (`EPIC_BOUNDARY_CHECK`, `RETROSPECTIVE`, `PREPARE_STORY_BRANCH`, `CREATE_STORY`, `NANO_QUICK_DEV`) when `session_stories_completed >= profile.session_story_limit`. Halt payload includes `reason: 'session_story_limit_reached'`, the counter, the configured limit, and a prompt telling the LLM/user to re-run `/sprint-autopilot-on` to continue. Skipped when `session_story_limit === 0` (unlimited per docs) or when sprint completion takes precedence.
+- **Adapter increment** — `adapt.advanceState` bumps the counter on the `STORY_DONE → EPIC_BOUNDARY_CHECK` transition (same block that pops the queue head). Mid-story phase transitions don't touch it.
+- **Runtime plumbing in `autopilot.js`** — `composeRuntimeState` reads the counter from persisted state, `persistRuntimeState` writes it back, `cmdStart` resets to `0`.
+- 10 regression tests across `state-machine.test.ts` and `adapt.test.ts` covering: halt at exactly the limit, no-halt below it, `0 = unlimited`, story-boundary phase set, mid-story phases ignored, sprint-complete precedence, custom limits (e.g. nano's 5), and counter increment semantics.
+
+### Why this matters
+
+The user-facing contract — "the autopilot drives N stories then checkpoints so we don't hit context rot" — was unenforced. Combined with the v2.2.11 LLM-pause fix (which stripped the LLM's ability to call its own halt), sessions could run until they hit retry budgets or true blockers. v2.2.13 puts the documented checkpoint behavior back where users expect it.
+
 ## [2.2.12] - 2026-05-16
 
 **`land_as_you_go` STORY_LAND now emits inlined argv steps.** Real-world report: a user on `land_as_you_go` saw the orchestrator emit a metadata-only `run_script` action (`helper: 'lib/orchestrator/land.js'`, `op: 'land_story'`, `land_when`, `squash_on_merge`, …) with no `args` / `command` / `steps`. The state machine's comment promised "The CLI edge composes the actual argv via land.js#planLand" but the wiring was never built. LLMs/runners had to invent their own `gh` invocations.

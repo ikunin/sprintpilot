@@ -770,3 +770,39 @@ describe('advanceState — bug #2: current_epic preserved through STORY_DONE →
     expect(r.newState.story_queue).toEqual(['4-9-next-in-epic-4']);
   });
 });
+
+describe('advanceState — session_stories_completed counter', () => {
+  it('increments on STORY_DONE → EPIC_BOUNDARY_CHECK', () => {
+    const r = interpretSignal(
+      st(STATES.STORY_DONE, { session_stories_completed: 2 }),
+      {
+        status: 'success',
+        output: { commit_sha: 'abc', branch: 'story/S1', git_steps_completed: true },
+      },
+      medium(),
+    );
+    expect(r.newState.phase).toBe(STATES.EPIC_BOUNDARY_CHECK);
+    expect(r.newState.session_stories_completed).toBe(3);
+  });
+
+  it('treats unset counter as 0 (increments from 0 → 1)', () => {
+    const r = interpretSignal(
+      st(STATES.STORY_DONE),
+      {
+        status: 'success',
+        output: { commit_sha: 'abc', branch: 'story/S1', git_steps_completed: true },
+      },
+      medium(),
+    );
+    expect(r.newState.session_stories_completed).toBe(1);
+  });
+
+  it('does NOT increment on transitions that are not STORY_DONE → EPIC_BOUNDARY_CHECK', () => {
+    const r = interpretSignal(
+      st(STATES.DEV_RED, { session_stories_completed: 2 }),
+      { status: 'success' },
+      medium(),
+    );
+    expect(r.newState.session_stories_completed).toBe(2);
+  });
+});
