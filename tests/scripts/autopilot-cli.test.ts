@@ -194,6 +194,98 @@ describe('autopilot start', () => {
   });
 });
 
+describe('autopilot start — resume divergence handling (v2.2.30)', () => {
+  // Real-world: user manually merged a story outside autopilot. Sprint-
+  // status shows it `done`, but autopilot-state.yaml + the last halt's
+  // fingerprint still reference that story. Pre-2.2.30 cmdStart returned
+  // resume_divergence forever — there was no escape hatch short of
+  // deleting state files manually.
+
+  function seedDiverged(opts: { current_story: string; sprint_status_yaml: string }) {
+    const artDir = join(projectRoot, '_bmad-output', 'implementation-artifacts');
+    mkdirSync(artDir, { recursive: true });
+    // Write a halt entry with a stale fingerprint so divergence.detect
+    // fires (any non-empty fingerprint that doesn't match the live world
+    // works for the test).
+    writeFileSync(
+      join(artDir, 'ledger.jsonl'),
+      JSON.stringify({
+        seq: 1,
+        ts: '2026-01-01T00:00:00Z',
+        kind: 'halt',
+        phase: 'prepare_story_branch',
+        reason: 'user_pause',
+        fingerprint: { sprintStatusSha: 'stale', bmadTree: {}, branchHeads: {}, worktreePaths: [] },
+      }) + '\n',
+    );
+    writeFileSync(
+      join(artDir, 'autopilot-state.yaml'),
+      `current_bmad_step: prepare_story_branch\ncurrent_story: ${opts.current_story}\n`,
+    );
+    writeFileSync(join(artDir, 'sprint-status.yaml'), opts.sprint_status_yaml);
+  }
+
+  it('auto-accepts divergence when persisted current_story is now `done` in sprint-status', () => {
+    seedDiverged({
+      current_story: '4-6-realm',
+      sprint_status_yaml: 'development_status:\n  4-6-realm: done  # PR #42 merged manually\n  4-7-next: backlog\n',
+    });
+    const r = runCli(['start']);
+    expect(r.status).toBe(0);
+    // Should NOT emit resume_divergence — should proceed to action.
+    expect(r.stdout).not.toContain('resume_divergence');
+    // Ledger should record the auto-accept decision.
+    const ledgerPath = join(
+      projectRoot,
+      '_bmad-output',
+      'implementation-artifacts',
+      'ledger.jsonl',
+    );
+    const entries = readFileSync(ledgerPath, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+    const accepted = entries.find(
+      (e) => e.kind === 'resume' && e.divergence && e.divergence.kind === 'divergence_accepted',
+    );
+    expect(accepted).toBeDefined();
+    expect(accepted.divergence.reason).toBe('external_completion');
+    expect(accepted.divergence.story).toBe('4-6-realm');
+  });
+
+  it('blocks with resume_divergence when persisted story is NOT yet done', () => {
+    seedDiverged({
+      current_story: '4-6-realm',
+      sprint_status_yaml: 'development_status:\n  4-6-realm: in-progress\n',
+    });
+    const r = runCli(['start']);
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain('resume_divergence');
+    const parsed = JSON.parse(r.stdout);
+    expect(parsed.kind).toBe('resume_divergence');
+    expect(parsed.hint).toContain('--accept-divergence');
+  });
+
+  it('--accept-divergence bypasses the check unconditionally', () => {
+    seedDiverged({
+      current_story: '4-6-realm',
+      sprint_status_yaml: 'development_status:\n  4-6-realm: in-progress\n',
+    });
+    const r = runCli(['start', '--accept-divergence']);
+    expect(r.status).toBe(0);
+    expect(r.stdout).not.toContain('resume_divergence');
+    const ledgerPath = join(
+      projectRoot,
+      '_bmad-output',
+      'implementation-artifacts',
+      'ledger.jsonl',
+    );
+    const entries = readFileSync(ledgerPath, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+    const accepted = entries.find(
+      (e) => e.kind === 'resume' && e.divergence && e.divergence.kind === 'divergence_accepted',
+    );
+    expect(accepted).toBeDefined();
+    expect(accepted.divergence.reason).toBe('explicit_accept');
+  });
+});
+
 describe('autopilot next', () => {
   it('emits the next planned action for the persisted phase', () => {
     runCli(['start']);

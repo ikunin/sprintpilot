@@ -1380,18 +1380,66 @@ function cmdStart(opts) {
   }
 
   // Resume detection: if a prior session left a fingerprint, diff.
+  // Two escape hatches let cmdStart proceed despite a divergent fingerprint:
+  //
+  //   1. External completion (auto): if the last halt's `current_story`
+  //      is now marked `done` in sprint-status, the divergence is the
+  //      EXPECTED result of completing that story outside the autopilot
+  //      (manual merge, hot-fix, PR landed via the UI). Clear the
+  //      stale story identity from persisted state and proceed —
+  //      composeRuntimeState's resolver will pick the next pending story.
+  //
+  //   2. Explicit --accept-divergence flag: catch-all for cases (1) doesn't
+  //      cover (multiple stories completed, branch heads moved, etc.). The
+  //      flag is logged into the ledger so the audit trail records that
+  //      the user opted in to bypass.
   const lastHalt = ledger.last({ projectRoot }, 'halt');
   if (lastHalt && lastHalt.fingerprint) {
     const d = divergence.detect({ projectRoot }, lastHalt.fingerprint);
     if (!d.identical) {
-      const result = {
-        kind: 'resume_divergence',
-        differences: d.differences,
-        last_phase: persisted.current_bmad_step || null,
-      };
-      ledger.append({ kind: 'resume', divergence: result }, { projectRoot });
-      process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
-      return 0;
+      let autoAck = null;
+      const persistedStory = persisted.current_story || null;
+      if (persistedStory) {
+        const stories = readSprintStatuses(projectRoot);
+        const status = stories && stories[persistedStory]
+          ? String(stories[persistedStory].status || '').trim().toLowerCase()
+          : null;
+        if (status === 'done') {
+          autoAck = { reason: 'external_completion', story: persistedStory };
+        }
+      }
+      const accepted = autoAck || (opts['accept-divergence'] ? { reason: 'explicit_accept' } : null);
+      if (!accepted) {
+        const result = {
+          kind: 'resume_divergence',
+          differences: d.differences,
+          last_phase: persisted.current_bmad_step || null,
+          hint:
+            'Pass --accept-divergence to proceed despite the diff, or finish externally-merged stories so sprint-status reflects reality before resuming.',
+        };
+        ledger.append({ kind: 'resume', divergence: result }, { projectRoot });
+        process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+        return 0;
+      }
+      // Clear the stale story identity before composeRuntimeState runs.
+      // Without this the runtime would re-enter the same story (which is
+      // now done) and verifyStoryDone would loop on "already complete".
+      persisted.current_story = null;
+      persisted.story_file_path = null;
+      persisted.current_epic = null;
+      persisted.current_bmad_step = null;
+      ledger.append(
+        {
+          kind: 'resume',
+          divergence: {
+            kind: 'divergence_accepted',
+            ...accepted,
+            differences: d.differences,
+            last_phase: lastHalt.phase || null,
+          },
+        },
+        { projectRoot },
+      );
     }
   }
 

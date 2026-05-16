@@ -1,5 +1,26 @@
 # Changelog
 
+## [2.2.30] - 2026-05-16
+
+**Resume divergence now auto-resolves when persisted story was completed externally.** Reported from a live session: user merged Story 4-6 manually outside the autopilot. After that, every `/sprint-autopilot-on` returned `resume_divergence` and refused to proceed — there was no escape hatch short of deleting `autopilot-state.yaml` by hand. The divergence detection (v2.1.0+) correctly flagged the state drift but had no remediation path for the most common cause: stories completed via direct PR merge / hotfix / UI action.
+
+### Added
+
+- **External-completion auto-acknowledge.** When `divergence.detect` returns `!identical` AND `sprint-status.yaml` shows the persisted `current_story` as `done`, cmdStart treats the divergence as expected external progress: clears the stale story identity (`current_story` / `story_file_path` / `current_epic` / `current_bmad_step` all nulled), logs `kind: resume, divergence: {kind: 'divergence_accepted', reason: 'external_completion', story: <key>}` to the ledger, and proceeds. `composeRuntimeState`'s resolver then picks the next pending story from queue or sprint-status.
+- **`--accept-divergence` flag** for cmdStart — catch-all escape hatch when (a) the persisted story isn't yet `done`, (b) multiple stories completed externally, (c) branch heads moved, or (d) any other divergence pattern auto-accept doesn't cover. Logged with `reason: 'explicit_accept'` for the audit trail.
+- **`hint` field** added to `resume_divergence` output: `"Pass --accept-divergence to proceed despite the diff, or finish externally-merged stories so sprint-status reflects reality before resuming."` Gives users + LLMs a discoverable next step.
+
+### Why this matters
+
+The divergence check was doing its job — detecting that the world had moved since the last halt — but every safe form of "world moved on" (someone merged a PR, finished a task in their IDE, ran a script) was indistinguishable from genuinely corrupt state. The result was: any user who completed a story outside the autopilot had to either roll back their work, manually edit `autopilot-state.yaml`, or delete it. Now the orchestrator recognizes "story is `done` in sprint-status" as the canonical signal of safe external progress.
+
+### Added tests
+
+- 3 regression tests in `autopilot-cli.test.ts`:
+  - Auto-accept when persisted current_story is `done`
+  - Block with hint when persisted current_story is still `in-progress`
+  - `--accept-divergence` bypasses unconditionally
+
 ## [2.2.29] - 2026-05-16
 
 **`state-store.parseYamlNarrow` silently dropped block-form YAML lists.** Reported from a live session: the user hit divergence loops on `autopilot start --force --stories <csv>` retries after intermediate halts. Root cause: when state had a `story_queue:` block followed by `- item` lines (the standard YAML list form), the narrow parser hit the no-colon line, `continue`d, and never appended to the list. The story queue silently became an empty object `{}`. The user's workaround was manual inline-JSON `story_queue: ["k1","k2"]`.
