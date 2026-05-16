@@ -867,31 +867,123 @@ function decorateGitOp(action, state, profile, projectRoot) {
 // options), inline the resulting `steps[]` onto the action.
 function decorateRunScript(action, state, profile, projectRoot) {
   if (!action || action.type !== 'run_script') return action;
-  if (action.op !== 'land_story') return action;
-  try {
-    const root = projectRoot || process.cwd();
-    const scriptsDir = path.join(root, '_Sprintpilot', 'scripts');
-    const snapshotPath = path.join(
-      root,
-      '_bmad-output',
-      'implementation-artifacts',
-      '.land-snapshots',
-      `${state.story_key || 'sprint'}.json`,
-    );
-    const branch = gitPlan.branchName(profile, state.story_key, state.current_epic, state);
-    const platform = profile.platform_provider || 'auto';
-    const planned = land.planLand(state, profile, {
-      scriptsDir,
-      snapshotPath,
-      branch,
-      platform,
-      projectRoot: root,
-    });
-    return { ...action, branch: planned.branch, steps: planned.steps };
-  } catch (e) {
-    log.warn(`land-plan failed for op=${action.op}: ${e.message}`);
-    return action;
+  if (action.op === 'land_story') {
+    try {
+      const root = projectRoot || process.cwd();
+      const scriptsDir = path.join(root, '_Sprintpilot', 'scripts');
+      const snapshotPath = path.join(
+        root,
+        '_bmad-output',
+        'implementation-artifacts',
+        '.land-snapshots',
+        `${state.story_key || 'sprint'}.json`,
+      );
+      const branch = gitPlan.branchName(profile, state.story_key, state.current_epic, state);
+      const platform = profile.platform_provider || 'auto';
+      const planned = land.planLand(state, profile, {
+        scriptsDir,
+        snapshotPath,
+        branch,
+        platform,
+        projectRoot: root,
+      });
+      return { ...action, branch: planned.branch, steps: planned.steps };
+    } catch (e) {
+      log.warn(`land-plan failed for op=${action.op}: ${e.message}`);
+      return action;
+    }
   }
+  if (action.op === 'install_dependencies') {
+    const root = projectRoot || process.cwd();
+    const steps = planDependencyInstall(root);
+    if (steps.length === 0) {
+      // No manifest detected — fall back to a no-op success rather than
+      // halting the autopilot on an unrecognized project shape. The LLM
+      // already had a recoverable blocker; the orchestrator's retry will
+      // either succeed (the LLM resolves the dependency another way) or
+      // hit the retry budget and prompt.
+      return { ...action, steps: [], no_manifest_detected: true };
+    }
+    return { ...action, steps };
+  }
+  return action;
+}
+
+// Detect manifest files in the project root and return install steps
+// for each language. Returns [] when no manifest is found (caller can
+// degrade to a no-op rather than hardcoding npm install).
+//
+// Order matters: the first match wins for the install. We pick the
+// first detected, since most projects are single-language at the root.
+// Monorepos with multiple manifests still install for the primary
+// (and the LLM can run additional installs via subsequent signals).
+function planDependencyInstall(projectRoot) {
+  const exists = (rel) => {
+    try {
+      return fs.existsSync(path.join(projectRoot, rel));
+    } catch {
+      return false;
+    }
+  };
+  // pnpm / yarn / npm: pick the lockfile that exists; fall back to npm.
+  if (exists('package.json')) {
+    if (exists('pnpm-lock.yaml')) {
+      return [{ args: ['pnpm', 'install', '--frozen-lockfile'], description: 'install pnpm deps' }];
+    }
+    if (exists('yarn.lock')) {
+      return [{ args: ['yarn', 'install', '--frozen-lockfile'], description: 'install yarn deps' }];
+    }
+    if (exists('bun.lockb')) {
+      return [{ args: ['bun', 'install', '--frozen-lockfile'], description: 'install bun deps' }];
+    }
+    return [{ args: ['npm', 'install'], description: 'install npm deps' }];
+  }
+  // Python: prefer uv > poetry > pipenv > pip
+  if (exists('pyproject.toml')) {
+    if (exists('uv.lock')) return [{ args: ['uv', 'sync'], description: 'install python deps via uv' }];
+    if (exists('poetry.lock')) {
+      return [{ args: ['poetry', 'install'], description: 'install python deps via poetry' }];
+    }
+    return [{ args: ['pip', 'install', '-e', '.'], description: 'install python project deps' }];
+  }
+  if (exists('requirements.txt')) {
+    return [{ args: ['pip', 'install', '-r', 'requirements.txt'], description: 'install pip requirements' }];
+  }
+  if (exists('Pipfile')) {
+    return [{ args: ['pipenv', 'install'], description: 'install python deps via pipenv' }];
+  }
+  // Rust
+  if (exists('Cargo.toml')) {
+    return [{ args: ['cargo', 'fetch'], description: 'fetch rust deps via cargo' }];
+  }
+  // Go
+  if (exists('go.mod')) {
+    return [{ args: ['go', 'mod', 'download'], description: 'download go modules' }];
+  }
+  // Ruby
+  if (exists('Gemfile')) {
+    return [{ args: ['bundle', 'install'], description: 'install ruby deps via bundler' }];
+  }
+  // Java / Kotlin
+  if (exists('pom.xml')) {
+    return [{ args: ['mvn', '-q', 'dependency:resolve'], description: 'resolve maven deps' }];
+  }
+  if (exists('build.gradle') || exists('build.gradle.kts')) {
+    return [{ args: ['./gradlew', '--quiet', 'dependencies'], description: 'resolve gradle deps' }];
+  }
+  // PHP
+  if (exists('composer.json')) {
+    return [{ args: ['composer', 'install'], description: 'install composer deps' }];
+  }
+  // .NET
+  if (exists('global.json') || exists('*.csproj')) {
+    return [{ args: ['dotnet', 'restore'], description: 'restore dotnet deps' }];
+  }
+  // Swift
+  if (exists('Package.swift')) {
+    return [{ args: ['swift', 'package', 'resolve'], description: 'resolve swift packages' }];
+  }
+  return [];
 }
 
 // Detect whether a branch exists, locally OR on origin. Used by

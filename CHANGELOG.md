@@ -1,5 +1,37 @@
 # Changelog
 
+## [2.2.19] - 2026-05-16
+
+**`missing_dependency` recovery is now language-aware.** The recoverable blocker handler in `adapt.js` hardcoded `command: ['npm', 'install']`. On any non-Node project (Python, Rust, Go, Ruby, Java, Swift, .NET, PHP, etc.) the recovery step failed instantly and the retry budget burned through. Real-world impact: the user's monorepo with `apps/gateway` (Node) PLUS `apps/ai-service` (Python) PLUS `firmware/` (C++) saw recovery succeed on Node-only stories and fail on the rest.
+
+### Fixed
+
+- **`adapt.interpretSignal`** — `missing_dependency` blocker now emits an abstract `run_script` action with `op: 'install_dependencies'` (no inline `command`). The decision of WHAT to run moves to the CLI edge where FS access is allowed.
+- **`autopilot.decorateRunScript`** — when `op === 'install_dependencies'`, walks the project root for manifest files and inlines the correct install command per detected language:
+  - `package.json` + `pnpm-lock.yaml` → `pnpm install --frozen-lockfile`
+  - `package.json` + `yarn.lock` → `yarn install --frozen-lockfile`
+  - `package.json` + `bun.lockb` → `bun install --frozen-lockfile`
+  - `package.json` (fallback) → `npm install`
+  - `pyproject.toml` + `uv.lock` → `uv sync`
+  - `pyproject.toml` + `poetry.lock` → `poetry install`
+  - `pyproject.toml` (fallback) → `pip install -e .`
+  - `requirements.txt` → `pip install -r requirements.txt`
+  - `Pipfile` → `pipenv install`
+  - `Cargo.toml` → `cargo fetch`
+  - `go.mod` → `go mod download`
+  - `Gemfile` → `bundle install`
+  - `pom.xml` → `mvn -q dependency:resolve`
+  - `build.gradle` / `build.gradle.kts` → `./gradlew --quiet dependencies`
+  - `composer.json` → `composer install`
+  - `global.json` / `*.csproj` → `dotnet restore`
+  - `Package.swift` → `swift package resolve`
+- **No manifest detected** → empty `steps[]` + `no_manifest_detected: true`. The autopilot's retry path treats this as a no-op rather than halting; the orchestrator's retry budget gates whether the LLM gets another chance or escalates to user_prompt.
+
+### Added
+
+- 9 regression tests in `autopilot-decorate-git-op.test.ts` covering npm, pnpm, uv, poetry, pip-requirements, cargo, go mod, bundler, and the no-manifest degraded path.
+- 1 updated test in `adapt.test.ts` asserting the abstract `install_dependencies` action shape (no inline `command`).
+
 ## [2.2.18] - 2026-05-16
 
 **`test file missing` rejected paths that actually existed.** Real-world report (continued audit of the same user's ledger): `verify_rejected dev_red issues=["test file missing: apps/gateway/tests/auth/keycloak-admin.test.ts", "test file missing: apps/gateway/tests/routes/auth.register.test.ts", "test file missing: apps/gateway/tests/routes/auth.change-password.test.ts"]`. The files existed at exactly those paths in the project. The bug: `fileExists` resolved relative paths against `process.cwd()` (wherever the autopilot CLI was invoked from), not against `ctx.projectRoot`.

@@ -273,6 +273,11 @@ function handleBlocked(state, signal, profile, sideEffects) {
   // Recoverable blockers: deterministic recovery per kind (initial set).
   switch (kind) {
     case 'missing_dependency':
+      // Emit an abstract install action. The CLI edge (autopilot.js
+      // decorateRunScript) detects the project's language(s) from
+      // manifest files and inlines the concrete `command`. Pre-2.2.19
+      // this hardcoded `npm install`, which failed on non-Node projects
+      // (Python, Rust, Go, Ruby, etc.).
       return {
         newState: state,
         newProfile: profile,
@@ -280,7 +285,8 @@ function handleBlocked(state, signal, profile, sideEffects) {
           type: 'run_script',
           phase: state.phase,
           reason: 'install_missing_dependency',
-          command: ['npm', 'install'],
+          op: 'install_dependencies',
+          details: signal.details || null,
         },
         sideEffects,
         verdict: 'retry',

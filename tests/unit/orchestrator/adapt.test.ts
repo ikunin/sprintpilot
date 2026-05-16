@@ -323,14 +323,19 @@ describe('blocked', () => {
     }
   });
 
-  it('missing_dependency → run_script npm install', () => {
+  it('missing_dependency → abstract run_script install_dependencies (CLI inlines the command)', () => {
     const r = interpretSignal(
       st(STATES.DEV_GREEN),
       { status: 'blocked', blocker_kind: 'missing_dependency', user_input_needed: false },
       medium(),
     );
     expect(r.verdict).toBe('retry');
-    expect((r.nextAction as Record<string, unknown>).type).toBe('run_script');
+    const action = r.nextAction as Record<string, unknown>;
+    expect(action.type).toBe('run_script');
+    expect(action.op).toBe('install_dependencies');
+    // Language-specific argv is inlined by decorateRunScript at the CLI
+    // edge — adapt.js stays pure (no FS detection).
+    expect(action.command).toBeUndefined();
   });
 
   it('user_input_needed=true on any kind → user_prompt', () => {

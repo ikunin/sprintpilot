@@ -952,3 +952,142 @@ describe('decorateRunScript — inlines land.js#planLand steps for land_as_you_g
     expect(r).toBe(otherRunScript);
   });
 });
+
+describe('decorateRunScript — install_dependencies (v2.2.19 language-aware)', () => {
+  // Real user pain: the missing_dependency recovery hardcoded `npm install`,
+  // which failed on non-Node projects. v2.2.19 emits an abstract op and
+  // decorateRunScript inlines the right install command per detected manifest.
+  function mkTmp(): string {
+    const { mkdtempSync } = require('node:fs') as typeof import('node:fs');
+    const { tmpdir } = require('node:os') as typeof import('node:os');
+    const { join } = require('node:path') as typeof import('node:path');
+    return mkdtempSync(join(tmpdir(), 'sp-install-deps-'));
+  }
+  function write(root: string, rel: string, content = '') {
+    const { writeFileSync, mkdirSync } = require('node:fs') as typeof import('node:fs');
+    const { join, dirname } = require('node:path') as typeof import('node:path');
+    mkdirSync(dirname(join(root, rel)), { recursive: true });
+    writeFileSync(join(root, rel), content, 'utf8');
+  }
+  function rm(root: string) {
+    const { rmSync } = require('node:fs') as typeof import('node:fs');
+    rmSync(root, { recursive: true, force: true });
+  }
+  const action = {
+    type: 'run_script',
+    op: 'install_dependencies',
+    reason: 'install_missing_dependency',
+  };
+  const profile = flatToProfile({}, 'medium');
+
+  it('node + npm: npm install', () => {
+    const t = mkTmp();
+    try {
+      write(t, 'package.json', '{}');
+      const r = decorateRunScript(action, {}, profile, t);
+      expect((r.steps as { args: string[] }[])[0].args).toEqual(['npm', 'install']);
+    } finally {
+      rm(t);
+    }
+  });
+
+  it('node + pnpm: pnpm install --frozen-lockfile', () => {
+    const t = mkTmp();
+    try {
+      write(t, 'package.json', '{}');
+      write(t, 'pnpm-lock.yaml', '');
+      const r = decorateRunScript(action, {}, profile, t);
+      expect((r.steps as { args: string[] }[])[0].args).toEqual([
+        'pnpm',
+        'install',
+        '--frozen-lockfile',
+      ]);
+    } finally {
+      rm(t);
+    }
+  });
+
+  it('python pyproject + uv: uv sync', () => {
+    const t = mkTmp();
+    try {
+      write(t, 'pyproject.toml', '');
+      write(t, 'uv.lock', '');
+      const r = decorateRunScript(action, {}, profile, t);
+      expect((r.steps as { args: string[] }[])[0].args).toEqual(['uv', 'sync']);
+    } finally {
+      rm(t);
+    }
+  });
+
+  it('python pyproject + poetry: poetry install', () => {
+    const t = mkTmp();
+    try {
+      write(t, 'pyproject.toml', '');
+      write(t, 'poetry.lock', '');
+      const r = decorateRunScript(action, {}, profile, t);
+      expect((r.steps as { args: string[] }[])[0].args).toEqual(['poetry', 'install']);
+    } finally {
+      rm(t);
+    }
+  });
+
+  it('python requirements.txt: pip install -r', () => {
+    const t = mkTmp();
+    try {
+      write(t, 'requirements.txt', 'flask\n');
+      const r = decorateRunScript(action, {}, profile, t);
+      expect((r.steps as { args: string[] }[])[0].args).toEqual([
+        'pip',
+        'install',
+        '-r',
+        'requirements.txt',
+      ]);
+    } finally {
+      rm(t);
+    }
+  });
+
+  it('rust Cargo.toml: cargo fetch', () => {
+    const t = mkTmp();
+    try {
+      write(t, 'Cargo.toml', '');
+      const r = decorateRunScript(action, {}, profile, t);
+      expect((r.steps as { args: string[] }[])[0].args).toEqual(['cargo', 'fetch']);
+    } finally {
+      rm(t);
+    }
+  });
+
+  it('go go.mod: go mod download', () => {
+    const t = mkTmp();
+    try {
+      write(t, 'go.mod', 'module x');
+      const r = decorateRunScript(action, {}, profile, t);
+      expect((r.steps as { args: string[] }[])[0].args).toEqual(['go', 'mod', 'download']);
+    } finally {
+      rm(t);
+    }
+  });
+
+  it('ruby Gemfile: bundle install', () => {
+    const t = mkTmp();
+    try {
+      write(t, 'Gemfile', '');
+      const r = decorateRunScript(action, {}, profile, t);
+      expect((r.steps as { args: string[] }[])[0].args).toEqual(['bundle', 'install']);
+    } finally {
+      rm(t);
+    }
+  });
+
+  it('no manifest: empty steps + no_manifest_detected flag (degrade, do not halt)', () => {
+    const t = mkTmp();
+    try {
+      const r = decorateRunScript(action, {}, profile, t);
+      expect(r.steps).toEqual([]);
+      expect(r.no_manifest_detected).toBe(true);
+    } finally {
+      rm(t);
+    }
+  });
+});
