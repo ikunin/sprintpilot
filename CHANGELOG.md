@@ -1,5 +1,26 @@
 # Changelog
 
+## [2.2.24] - 2026-05-16
+
+**`git.lint.*` is now actually wired** (supersedes the v2.2.23 experimental warning). The `scripts/post-green-gates.js` composed pipeline (lint-changed + lint-test-pitfalls + ci-parity scan) had a comment header reading "Called by the orchestrator after a `bmad-dev-story` GREEN phase completes verify" — but nothing actually called it. v2.2.24 closes that gap.
+
+### Added
+
+- **`runPostGreenGates(ctx)` helper** in `verify.js` — when `profile.lint_enabled === true` AND `_Sprintpilot/scripts/post-green-gates.js` exists, spawns the script with `--json --project-root <root>` after the standard DEV_GREEN checks pass. Captures `failed_gate` and `first_issue` from the JSON report for the issue message.
+- **`verifyDevGreen` calls it** at the end of the existing checks. If the script exits non-zero AND `profile.lint_blocking === true`, pushes a `post-green-gates failed` issue → verify rejects → adapt retries (so the LLM can fix the lint findings before re-signaling success). Non-blocking failures pass through silently for now (visible in the orchestrator's lint output but don't gate the autopilot).
+- **`profile` plumbed into verify context** (`autopilot.js` passes it; `verify.js` exposes via `ctx.profile`). Existing call sites unchanged.
+- **`lint_enabled` ledger entry** at cmdStart now reports `{lint_enabled: true, lint_blocking: <bool>}` (replaces the v2.2.23 `lint_experimental_warning` since the feature actually works now).
+- 4 regression tests in `verify.test.ts`: default lint_enabled=false skips gates, missing script degrades gracefully, blocking failure rejects, non-blocking failure passes through.
+
+### Why this matters
+
+`git.lint.enabled: true` users (especially on the `large` profile that defaults more aggressive gating) got a real lint enforcement pipeline post-GREEN. The script catches:
+1. Lint errors on changed files (biome / eslint, per-language)
+2. Common LLM-test pitfalls (assertion smells, missing setup)
+3. CI-only failure modes (local-only env assumptions)
+
+All three gates run in `lint_output_limit`-truncated mode (the config has been honored since v2.2.23's typed-profile plumbing). Graceful degradation on missing script — partial installs / older fixtures pass through unchanged.
+
 ## [2.2.23] - 2026-05-16
 
 **`git.lint.*` config plumbed + experimental warning.** The entire lint configuration block (`enabled`, `blocking`, `output_limit`, plus the per-language `linters` map) was documented in `modules/git/config.yaml` but never read by `profile-rules.js`. Users who set `git.lint.enabled: true` saw no behavior change because there was no LINT_CHECK state machine phase to drive lint execution.

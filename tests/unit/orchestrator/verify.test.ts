@@ -379,6 +379,82 @@ describe('verify DEV_GREEN', () => {
     );
     expect(r.ok).toBe(true);
   });
+
+  it('skips post-green-gates when lint_enabled is false (default)', () => {
+    // No lint config → no post-green-gates spawn → no impact on pass/fail.
+    const tf = join(projectRoot, 't.test.ts');
+    writeFileSync(tf, 'test', 'utf8');
+    const r = verify(
+      { phase: STATES.DEV_GREEN },
+      { tests_run: 5, test_files: [tf] },
+      { projectRoot, runner: () => ({ exit_code: 0, tests_run: 5 }) },
+    );
+    expect(r.ok).toBe(true);
+  });
+
+  it('lint_enabled=true + post-green-gates.js missing → does not halt (graceful degrade)', () => {
+    // Partial install / older version. Lint runs but the script isn't
+    // there. Should pass through, not block the autopilot.
+    const tf = join(projectRoot, 't.test.ts');
+    writeFileSync(tf, 'test', 'utf8');
+    const r = verify(
+      { phase: STATES.DEV_GREEN },
+      { tests_run: 5, test_files: [tf] },
+      {
+        projectRoot,
+        runner: () => ({ exit_code: 0, tests_run: 5 }),
+        profile: { lint_enabled: true, lint_blocking: true },
+      },
+    );
+    expect(r.ok).toBe(true);
+  });
+
+  it('lint_enabled=true + post-green-gates fails + lint_blocking=true → verify rejects', () => {
+    // Stage a fake post-green-gates.js that always exits 1.
+    const scriptDir = join(projectRoot, '_Sprintpilot', 'scripts');
+    mkdirSync(scriptDir, { recursive: true });
+    writeFileSync(
+      join(scriptDir, 'post-green-gates.js'),
+      '#!/usr/bin/env node\nprocess.stdout.write(JSON.stringify({failed_gate:"lint-changed",first_issue:"missing semicolon"}));\nprocess.exit(1);\n',
+      'utf8',
+    );
+    const tf = join(projectRoot, 't.test.ts');
+    writeFileSync(tf, 'test', 'utf8');
+    const r = verify(
+      { phase: STATES.DEV_GREEN },
+      { tests_run: 5, test_files: [tf] },
+      {
+        projectRoot,
+        runner: () => ({ exit_code: 0, tests_run: 5 }),
+        profile: { lint_enabled: true, lint_blocking: true },
+      },
+    );
+    expect(r.ok).toBe(false);
+    expect(r.issues.join(' ')).toContain('post-green-gates failed');
+  });
+
+  it('lint_enabled=true + post-green-gates fails + lint_blocking=false → verify still accepts', () => {
+    // Non-blocking lint failure: log it but don't halt.
+    const scriptDir = join(projectRoot, '_Sprintpilot', 'scripts');
+    mkdirSync(scriptDir, { recursive: true });
+    writeFileSync(
+      join(scriptDir, 'post-green-gates.js'),
+      '#!/usr/bin/env node\nprocess.exit(1);\n',
+      'utf8',
+    );
+    const tf = join(projectRoot, 't.test.ts');
+    writeFileSync(tf, 'test', 'utf8');
+    const r = verify(
+      { phase: STATES.DEV_GREEN },
+      { tests_run: 5, test_files: [tf] },
+      {
+        projectRoot,
+        runner: () => ({ exit_code: 0, tests_run: 5 }),
+        profile: { lint_enabled: true, lint_blocking: false },
+      },
+    );
+    expect(r.ok).toBe(true);
+  });
 });
 
 describe('verify CODE_REVIEW', () => {

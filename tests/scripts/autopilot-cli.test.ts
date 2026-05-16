@@ -110,15 +110,15 @@ describe('autopilot start', () => {
     expect(parsed.action.skill).toBe('bmad-create-story');
   });
 
-  it('logs an experimental warning when git.lint.enabled=true (LINT_CHECK phase not yet wired)', () => {
-    // Same honesty pattern as parallel_stories — config is parsed but
-    // the state machine has no LINT_CHECK phase, so users who enable
-    // lint must know it's not running.
+  it('logs that lint_enabled is active (v2.2.24+: post-green-gates.js wired into verifyDevGreen)', () => {
+    // v2.2.24: lint_enabled now actually runs scripts/post-green-gates.js
+    // during DEV_GREEN verify. The v2.2.23 "experimental warning" ledger
+    // entry was replaced with a positive `lint_enabled: true` confirmation.
     const gitCfgDir = join(projectRoot, '_Sprintpilot', 'modules', 'git');
     mkdirSync(gitCfgDir, { recursive: true });
     writeFileSync(
       join(gitCfgDir, 'config.yaml'),
-      'enabled: false\nlint:\n  enabled: true\n',
+      'enabled: false\nlint:\n  enabled: true\n  blocking: true\n',
       'utf8',
     );
     runCli(['start']);
@@ -130,10 +130,11 @@ describe('autopilot start', () => {
     );
     const lines = readFileSync(ledgerPath, 'utf8').trim().split('\n');
     const entries = lines.map((l) => JSON.parse(l));
-    const warning = entries.find(
-      (e) => e.detail && e.detail.lint_experimental_warning,
+    const lintEntry = entries.find(
+      (e) => e.detail && e.detail.lint_enabled === true,
     );
-    expect(warning).toBeDefined();
+    expect(lintEntry).toBeDefined();
+    expect(lintEntry.detail.lint_blocking).toBe(true);
   });
 
   it('logs an experimental warning when ma.parallel_stories=true (state-machine not yet wired)', () => {

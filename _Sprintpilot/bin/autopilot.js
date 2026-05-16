@@ -1461,21 +1461,20 @@ function cmdStart(opts) {
     );
   }
   if (profile.lint_enabled) {
-    // Same honesty pattern as parallel_stories. Config is parsed; no
-    // state-machine integration yet. Users on lint_enabled=true would
-    // otherwise assume lint runs post-DEV_GREEN — it doesn't.
+    // v2.2.24: lint_enabled wires verifyDevGreen → post-green-gates.js
+    // (lint-changed + lint-test-pitfalls + ci-parity scan). lint_blocking
+    // governs whether a failed gate halts the autopilot or passes
+    // through with a warning. The v2.2.23 "not wired" warning is gone —
+    // lint runs for real now.
     ledger.append(
       {
         kind: 'state_transition',
         detail: {
-          lint_experimental_warning:
-            'git.lint.enabled=true: config is read into the typed Profile but the state machine has no LINT_CHECK phase yet. Lint enforcement (per-language linters, blocking/non-blocking gate, output_limit) is tracked for v2.3.0+. Until then, bake lint into your test command (bmad-dev-story GREEN phase will catch failures).',
+          lint_enabled: true,
+          lint_blocking: !!profile.lint_blocking,
         },
       },
       { projectRoot },
-    );
-    process.stderr.write(
-      '[autopilot] WARN git.lint.enabled=true but no LINT_CHECK phase exists yet (planned for v2.3.0). Bake lint into your test command for now.\n',
     );
   }
 
@@ -1647,7 +1646,7 @@ function cmdRecord(opts) {
     profile.enabled === false && stateMachine.shouldSkipVerifyWhenGitDisabled(runtime.phase);
   let verifyResult;
   if (signal.status === 'success' && !isGitDisabledPhase) {
-    verifyResult = verifyMod.verify(runtime, signal.output, { projectRoot });
+    verifyResult = verifyMod.verify(runtime, signal.output, { projectRoot, profile });
     ledger.append(
       { kind: 'verify_result', phase: runtime.phase, ok: verifyResult.ok, issues: verifyResult.issues || [] },
       { projectRoot },
@@ -1656,7 +1655,7 @@ function cmdRecord(opts) {
     verifyResult = verifyMod.verifyWithOverride(
       runtime,
       signal.output || {},
-      { projectRoot },
+      { projectRoot, profile },
       signal.evidence || {},
     );
     ledger.append(

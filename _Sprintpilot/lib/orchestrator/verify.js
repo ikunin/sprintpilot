@@ -164,6 +164,54 @@ function autoDetectTestFiles(ctx, baseBranch) {
   return out;
 }
 
+// Invoke scripts/post-green-gates.js when profile.lint_enabled is true.
+// Returns null when:
+//   - profile.lint_enabled is false / absent (feature opt-out)
+//   - the script is missing (partial install)
+//   - projectRoot is unset
+// Returns { failed: bool, summary?: string } on a real run.
+//
+// The script's contract: exit 0 = all gates pass, exit !=0 = at least
+// one gate failed. JSON report on stdout when invoked with --json (we
+// pass that flag). Failure summary captured for the issue message.
+function runPostGreenGates(ctx) {
+  if (!ctx || !ctx.profile || !ctx.profile.lint_enabled) return null;
+  if (!ctx.projectRoot) return null;
+  const scriptRel = nodePath.join('_Sprintpilot', 'scripts', 'post-green-gates.js');
+  const scriptAbs = nodePath.join(ctx.projectRoot, scriptRel);
+  let fs;
+  try {
+    fs = ctx.fs || nodeFs;
+    if (!fs.existsSync(scriptAbs)) return null;
+  } catch {
+    return null;
+  }
+  const cp = require('node:child_process');
+  try {
+    const r = cp.spawnSync(
+      'node',
+      [scriptAbs, '--json', '--project-root', ctx.projectRoot],
+      { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 120_000 },
+    );
+    if (r.status === 0) return { failed: false };
+    // Try to extract a brief summary from the JSON output. Fall back
+    // to the exit code if parsing fails.
+    let summary = `exit ${r.status}`;
+    try {
+      const parsed = JSON.parse(r.stdout || '{}');
+      if (parsed && parsed.failed_gate) summary = `failed_gate=${parsed.failed_gate}`;
+      if (parsed && parsed.first_issue) summary += `: ${parsed.first_issue}`;
+    } catch {
+      /* keep exit-code summary */
+    }
+    return { failed: true, summary };
+  } catch (_e) {
+    // Script crashed (e.g. ENOENT for node). Treat as non-failing —
+    // the lint phase should not gate the autopilot on its own bugs.
+    return null;
+  }
+}
+
 // Probe the underlying git state to confirm a STORY_DONE signal whose
 // `git_steps_completed` flag was omitted. Returns true iff:
 //   - commit_sha resolves locally (git cat-file -e <sha>)
@@ -227,6 +275,7 @@ function verify(state, signalOutput, context) {
     runner: (context && context.runner) || null,
     projectRoot: (context && context.projectRoot) || '.',
     augmented: (context && context.augmented) || null,
+    profile: (context && context.profile) || null,
   };
   const out = signalOutput || {};
   // Effective state: fall forward to signal.output for identity fields
@@ -379,6 +428,20 @@ function verifyDevGreen(state, out, ctx) {
       // Recovered — don't push the "must be a positive number" issue.
     } else {
       issues.push('tests_run must be a positive number (per AGENTS.md test-result format)');
+    }
+  }
+  // Post-GREEN gates: lint-changed + lint-test-pitfalls + ci-parity scan.
+  // Composed pipeline lives in scripts/post-green-gates.js. Only fires
+  // when profile.lint_enabled === true. Blocking vs non-blocking
+  // governed by profile.lint_blocking. Pre-2.2.24 the script existed
+  // and was documented as "called by the orchestrator after GREEN
+  // verify" but nothing actually invoked it.
+  const lintResult = runPostGreenGates(ctx);
+  if (lintResult) {
+    if (lintResult.failed && (ctx.profile && ctx.profile.lint_blocking)) {
+      issues.push(
+        `post-green-gates failed (lint_blocking=true): ${lintResult.summary || 'see ledger detail'}`,
+      );
     }
   }
   return { ok: issues.length === 0, issues };
