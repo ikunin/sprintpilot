@@ -123,6 +123,18 @@ describe('flatToProfile', () => {
     expect(flatToProfile({ git: { enabled: false } }, 'medium').enabled).toBe(false);
   });
 
+  it('git.lock.stale_timeout_minutes defaults to 30 and honors overrides', () => {
+    expect(flatToProfile({}, 'medium').lock_stale_timeout_minutes).toBe(30);
+    expect(
+      flatToProfile({ git: { lock: { stale_timeout_minutes: 15 } } }, 'medium')
+        .lock_stale_timeout_minutes,
+    ).toBe(15);
+    expect(
+      flatToProfile({ git: { lock: { stale_timeout_minutes: '90' } } }, 'medium')
+        .lock_stale_timeout_minutes,
+    ).toBe(90);
+  });
+
   it('push.auto / push.create_pr default true; honor explicit overrides', () => {
     const def = flatToProfile({}, 'medium');
     expect(def.push_auto).toBe(true);

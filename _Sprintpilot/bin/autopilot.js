@@ -702,6 +702,10 @@ function composeRuntimeState(persisted, profile, projectRoot) {
     // not lifetime). Persisted across in-session resumes so a `pause` mid-flow
     // doesn't reset progress against the limit.
     session_stories_completed: persisted.session_stories_completed || 0,
+    // .autopilot.lock holder ID, persisted so subsequent cmdStart calls
+    // recognize their own lock and refresh in place. Cleared by
+    // sprint-autopilot-off (which calls `lock.js release`).
+    lock_session_id: persisted.lock_session_id || null,
     // halt_requested is intentionally NOT carried forward here: cmdStart
     // clears it on each new session (a `pause` cleanly halts THIS session
     // and the next /sprint-autopilot-on resumes normally).
@@ -731,6 +735,7 @@ function persistRuntimeState(runtime, profile, projectRoot) {
     land_pending: runtime.land_pending,
     pending_alternative: runtime.pending_alternative || null,
     session_stories_completed: runtime.session_stories_completed || 0,
+    lock_session_id: runtime.lock_session_id || null,
   };
   return persistState(updates, profile, projectRoot, runtime.story_key || 'sprint');
 }
@@ -1066,6 +1071,96 @@ function lockUserBranchIfNeeded(runtime, profile, projectRoot) {
   return null;
 }
 
+// .autopilot.lock: prevent concurrent autopilot sessions on the same
+// project. Lockfile contract documented in modules/git/config.yaml
+// ("Lock file (.autopilot.lock — prevents concurrent autopilot sessions)")
+// and implemented in scripts/lock.js. cmdStart wires it in here.
+//
+// Idempotency: a /sprint-autopilot-on mid-flow (e.g. after a halt) must
+// not refuse to resume just because the prior cmdStart left a lock. We
+// store the lock's session_id in autopilot-state.yaml on first acquire and
+// treat a matching id on subsequent cmdStart calls as "my lock; refresh".
+//
+// Return shape:
+//   { acquired: true,  id, refreshed?: true }  — proceed
+//   { acquired: false, holder, ageMin }        — halt; caller emits user_prompt
+//   { acquired: true,  id, takeover: 'stale' } — stale takeover; proceed
+function acquireAutopilotLock(persisted, profile, projectRoot) {
+  const { execFileSync: runFile } = require('node:child_process');
+  const lockScript = path.join(projectRoot, '_Sprintpilot', 'scripts', 'lock.js');
+  if (!fs.existsSync(lockScript)) {
+    return { acquired: true, id: null, skipped: true };
+  }
+  const lockFile = path.join(projectRoot, '.autopilot.lock');
+  const stale = typeof profile.lock_stale_timeout_minutes === 'number'
+    ? profile.lock_stale_timeout_minutes
+    : 30;
+  // stale_timeout_minutes <= 0 means "never auto-take-over". Pass a very
+  // large value to lock.js so it never deems anything STALE.
+  const staleArg = stale > 0 ? String(stale) : '999999';
+
+  const callLock = (action) => {
+    try {
+      const out = runFile(
+        'node',
+        [lockScript, action, '--file', lockFile, '--stale-minutes', staleArg],
+        { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] },
+      ).trim();
+      return { ok: true, out };
+    } catch (e) {
+      return { ok: false, out: (e.stdout && e.stdout.toString().trim()) || '', code: e.status };
+    }
+  };
+
+  const checkResult = callLock('check');
+  const checkOut = checkResult.out || 'FREE';
+
+  if (checkOut === 'FREE') {
+    const acq = callLock('acquire');
+    if (acq.ok && acq.out.startsWith('ACQUIRED:')) {
+      return { acquired: true, id: acq.out.slice('ACQUIRED:'.length) };
+    }
+    // Race: another acquirer just created the lock. Fall through to retry.
+  }
+
+  const match = /^(LOCKED|STALE):([^:]+):(\d+)m$/.exec(checkOut);
+  if (match) {
+    const state = match[1];
+    const holderId = match[2];
+    const ageMin = parseInt(match[3], 10);
+
+    // My own lock? Refresh (rewrite ts + same id) and proceed.
+    if (state === 'LOCKED' && persisted.lock_session_id && persisted.lock_session_id === holderId) {
+      try {
+        const ts = Math.floor(Date.now() / 1000);
+        fs.writeFileSync(lockFile, `${ts}\n${holderId}\n`, { encoding: 'utf8', mode: 0o644 });
+        return { acquired: true, id: holderId, refreshed: true };
+      } catch (e) {
+        return { acquired: false, holder: holderId, ageMin, error: `lock refresh failed: ${e.message}` };
+      }
+    }
+
+    if (state === 'STALE') {
+      const acq = callLock('acquire');
+      if (acq.ok && acq.out.startsWith('ACQUIRED_STALE:')) {
+        return { acquired: true, id: acq.out.slice('ACQUIRED_STALE:'.length), takeover: 'stale' };
+      }
+      if (acq.ok && acq.out.startsWith('ACQUIRED:')) {
+        return { acquired: true, id: acq.out.slice('ACQUIRED:'.length) };
+      }
+      const reMatch = /^LOCKED:([^:]+):(\d+)m$/.exec(acq.out);
+      if (reMatch) {
+        return { acquired: false, holder: reMatch[1], ageMin: parseInt(reMatch[2], 10) };
+      }
+      return { acquired: false, holder: holderId, ageMin };
+    }
+
+    return { acquired: false, holder: holderId, ageMin };
+  }
+
+  return { acquired: true, id: null, warning: `unrecognized lock state: ${checkOut}` };
+}
+
 function cmdStart(opts) {
   const projectRoot = resolveProjectRoot(opts);
   const { typed: profile } = resolveProfile(projectRoot, opts.profile);
@@ -1116,6 +1211,49 @@ function cmdStart(opts) {
       process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
       return 0;
     }
+  }
+
+  // .autopilot.lock — acquire before any state mutation. If another
+  // session holds the lock (and it isn't ours and isn't stale), bail out
+  // with a user_prompt action so the LLM/user knows to either wait or
+  // run `sprint-autopilot-off` in the other session.
+  const lockOutcome = acquireAutopilotLock(persisted, profile, projectRoot);
+  if (!lockOutcome.acquired) {
+    const haltAction = {
+      type: 'user_prompt',
+      reason: 'autopilot_lock_held',
+      prompt:
+        `Another autopilot session holds .autopilot.lock (session ${lockOutcome.holder}, age ${lockOutcome.ageMin}m). ` +
+        `Wait for it to finish, run \`/sprint-autopilot-off\` in the other session, or delete .autopilot.lock if you're sure the holder crashed.`,
+      holder: lockOutcome.holder,
+      age_minutes: lockOutcome.ageMin,
+    };
+    ledger.append(
+      { kind: 'action_emitted', phase: persisted.current_bmad_step || null, action: haltAction },
+      { projectRoot },
+    );
+    process.stdout.write(`${JSON.stringify({ action: haltAction, phase: persisted.current_bmad_step || null }, null, 2)}\n`);
+    return 0;
+  }
+  if (lockOutcome.id) {
+    persisted.lock_session_id = lockOutcome.id;
+    // Eagerly persist lock_session_id so a crash between here and the
+    // final persistRuntimeState below doesn't leave the lockfile owned
+    // by an ID that nothing knows about. Without this, a mid-cmdStart
+    // crash would brick the project until the lock goes stale.
+    persistState({ lock_session_id: lockOutcome.id }, profile, projectRoot, 'sprint');
+    if (profile.coalesce_state_writes) stateStore.flush(profile, { projectRoot, story: 'sprint' });
+    ledger.append(
+      {
+        kind: 'lock_acquired',
+        detail: {
+          session_id: lockOutcome.id,
+          takeover: lockOutcome.takeover || null,
+          refreshed: !!lockOutcome.refreshed,
+        },
+      },
+      { projectRoot },
+    );
   }
 
   // Persist the new queue BEFORE composing runtime state so the queue
@@ -1419,4 +1557,11 @@ if (require.main === module) {
   process.exit(main(process.argv.slice(2)));
 }
 
-module.exports = { main, SUBCOMMANDS, decorateGitOp, decorateRunScript, composeRuntimeState };
+module.exports = {
+  main,
+  SUBCOMMANDS,
+  decorateGitOp,
+  decorateRunScript,
+  composeRuntimeState,
+  acquireAutopilotLock,
+};

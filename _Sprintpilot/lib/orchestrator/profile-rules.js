@@ -148,6 +148,12 @@ function flatToProfile(resolved, profileName) {
     // (story keys + prefix) to this length with a 6-char hash suffix to
     // keep the name unique. Honors the contract advertised in config.yaml.
     max_branch_length: coerceInt(get(resolved, 'git.max_branch_length'), 60),
+    // git.lock.stale_timeout_minutes — .autopilot.lock is auto-taken-over
+    // by cmdStart when older than this. Documented in modules/git/config.yaml
+    // ("auto-remove locks older than this"). Forwarded to lock.js via
+    // --stale-minutes. 0 disables the auto-takeover entirely (locks are
+    // never considered stale; manual `autopilot off` required).
+    lock_stale_timeout_minutes: coerceInt(get(resolved, 'git.lock.stale_timeout_minutes'), 30),
     // git.platform.provider + base_url — forwarded to create-pr.js when
     // the orchestrator opens or polls PRs. 'auto' delegates platform
     // detection to create-pr.js (currently defaults to github).

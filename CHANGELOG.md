@@ -1,5 +1,18 @@
 # Changelog
 
+## [2.2.14] - 2026-05-16
+
+**`.autopilot.lock` is now actually acquired on `cmdStart`.** The lockfile contract was documented in `modules/git/config.yaml` ("Lock file (.autopilot.lock — prevents concurrent autopilot sessions)"), the script existed at `scripts/lock.js` with full `check`/`acquire`/`release`/`status` actions and `stale_timeout_minutes` handling — but the orchestrator never called `acquire`. The only consumer was `sprint-autopilot-off` which called `release`. Two concurrent `/sprint-autopilot-on` sessions on the same project would happily race each other through the BMad cycle, corrupting `_bmad-output/implementation-artifacts/sprint-status.yaml` and stomping on each other's git branches.
+
+### Added
+
+- **`acquireAutopilotLock(persisted, profile, projectRoot)`** in `autopilot.js` — spawns `lock.js check` first, then `acquire` for FREE/STALE, or refreshes in place when the on-disk lock's session id matches `persisted.lock_session_id` (idempotent across `/sprint-autopilot-on` in the same logical session). Returns `{acquired, id, holder?, ageMin?, refreshed?, takeover?}`.
+- **`cmdStart` wires the lock check** between resume-divergence detection and runtime composition. On `acquired: false` emits a `user_prompt` action with `reason: 'autopilot_lock_held'`, includes holder + age in the payload, and tells the user to wait, run `/sprint-autopilot-off` in the other session, or delete the lockfile manually.
+- **`persisted.lock_session_id`** plumbed through `composeRuntimeState` and `persistRuntimeState` so subsequent cmdStart calls recognize their own lock. Persisted eagerly right after acquire (a crash between acquire and the final state-write would otherwise brick the project until the lock goes stale).
+- **`lock_acquired` ledger event** records `session_id`, `takeover`, and `refreshed` for the audit trail.
+- **`profile.lock_stale_timeout_minutes`** added to the typed Profile, default `30`, reads `git.lock.stale_timeout_minutes` from config. `0` disables auto-takeover (locks are never considered stale; manual `autopilot off` required).
+- 7 regression tests in `autopilot-lock.test.ts` covering: free acquire, foreign-holder block, self-refresh, stale takeover, `lock_stale_timeout_minutes: 0` semantics, custom threshold, partial-install bailout. Plus 1 profile-rules test for the new field.
+
 ## [2.2.13] - 2026-05-16
 
 **`session_story_limit` is now actually enforced.** Documented since 2.0.1 in `Sprintpilot.md` ("Stories fully implemented per autopilot run before checkpoint. `0` = unlimited") and parsed into the typed Profile by `profile-rules.js` (default `3`, nano `5`), but the orchestrator never read the value back. Sessions ran indefinitely against `resolveNextStoryKey` until the LLM either improvised a pause (the v2.2.11 contract violation) or hit a TRUE BLOCKER. The promised "checkpoint every N stories" was a no-op.
