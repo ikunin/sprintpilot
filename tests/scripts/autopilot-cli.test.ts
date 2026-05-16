@@ -110,6 +110,38 @@ describe('autopilot start', () => {
     expect(parsed.action.skill).toBe('bmad-create-story');
   });
 
+  it('logs an experimental warning when ma.parallel_stories=true (state-machine not yet wired)', () => {
+    // Document the gap explicitly: planBatch + dispatch-layer.js exist
+    // as building blocks but nextAction never emits parallel_batch.
+    // cmdStart MUST surface this so users who set the flag don't assume
+    // parallel dispatch is happening.
+    // resolve-profile wraps modules/ma/config.yaml content under `ma:`
+    // for the merged tree; profile-rules.js then reads `ma.parallel_stories`.
+    // The shipped modules/ma/config.yaml wraps under `multi_agent:` (legacy
+    // namespace) which doesn't reach profile-rules — that's a separate
+    // config-contract bug. Test the path profile-rules actually consumes.
+    const maCfgDir = join(projectRoot, '_Sprintpilot', 'modules', 'ma');
+    mkdirSync(maCfgDir, { recursive: true });
+    writeFileSync(
+      join(maCfgDir, 'config.yaml'),
+      'parallel_stories: true\nmax_parallel_stories: 2\n',
+      'utf8',
+    );
+    runCli(['start']);
+    const ledgerPath = join(
+      projectRoot,
+      '_bmad-output',
+      'implementation-artifacts',
+      'ledger.jsonl',
+    );
+    const lines = readFileSync(ledgerPath, 'utf8').trim().split('\n');
+    const entries = lines.map((l) => JSON.parse(l));
+    const warning = entries.find(
+      (e) => e.detail && e.detail.parallel_stories_experimental_warning,
+    );
+    expect(warning).toBeDefined();
+  });
+
   it('writes the ledger and state on start', () => {
     runCli(['start']);
     const statePath = join(

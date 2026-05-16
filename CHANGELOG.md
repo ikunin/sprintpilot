@@ -1,5 +1,25 @@
 # Changelog
 
+## [2.2.16] - 2026-05-16
+
+**Two parallel-stories config truths surfaced.** Auditing revealed both a config-contract bug AND a feature gap:
+
+1. **`modules/ma/config.yaml` namespace bug.** The shipped file used `multi_agent:` as the top-level key; `resolve-profile.js` then deep-merged it under `ma:` producing `resolved.ma.multi_agent.parallel_stories` — but `profile-rules.js` reads `ma.parallel_stories`. The path mismatch meant user overrides in `modules/ma/config.yaml` were silently ignored. Only the profile YAMLs (`_base.yaml`, `large.yaml`, etc.) — which DO use `ma:` correctly — actually reached the typed Profile.
+2. **`ma.parallel_stories=true` never produced parallelism.** The supporting infrastructure (`parallel-batch.js` `planBatch`/`classifyResults`, `dispatch-layer.js`, `agent-adapter.js`, `merge-shards.js`, `resolve-dag.js`) is fully implemented as building blocks — but `state-machine.nextAction` never emits a `parallel_batch` action. Every story still flows through the 7-phase BMad cycle one at a time. The `large` profile sets `parallel_stories: true` by default, so users on that profile were getting sequential execution while the config said parallel.
+
+### Fixed
+
+- **`modules/ma/config.yaml`** — top-level key renamed `multi_agent:` → `ma:` so user overrides actually flow through `resolve-profile.js` → `profile-rules.js`. Added a comment header explaining the contract so future edits don't regress.
+
+### Added
+
+- **Experimental warning at cmdStart** — when `profile.parallel_stories === true`, autopilot now emits a clear stderr WARN plus a `state_transition` ledger entry with `detail.parallel_stories_experimental_warning` explaining that the state machine integration is planned for v2.3.0+. Users no longer silently assume parallel dispatch is happening.
+- 1 regression test in `autopilot-cli.test.ts` asserting the warning fires when the flag is enabled.
+
+### Not changed
+
+The full parallel-stories implementation (state machine multi-story tracking, per-story state shards with merge points, conflict detection in preflight-merge, worktree race protection, aggregate signal handling) is a v2.3.0+ effort. Shipping a stub `parallel_batch` emission would have been misleading; the explicit warning is the honest move.
+
 ## [2.2.15] - 2026-05-16
 
 **Worktree health check now runs on every `cmdStart`.** `git.worktree.health_check_on_boot: true` was documented in `modules/git/config.yaml` ("check for orphaned worktrees from crashed sessions") and `scripts/health-check.js` had a complete implementation (CLEAN_DONE / COMMITTED / STALE / DIRTY / ORPHAN classification, SUMMARY line, status-file integration), but nothing called it on boot. Crashed sessions left orphan worktrees under `.worktrees/` and the autopilot blithely created a new branch alongside them.

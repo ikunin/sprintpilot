@@ -1346,6 +1346,29 @@ function cmdStart(opts) {
     );
   }
 
+  // parallel_stories: surface honestly that the documented flag is not
+  // yet wired through the BMad state machine. The supporting pieces
+  // (planBatch, dispatch-layer.js, agent-adapter.js, merge-shards.js)
+  // exist as building blocks but nextAction never emits a parallel_batch
+  // action — every story still flows through the 7-phase cycle one at a
+  // time. A user who sets `ma.parallel_stories: true` and doesn't see
+  // this notice would assume parallelism is happening when it isn't.
+  if (profile.parallel_stories) {
+    ledger.append(
+      {
+        kind: 'state_transition',
+        detail: {
+          parallel_stories_experimental_warning:
+            'ma.parallel_stories=true is honored by the planBatch / dispatch-layer.js building blocks but the BMad state machine still emits one story at a time. Full intra-epic parallel dispatch is tracked for v2.3.0+. Stories continue sequentially in this session.',
+        },
+      },
+      { projectRoot },
+    );
+    process.stderr.write(
+      '[autopilot] WARN ma.parallel_stories=true but the state machine is not yet wired for parallel dispatch (planned for v2.3.0). Stories will run sequentially this session.\n',
+    );
+  }
+
   // Worktree health check — once per session, after lock acquire so we
   // don't compete with another active session for the same .worktrees
   // directory.

@@ -1,7 +1,12 @@
-# Multi-Agent Configuration — disabled in v1.0
-# Enable in v1.1 for parallel code review
+# Multi-Agent Configuration
+#
+# Top-level key MUST be `ma:` — resolve-profile.js merges this under the
+# `ma` namespace, and profile-rules.js reads `ma.parallel_stories` /
+# `ma.max_parallel_stories`. The legacy `multi_agent:` wrapper used in
+# pre-2.2.16 versions was silently ignored (deep-merge produced
+# `resolved.ma.multi_agent.*` instead of `resolved.ma.*`).
 
-multi_agent:
+ma:
   enabled: true
   max_parallel_review_layers: 3 # Always 3: blind, edge-case, acceptance
   max_parallel_research: 3 # Max concurrent research agents per batch
