@@ -14,8 +14,13 @@
 //
 // Usage:
 //   post-green-gates.js [--json] [--changed-files <path>] [--project-root <path>]
+//                       [--output-limit <N>]
 //     --changed-files: path to a newline-delimited list of changed files
 //                      (default: derive from `git diff --name-only HEAD`)
+//     --output-limit:  max lines of lint output per gate (forwarded to
+//                      lint-changed.js as --limit). Honors
+//                      `git.lint.output_limit` from config when called
+//                      from the orchestrator (v2.2.28+).
 //
 // Each gate runs in a child process via execFileSync. Argv-only — no shell.
 
@@ -90,20 +95,22 @@ function main(argv) {
   const changed = listChangedFiles(projectRoot, opts['changed-files']);
   const jsTs = changed.filter(isJsTsFile);
   const testFiles = changed.filter(isTestFile);
+  const outputLimit = parseInt(opts['output-limit'] || '0', 10);
+  const lintersJson = opts['linters-json'] || '';
 
   const gates = [];
 
   // Gate 1: lint-changed.
   const lintChangedPath = path.join(projectRoot, '_Sprintpilot', 'scripts', 'lint-changed.js');
   if (fs.existsSync(lintChangedPath) && jsTs.length > 0) {
-    gates.push(
-      runGate(
-        'lint-changed',
-        'node',
-        [lintChangedPath, '--project-root', projectRoot],
-        projectRoot,
-      ),
-    );
+    const lcArgs = [lintChangedPath, '--project-root', projectRoot];
+    if (outputLimit > 0) {
+      lcArgs.push('--limit', String(outputLimit));
+    }
+    if (lintersJson) {
+      lcArgs.push('--linters-json', lintersJson);
+    }
+    gates.push(runGate('lint-changed', 'node', lcArgs, projectRoot));
   } else {
     gates.push({
       gate: 'lint-changed',

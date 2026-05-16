@@ -187,10 +187,25 @@ function runPostGreenGates(ctx) {
     return null;
   }
   const cp = require('node:child_process');
+  const args = [scriptAbs, '--json', '--project-root', ctx.projectRoot];
+  // Forward output_limit (v2.2.28). Pre-2.2.28 the typed-profile field
+  // existed but lint-changed.js used its hardcoded default of 100.
+  if (typeof ctx.profile.lint_output_limit === 'number' && ctx.profile.lint_output_limit > 0) {
+    args.push('--output-limit', String(ctx.profile.lint_output_limit));
+  }
+  // Forward per-language linter map (v2.2.28). Lets users reorder or
+  // disable linters via git.lint.linters.{language}: [list].
+  if (ctx.profile.lint_linters && typeof ctx.profile.lint_linters === 'object') {
+    try {
+      args.push('--linters-json', JSON.stringify(ctx.profile.lint_linters));
+    } catch {
+      /* malformed user config — ignore, fall back to defaults */
+    }
+  }
   try {
     const r = cp.spawnSync(
       'node',
-      [scriptAbs, '--json', '--project-root', ctx.projectRoot],
+      args,
       { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 120_000 },
     );
     if (r.status === 0) return { failed: false };

@@ -190,6 +190,16 @@ function flatToProfile(resolved, profileName) {
     lint_enabled: coerceBool(get(resolved, 'git.lint.enabled'), false),
     lint_blocking: coerceBool(get(resolved, 'git.lint.blocking'), false),
     lint_output_limit: coerceInt(get(resolved, 'git.lint.output_limit'), 100),
+    // git.lint.linters — per-language preference map. v2.2.28+ forwards
+    // this to lint-changed.js as --linters-json so users can reorder
+    // priorities or disable individual linters. The default-shipped
+    // priority order in lint-changed.js matches the documented config
+    // defaults, so most users see no behavior change. Setting an empty
+    // array for a language disables linting for that language entirely.
+    lint_linters: (() => {
+      const v = get(resolved, 'git.lint.linters');
+      return v && typeof v === 'object' && !Array.isArray(v) ? v : null;
+    })(),
     // git.platform.provider + base_url — forwarded to create-pr.js when
     // the orchestrator opens or polls PRs. 'auto' delegates platform
     // detection to create-pr.js (currently defaults to github).

@@ -1,5 +1,31 @@
 # Changelog
 
+## [2.2.28] - 2026-05-16
+
+**`git.lint.output_limit` and `git.lint.linters` are now actually honored.** Both fields landed in the typed Profile (v2.2.23) and v2.2.24 wired the script invocation, but neither knob actually flowed through to `lint-changed.js`. Users who configured a custom output limit or preferred linter order saw no behavior change — `lint-changed.js` used its hardcoded default of 100 lines and its hardcoded per-language priority.
+
+### Fixed
+
+- **`verify.runPostGreenGates`** forwards `--output-limit <N>` (from `profile.lint_output_limit`) and `--linters-json <json>` (from `profile.lint_linters`) to `scripts/post-green-gates.js`.
+- **`post-green-gates.js`** accepts both new flags and forwards them to `lint-changed.js` as `--limit` and `--linters-json` respectively. Backwards-compatible: when the flags are absent (older callers), behavior is unchanged.
+- **`lint-changed.js`** new `--linters-json <json>` flag. Parses a per-language map `{ "<lang>": ["<linter>", ...] }`. When set, for each detected language, only the named linters are tried (in order). An empty list disables linting for that language. Aliases `javascript` and `typescript` are merged into `js-ts` (both share eslint/biome tooling). Malformed JSON logs a warning and falls back to auto-detection rather than failing the gate.
+
+### Added
+
+- `lint_linters` field on the typed Profile (default `null` → auto-detect).
+- 2 profile-rules regression tests: object passthrough, non-object rejection.
+- 1 verify integration test: orchestrator → post-green-gates argv contains `--output-limit 42 --linters-json {...}` when profile fields are set.
+- 3 lint-changed regression tests: empty list disables a language, invalid JSON falls back to auto-detect, help text mentions the new flag.
+
+### Why this matters
+
+The lint stack now respects every documented knob in `modules/git/config.yaml`:
+- `enabled` / `blocking` — phase gating (v2.2.24)
+- `output_limit` — output truncation in context (v2.2.28)
+- `linters.<language>: [...]` — preference order + opt-out (v2.2.28)
+
+Users with strict context budgets (smaller limits) and users with non-default linter setups (e.g., `python: [pylint]` only, no `ruff`) now get the behavior the config promises.
+
 ## [2.2.27] - 2026-05-16
 
 **`workflow.orchestrator.md` docs updated to reflect v2.2.17–v2.2.25's auto-recovery.** The LLM-facing contract documentation still described the pre-2.2.17 strict checks (literal `## Acceptance Criteria` heading, missing `test_files` → halt, `_bmad-output/reviews/<key>.md` required path). LLMs reading the doc would over-engineer their signaling to comply with checks that no longer exist.

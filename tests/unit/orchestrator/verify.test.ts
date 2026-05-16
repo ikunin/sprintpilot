@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -481,6 +481,46 @@ describe('verify DEV_GREEN', () => {
     );
     expect(r.ok).toBe(false);
     expect(r.issues.join(' ')).toContain('post-green-gates failed');
+  });
+
+  it('lint_enabled=true forwards lint_output_limit + lint_linters to post-green-gates (v2.2.28)', () => {
+    // Stage a fake post-green-gates that echoes argv to a sentinel file
+    // so we can assert the orchestrator forwarded the knobs.
+    const scriptDir = join(projectRoot, '_Sprintpilot', 'scripts');
+    mkdirSync(scriptDir, { recursive: true });
+    const sentinel = join(projectRoot, 'pgg-argv.json');
+    writeFileSync(
+      join(scriptDir, 'post-green-gates.js'),
+      `#!/usr/bin/env node\nrequire('node:fs').writeFileSync(${JSON.stringify(
+        sentinel,
+      )}, JSON.stringify(process.argv.slice(2)));\nprocess.exit(0);\n`,
+      'utf8',
+    );
+    const tf = join(projectRoot, 't.test.ts');
+    writeFileSync(tf, 'test', 'utf8');
+    const r = verify(
+      { phase: STATES.DEV_GREEN },
+      { tests_run: 5, test_files: [tf] },
+      {
+        projectRoot,
+        runner: () => ({ exit_code: 0, tests_run: 5 }),
+        profile: {
+          lint_enabled: true,
+          lint_blocking: true,
+          lint_output_limit: 42,
+          lint_linters: { python: ['pylint'], javascript: ['biome'] },
+        },
+      },
+    );
+    expect(r.ok).toBe(true);
+    // Re-import after the verify call wrote it.
+    const argv = JSON.parse(readFileSync(sentinel, 'utf8')) as string[];
+    expect(argv).toContain('--output-limit');
+    expect(argv[argv.indexOf('--output-limit') + 1]).toBe('42');
+    expect(argv).toContain('--linters-json');
+    const linters = JSON.parse(argv[argv.indexOf('--linters-json') + 1]);
+    expect(linters.python).toEqual(['pylint']);
+    expect(linters.javascript).toEqual(['biome']);
   });
 
   it('lint_enabled=true + post-green-gates fails + lint_blocking=false → verify still accepts', () => {

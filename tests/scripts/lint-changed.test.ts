@@ -92,5 +92,44 @@ describe('lint-changed', () => {
     const r = runScript('lint-changed', ['--help'], { cwd: repo.dir });
     expect(r.status).toBe(0);
     expect(r.stdout).toContain('Usage:');
+    expect(r.stdout).toContain('--linters-json');
+  });
+
+  it('linters-json with empty list disables linting for that language', () => {
+    // python: [] → no linters tried for python files. With no other
+    // changed files, detectAndLint returns null → exit 2 "no linter found".
+    commitFile(repo.dir, 'app.py', 'x = 1');
+    modifyFile(repo.dir, 'app.py', 'import os\n');
+    const r = runScript(
+      'lint-changed',
+      ['--linters-json', '{"python":[]}'],
+      { cwd: repo.dir, env: { PATH: minimalPath() } },
+    );
+    expect(r.status).toBe(2);
+  });
+
+  it('linters-json with invalid JSON falls back to auto-detection', () => {
+    commitFile(repo.dir, 'data.xyz', 'some data');
+    modifyFile(repo.dir, 'data.xyz', 'modified');
+    const r = runScript(
+      'lint-changed',
+      ['--linters-json', 'not-json'],
+      { cwd: repo.dir, env: { PATH: minimalPath() } },
+    );
+    // No linter for .xyz → exit 2, same as without the bad flag.
+    expect(r.status).toBe(2);
+    expect(r.stderr).toContain('invalid --linters-json');
+  });
+
+  it('linters-json normalizes javascript+typescript keys into js-ts', () => {
+    // Smoke test: with no JS/TS changes and an empty list, behavior
+    // doesn't change. Real-linter behavior tested manually.
+    const r = runScript(
+      'lint-changed',
+      ['--linters-json', '{"javascript":[],"typescript":[]}'],
+      { cwd: repo.dir },
+    );
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain('No changed files to lint');
   });
 });

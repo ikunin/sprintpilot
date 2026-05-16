@@ -167,6 +167,7 @@ describe('flatToProfile', () => {
     expect(def.lint_enabled).toBe(false);
     expect(def.lint_blocking).toBe(false);
     expect(def.lint_output_limit).toBe(100);
+    expect(def.lint_linters).toBeNull();
     const overridden = flatToProfile(
       { git: { lint: { enabled: true, blocking: true, output_limit: 50 } } },
       'medium',
@@ -174,6 +175,34 @@ describe('flatToProfile', () => {
     expect(overridden.lint_enabled).toBe(true);
     expect(overridden.lint_blocking).toBe(true);
     expect(overridden.lint_output_limit).toBe(50);
+  });
+
+  it('git.lint.linters is plumbed as an object map (v2.2.28)', () => {
+    const r = flatToProfile(
+      {
+        git: {
+          lint: {
+            linters: {
+              python: ['pylint'],
+              javascript: ['biome'],
+              typescript: ['eslint'],
+            },
+          },
+        },
+      },
+      'medium',
+    );
+    expect(r.lint_linters).toEqual({
+      python: ['pylint'],
+      javascript: ['biome'],
+      typescript: ['eslint'],
+    });
+  });
+
+  it('git.lint.linters defaults to null (auto-detect) and rejects non-object shapes', () => {
+    expect(flatToProfile({}, 'medium').lint_linters).toBeNull();
+    expect(flatToProfile({ git: { lint: { linters: 'not-a-map' } } }, 'medium').lint_linters).toBeNull();
+    expect(flatToProfile({ git: { lint: { linters: ['a', 'b'] } } }, 'medium').lint_linters).toBeNull();
   });
 
   it('push.auto / push.create_pr default true; honor explicit overrides', () => {
