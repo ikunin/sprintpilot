@@ -1,5 +1,23 @@
 # Changelog
 
+## [2.2.20] - 2026-05-16
+
+**`worktree.cleanup_on_merge` is now actually wired.** Documented since the original git config (`modules/git/config.yaml`: "false = keep worktrees after epic completion for inspection") and exposed via `complexity_profile`. The state machine emitted `MERGE_EPIC` git_ops, the merge plan deleted the branch (`gh pr merge --delete-branch` or `glab mr merge --remove-source-branch`), but the `.worktrees/<key>/` directory was left orphan on disk. Over multiple epics the user's project accumulated `.worktrees/` entries that the v2.2.15 boot-time health check then flagged as ORPHAN, halting startup until manual cleanup.
+
+### Added
+
+- **`scripts/cleanup-worktrees.js`** — walks `.worktrees/*`, runs `git worktree prune --expire now`, and removes directories whose attached branch no longer exists locally OR on `origin/`. Conservative: leaves directories with detached HEAD or unparseable `.git` files untouched (manual inspection). Outputs `ORPHAN:<name>` per removal + a `SUMMARY:<inspected>:<removed>:<kept>` line. Supports `--dry-run`.
+- **`profile.worktree_cleanup_on_merge`** added to typed Profile, default `true`, reads `git.worktree.cleanup_on_merge` from config.
+- **`buildCleanupSteps(profile)` helper** in `git-plan.js` — appends the cleanup script as an `optional: true` step (with `tolerate_exit_codes: [0,1,2]` so a cleanup failure doesn't fail the epic merge) to ALL three `planMergeEpic` paths:
+  - GitHub PR merge path (after `gh pr merge`)
+  - GitLab MR merge path (after `glab mr merge`)
+  - Local-merge fallback path (after the final `git push origin <base>`)
+- 3 regression tests: github path includes cleanup step, `cleanup_on_merge=false` omits it, profile-rules default + override.
+
+### Why this matters
+
+Before this fix, `cleanup_on_merge: true` was a no-op config knob. After each epic the `.worktrees/` directory grew by N orphans (one per merged story), and the v2.2.15 boot health check would halt on them, forcing the user to manually `git worktree prune` + `rm -rf .worktrees/<keys>`. v2.2.20 closes the loop: merge → cleanup → next-session boot is clean.
+
 ## [2.2.19] - 2026-05-16
 
 **`missing_dependency` recovery is now language-aware.** The recoverable blocker handler in `adapt.js` hardcoded `command: ['npm', 'install']`. On any non-Node project (Python, Rust, Go, Ruby, Java, Swift, .NET, PHP, etc.) the recovery step failed instantly and the retry budget burned through. Real-world impact: the user's monorepo with `apps/gateway` (Node) PLUS `apps/ai-service` (Python) PLUS `firmware/` (C++) saw recovery succeed on Node-only stories and fail on the rest.

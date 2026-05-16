@@ -523,6 +523,27 @@ function buildPrBody(state, profile, projectRoot, warnings) {
 // Both paths honor profile.squash_on_merge. The PR-merge path also
 // requires profile.platform_provider; non-github platforms fall through
 // to the local-merge sequence with a description note.
+// Build the worktree-cleanup steps appended to every merge_epic plan
+// when profile.worktree_cleanup_on_merge is true. Documented in
+// modules/git/config.yaml ("false = keep worktrees after epic
+// completion for inspection"). Falls back silently when the helper
+// script isn't available (partial install).
+function buildCleanupSteps(profile) {
+  if (!profile.worktree_cleanup_on_merge) return [];
+  if (!profile.worktree_enabled) return [];
+  return [
+    {
+      args: ['node', '_Sprintpilot/scripts/cleanup-worktrees.js'],
+      description: 'remove orphan worktrees whose branches were merged + deleted',
+      // SKIPPED (no .worktrees/ dir) returns 0; real failures here should
+      // not halt the merge — the epic is already merged, cleanup is
+      // best-effort housekeeping.
+      tolerate_exit_codes: [0, 1, 2],
+      optional: true,
+    },
+  ];
+}
+
 function planMergeEpic(state, profile, _action, branch) {
   const baseBranch = profile.base_branch || 'main';
   const squash = !!profile.squash_on_merge;
@@ -610,6 +631,7 @@ function planMergeEpic(state, profile, _action, branch) {
             description: `merge epic PR for ${branch} via gh (${squash ? 'squash' : 'merge'}, delete branch)`,
             env: Object.keys(env).length ? env : undefined,
           },
+          ...buildCleanupSteps(profile),
         ],
       };
     }
@@ -635,6 +657,7 @@ function planMergeEpic(state, profile, _action, branch) {
             description: `merge epic MR for ${branch} via glab${squash ? ' (squash)' : ''}`,
             env: Object.keys(env).length ? env : undefined,
           },
+          ...buildCleanupSteps(profile),
         ],
       };
     }
@@ -712,6 +735,7 @@ function planMergeEpic(state, profile, _action, branch) {
       retry: { attempts: 4, backoff_ms: [2000, 4000, 8000, 16000], on: 'network' },
     });
   }
+  for (const s of buildCleanupSteps(profile)) steps.push(s);
   return { branch, steps };
 }
 

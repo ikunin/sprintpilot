@@ -143,6 +143,14 @@ describe('flatToProfile', () => {
     ).toBe(false);
   });
 
+  it('git.worktree.cleanup_on_merge defaults true and honors overrides', () => {
+    expect(flatToProfile({}, 'medium').worktree_cleanup_on_merge).toBe(true);
+    expect(
+      flatToProfile({ git: { worktree: { cleanup_on_merge: false } } }, 'medium')
+        .worktree_cleanup_on_merge,
+    ).toBe(false);
+  });
+
   it('push.auto / push.create_pr default true; honor explicit overrides', () => {
     const def = flatToProfile({}, 'medium');
     expect(def.push_auto).toBe(true);

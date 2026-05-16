@@ -404,9 +404,11 @@ describe('integration: granularity=epic full lifecycle (commit_and_push → MERG
 });
 
 describe('plan: merge_epic', () => {
-  it('default (push_create_pr=true + github/auto) → wait + switch base + gh pr merge --merge --delete-branch', () => {
+  it('default (push_create_pr=true + github/auto) → wait + switch base + gh pr merge --merge --delete-branch + cleanup', () => {
     const r = plan(story(), flatToProfile({}, 'medium'), { type: 'git_op', op: 'merge_epic' });
-    expect(r.steps).toHaveLength(3);
+    // v2.2.20: cleanup_on_merge defaults true → one extra cleanup step
+    // is appended after the merge.
+    expect(r.steps).toHaveLength(4);
     // Step 0: wait for CI green.
     expect(r.steps[0].args[0]).toBe('node');
     expect(r.steps[0].args.some((a: string) => a.endsWith('create-pr.js'))).toBe(true);
@@ -422,6 +424,19 @@ describe('plan: merge_epic', () => {
     expect(r.steps[2].args).toContain('merge');
     expect(r.steps[2].args).toContain('--merge');
     expect(r.steps[2].args).toContain('--delete-branch');
+    // Step 3: worktree cleanup (cleanup_on_merge=true by default).
+    expect(r.steps[3].args[0]).toBe('node');
+    expect(r.steps[3].args.some((a: string) => a.endsWith('cleanup-worktrees.js'))).toBe(true);
+    expect(r.steps[3].optional).toBe(true);
+  });
+
+  it('cleanup_on_merge=false → no cleanup step appended', () => {
+    const p = { ...flatToProfile({}, 'medium'), worktree_cleanup_on_merge: false };
+    const r = plan(story(), p, { type: 'git_op', op: 'merge_epic' });
+    expect(r.steps).toHaveLength(3);
+    expect(r.steps.find((s: { args: string[] }) =>
+      s.args.some((a) => typeof a === 'string' && a.endsWith('cleanup-worktrees.js')),
+    )).toBeUndefined();
   });
 
   it('default + squash_on_merge=true → gh pr merge --squash', () => {

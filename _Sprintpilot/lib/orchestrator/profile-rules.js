@@ -105,6 +105,15 @@ function flatToProfile(resolved, profileName) {
       get(resolved, 'git.worktree.health_check_on_boot'),
       true,
     ),
+    // git.worktree.cleanup_on_merge — when true, planMergeEpic appends
+    // `git worktree prune` + per-directory cleanup steps so .worktrees/
+    // doesn't accumulate orphans after an epic merges. Documented in
+    // modules/git/config.yaml ("false = keep worktrees after epic
+    // completion for inspection").
+    worktree_cleanup_on_merge: coerceBool(
+      get(resolved, 'git.worktree.cleanup_on_merge'),
+      true,
+    ),
     squash_on_merge: coerceBool(get(resolved, 'git.squash_on_merge'), false),
     reuse_user_branch: coerceBool(get(resolved, 'git.reuse_user_branch'), false),
     merge_strategy: coerceEnum(
