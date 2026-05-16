@@ -1,5 +1,19 @@
 # Changelog
 
+## [2.2.11] - 2026-05-16
+
+**Forbid LLM-initiated pause.** Real-world report: a user's autopilot stopped after 1 story (well before `session_story_limit`) because the LLM driving the session sent a `user_input { kind: 'pause' }` with details `"Story 4-11 complete and PR #42 opened. Natural pause point — CI + human review before 4-12 keeps the merge cadence sane."` The orchestrator did the right thing — `pause` is a legitimate user-input command — but the LLM developed a "natural breakpoint" heuristic that defeats the autopilot's purpose. The user expected the autopilot to drive without stopping until `session_story_limit` or a TRUE BLOCKER.
+
+### Changed
+
+- **`workflow.orchestrator.md` § "Pause is human-only"** — new section explicitly forbidding LLM-initiated pause. Enumerates the only valid stop conditions (`session_story_limit`, TRUE BLOCKER, retry budget exhaustion, sprint complete, explicit human request). Lists rejected heuristics: "natural pause point," "CI is still running," "diff is large, let's checkpoint," "merge cadence." Pauses for any of those are contract violations.
+- **`SKILL.md` § "Never improvise"** — added explicit bullet: "Never pause on your own initiative. `user_input { kind: 'pause' }` is a HUMAN command."
+- **`user_input` row in the signals table** annotated: "**NEVER send `pause` on your own initiative**."
+
+### Not changed
+
+The orchestrator-side `pause` user-command handler stays as-is — the orchestrator can't reliably distinguish human-typed pause from LLM-typed pause (the LLM could spoof a flag if added). The fix is at the contract layer: a clear instruction the LLM is expected to follow, with the audit trail (`ledger.jsonl` records `reason: user_pause` and the `details` string) available to surface contract violations after the fact.
+
 ## [2.2.10] - 2026-05-15
 
 **Catch-all phase reset when a story-bound phase ends up with no story_key.** Real-world report: a user's session had `current_story: null` + `current_bmad_step: story_done` (nullified by an earlier v2.2.4 over-rejection that didn't reset phase). v2.2.9's reset only fires inside the rejection branch — null current_story means no rejection fires now, so no reset triggers either. The orchestrator emitted `commit_and_push_story` with `branch: story/unknown`.

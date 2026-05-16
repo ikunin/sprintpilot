@@ -83,8 +83,32 @@ Wrap everything in `{ "status": "...", ... }` and pass to
 | `failure`             | `reason`, `diagnosis` (first-class — fed back into next retry), `recoverable: boolean`           |
 | `blocked`             | `blocker_kind` (one of the 5 TRUE BLOCKERS or recoverable kinds), `details`, `user_input_needed`, `consecutive_count?` |
 | `propose_alternative` | `reason`, `alternative` (full Action object), `urgency_hint?` (raises impact only). Low impact → auto-accepted; medium / high → orchestrator stores the alternative in `state.pending_alternative` and emits `user_prompt`. The user accepts via `user_input` `{ kind: 'accept_alternative' }` or rejects via `force_continue` (both clear `pending_alternative`). |
-| `user_input`          | `commands: UserCommand[]` (validated server-side; see user-commands.js). Kinds: `skip_story`, `abort_sprint`, `force_continue`, `override_decision`, `change_profile`, `pause` (cleanly halts THIS session; next `/sprint-autopilot-on` resumes), `accept_alternative` (dispatches the stored `pending_alternative`). |
+| `user_input`          | `commands: UserCommand[]` (validated server-side; see user-commands.js). Kinds: `skip_story`, `abort_sprint`, `force_continue`, `override_decision`, `change_profile`, `pause` (cleanly halts THIS session; next `/sprint-autopilot-on` resumes), `accept_alternative` (dispatches the stored `pending_alternative`). **NEVER send `pause` on your own initiative** — see "Pause is human-only" below. |
 | `verify_override`     | `evidence: { decision_log_ref?, explanation, expected_paths? }` — used when verify.js is wrong   |
+
+## Pause is human-only
+
+The autopilot's purpose is to **drive without stopping** until one of:
+- `session_story_limit` is reached (profile-defined; default 3, nano 5)
+- A TRUE BLOCKER (5 kinds, listed below) fires
+- The retry budget exhausts on a single phase
+- `sprint_is_complete` (last story done → halt with `handoff: sprint_finalize_pending`)
+- The **human user** explicitly asks to pause (e.g. types `/pause`, `pause autopilot`, or a similar direct instruction in chat)
+
+**DO NOT issue `user_input` `{ kind: 'pause' }` on your own.** Specifically, the following are NOT valid reasons to pause:
+
+- "Natural pause point" / "PR opened, time for human review"
+- "CI is still running for the previous story"
+- "Diff is large, let's get a checkpoint"
+- "Merge cadence" / "want to wait for review before next story"
+- Any heuristic about session length, story count, or work-in-progress
+
+Pause is a HUMAN command. If you think the user might want to pause, **don't pause — finish the story and proceed to the next per the queue / `resolveNextStoryKey`**. The user can pause at any time by typing the command themselves; the next `/sprint-autopilot-on` cleanly resumes. Your judgment about "natural breakpoints" defeats the autopilot's purpose.
+
+The only cases where you signal a halt yourself are:
+- `blocked` with one of the 5 TRUE BLOCKERS (creative-input-required, new external dep, etc.)
+- `failure` with `recoverable: false` (catastrophic, can't proceed even with retries)
+- `propose_alternative` at medium/high impact (the orchestrator escalates to a `user_prompt` itself)
 
 ## TRUE BLOCKER kinds (per AGENTS.md)
 

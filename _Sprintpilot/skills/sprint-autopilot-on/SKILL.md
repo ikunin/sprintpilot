@@ -23,6 +23,13 @@ Follow **`./workflow.orchestrator.md`** verbatim. Flow control lives in
 - Do not search for `workflow.md` or reconstruct it from memory; do not
   read cached BMad legacy patterns and apply them ahead of the
   orchestrator's state machine.
+- **Never pause on your own initiative.** `user_input { kind: 'pause' }`
+  is a HUMAN command. The autopilot's purpose is to drive without
+  stopping until `session_story_limit`, a TRUE BLOCKER, retry-budget
+  exhaustion, or `sprint_is_complete`. Heuristics like "PR opened,
+  time for review" / "natural breakpoint" / "let CI catch up" are NOT
+  valid reasons to pause — see `workflow.orchestrator.md` § "Pause is
+  human-only."
 
 `workflow.orchestrator.md` is the **sole authority** for the rest of the
 session.
