@@ -1,5 +1,20 @@
 # Changelog
 
+## [2.2.27] - 2026-05-16
+
+**`workflow.orchestrator.md` docs updated to reflect v2.2.17–v2.2.25's auto-recovery.** The LLM-facing contract documentation still described the pre-2.2.17 strict checks (literal `## Acceptance Criteria` heading, missing `test_files` → halt, `_bmad-output/reviews/<key>.md` required path). LLMs reading the doc would over-engineer their signaling to comply with checks that no longer exist.
+
+### Changed
+
+- **`create_story` row** — documents the relaxed AC heading levels (2-4), title variants (`Acceptance Criteria` / `AC`), and list markers (`-`/`*`/numbered). Tasks section likewise accepts level 3-4 headings.
+- **`dev_red` / `dev_green` row** — documents the v2.2.17 `test_files` auto-detect from git, the v2.2.21/22 `tests_run` runner-recovery, and the v2.2.18 relative-path-against-projectRoot resolution.
+- **`code_review` row** — documents that findings can live in ANY of: story file's `### Review Findings` section (what `bmad-code-review` writes), `_bmad-output/reviews/<key>.md`, or `_bmad-output/implementation-artifacts/code-review-<key>.md`.
+- **`story_done` row** — documents the v2.2.17 git-state probe (`cat-file -e` + `ls-remote`) that auto-confirms `git_steps_completed` when the flag is omitted.
+
+### Why this matters
+
+Skills following the workflow doc try to comply with what they read. Outdated bookkeeping requirements push LLMs to add defensive echo-fields that are no longer needed; correct docs let them focus on real work. Audit trail (the `verify_result` ledger entry) records the actual recovery path taken on every signal, so the trail stays observable when defaults change.
+
 ## [2.2.26] - 2026-05-16
 
 **`autopilot.phase_timings: false` on the legacy profile is now respected.** `flatToProfile` didn't extract this field into the typed Profile, so the runtime check `profile.phase_timings === false` was always `undefined === false === false` — meaning the legacy profile's documented "no phase timings" override was a silent no-op. Legacy users saw `.timings/<story>.jsonl` shards accumulating despite their config saying otherwise.
