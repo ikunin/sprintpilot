@@ -94,6 +94,14 @@ function flatToProfile(resolved, profileName) {
     ),
     coalesce_state_writes: coerceBool(get(resolved, 'autopilot.coalesce_state_writes'), false),
     conditional_boot_work: coerceBool(get(resolved, 'autopilot.conditional_boot_work'), false),
+    // autopilot.phase_timings — when false, logSkillTiming returns early
+    // and the .timings/<story>.jsonl shards stop receiving events. Set
+    // false on the `legacy` profile (no parallel coordination, no need
+    // for granular timing). Default true on every other profile.
+    // Pre-2.2.26: flatToProfile didn't include this field, so
+    // `profile.phase_timings === false` was always false (undefined !==
+    // false), meaning the legacy override never took effect.
+    phase_timings: coerceBool(get(resolved, 'autopilot.phase_timings'), true),
     granularity: coerceEnum(get(resolved, 'git.granularity'), VALID_GRANULARITIES, 'story'),
     worktree_enabled: coerceBool(get(resolved, 'git.worktree.enabled'), true),
     // git.worktree.health_check_on_boot — when true, cmdStart runs

@@ -151,6 +151,17 @@ describe('flatToProfile', () => {
     ).toBe(false);
   });
 
+  it('autopilot.phase_timings defaults true and honors overrides', () => {
+    // legacy profile sets phase_timings: false in its YAML; pre-2.2.26
+    // flatToProfile didn't extract this field at all, so the legacy
+    // override was a no-op. The runtime check `profile.phase_timings ===
+    // false` always saw undefined.
+    expect(flatToProfile({}, 'medium').phase_timings).toBe(true);
+    expect(
+      flatToProfile({ autopilot: { phase_timings: false } }, 'medium').phase_timings,
+    ).toBe(false);
+  });
+
   it('git.lint.* fields default false/false/100 and honor overrides', () => {
     const def = flatToProfile({}, 'medium');
     expect(def.lint_enabled).toBe(false);

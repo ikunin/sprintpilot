@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.2.26] - 2026-05-16
+
+**`autopilot.phase_timings: false` on the legacy profile is now respected.** `flatToProfile` didn't extract this field into the typed Profile, so the runtime check `profile.phase_timings === false` was always `undefined === false === false` — meaning the legacy profile's documented "no phase timings" override was a silent no-op. Legacy users saw `.timings/<story>.jsonl` shards accumulating despite their config saying otherwise.
+
+### Fixed
+
+- **`profile-rules.js`** — adds `phase_timings: coerceBool(..., true)` to the typed Profile. Honors `autopilot.phase_timings: false` from any YAML in the merge chain (legacy.yaml sets it; users can also override per-project in `modules/autopilot/config.yaml`).
+
+### Added
+
+- 1 regression test asserting the default + explicit-false override.
+
 ## [2.2.25] - 2026-05-16
 
 **Acceptance Criteria and Tasks regex now tolerate stylistic variations.** The pre-2.2.25 `verifyCreateStory` AC pattern required *exactly* `## Acceptance Criteria` (level-2 heading, capitalized, full spelling) followed by `\n- ` (dash bullet). BMad templates and real-world stories use enough stylistic variation that legitimate stories were rejected as "Acceptance Criteria section missing or empty":
