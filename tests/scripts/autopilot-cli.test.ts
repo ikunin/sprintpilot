@@ -127,8 +127,11 @@ describe('autopilot start', () => {
     );
     const lines = readFileSync(ledgerPath, 'utf8').trim().split('\n');
     expect(lines.length).toBeGreaterThan(0);
-    const entry = JSON.parse(lines[0]);
-    expect(entry.kind).toBe('action_emitted');
+    // cmdStart emits multiple ledger entries before action_emitted
+    // (lock_acquired, worktree_health_check) — find the action entry
+    // rather than assuming it's first.
+    const actionEntry = lines.map((l) => JSON.parse(l)).find((e) => e.kind === 'action_emitted');
+    expect(actionEntry).toBeDefined();
   });
 });
 

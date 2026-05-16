@@ -1,5 +1,21 @@
 # Changelog
 
+## [2.2.15] - 2026-05-16
+
+**Worktree health check now runs on every `cmdStart`.** `git.worktree.health_check_on_boot: true` was documented in `modules/git/config.yaml` ("check for orphaned worktrees from crashed sessions") and `scripts/health-check.js` had a complete implementation (CLEAN_DONE / COMMITTED / STALE / DIRTY / ORPHAN classification, SUMMARY line, status-file integration), but nothing called it on boot. Crashed sessions left orphan worktrees under `.worktrees/` and the autopilot blithely created a new branch alongside them.
+
+### Added
+
+- **`runWorktreeHealthCheck(profile, projectRoot)`** in `autopilot.js` — spawns `scripts/health-check.js` with `--worktrees-dir .worktrees --base-branch <profile.base_branch>`, parses the `SUMMARY:total:cleanDone:committed:stale:dirty:orphan` line, and collects `ORPHAN:<name>` entries. Returns `{ok, summary, orphans?, prompt?, skipped?, reason?}`. Skips silently when health-check.js is missing (partial install), `.worktrees/` doesn't exist, `worktree_enabled` is false, or `worktree_health_check_on_boot` is false.
+- **`cmdStart` wires the health check** after lock acquire, before runtime composition. On orphan-detected emits a `user_prompt` action with `reason: 'worktree_orphans_detected'`, the orphan list, the full summary counts, and a prompt directing the user to `git worktree prune`. Logs every outcome (including skip reason) as a `worktree_health_check` ledger entry for the audit trail.
+- **`profile.worktree_health_check_on_boot`** added to the typed Profile, default `true`, reads `git.worktree.health_check_on_boot` from config.
+- **`worktree_health_check` ledger kind** added to `action-ledger.js` allowlist.
+- 6 regression tests in `autopilot-worktree-health.test.ts` covering: disabled flag, worktree_enabled=false, missing `.worktrees/`, missing script, empty dir, broken `.git` pointer (real-world crashed-`git worktree add` shape). Plus 1 profile-rules test.
+
+### Fixed
+
+- `tests/scripts/autopilot-cli.test.ts` — "writes the ledger and state on start" now searches for the `action_emitted` entry by kind instead of assuming it's first (cmdStart now emits `lock_acquired` + `worktree_health_check` ledger entries before the action).
+
 ## [2.2.14] - 2026-05-16
 
 **`.autopilot.lock` is now actually acquired on `cmdStart`.** The lockfile contract was documented in `modules/git/config.yaml` ("Lock file (.autopilot.lock — prevents concurrent autopilot sessions)"), the script existed at `scripts/lock.js` with full `check`/`acquire`/`release`/`status` actions and `stale_timeout_minutes` handling — but the orchestrator never called `acquire`. The only consumer was `sprint-autopilot-off` which called `release`. Two concurrent `/sprint-autopilot-on` sessions on the same project would happily race each other through the BMad cycle, corrupting `_bmad-output/implementation-artifacts/sprint-status.yaml` and stomping on each other's git branches.

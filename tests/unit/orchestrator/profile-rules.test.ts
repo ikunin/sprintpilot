@@ -135,6 +135,14 @@ describe('flatToProfile', () => {
     ).toBe(90);
   });
 
+  it('git.worktree.health_check_on_boot defaults true and honors overrides', () => {
+    expect(flatToProfile({}, 'medium').worktree_health_check_on_boot).toBe(true);
+    expect(
+      flatToProfile({ git: { worktree: { health_check_on_boot: false } } }, 'medium')
+        .worktree_health_check_on_boot,
+    ).toBe(false);
+  });
+
   it('push.auto / push.create_pr default true; honor explicit overrides', () => {
     const def = flatToProfile({}, 'medium');
     expect(def.push_auto).toBe(true);

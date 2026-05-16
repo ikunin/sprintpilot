@@ -1161,6 +1161,96 @@ function acquireAutopilotLock(persisted, profile, projectRoot) {
   return { acquired: true, id: null, warning: `unrecognized lock state: ${checkOut}` };
 }
 
+// Worktree health check on boot. Documented in modules/git/config.yaml
+// as "check for orphaned worktrees from crashed sessions". The script
+// (scripts/health-check.js) categorizes worktrees as CLEAN_DONE /
+// COMMITTED / STALE / DIRTY / ORPHAN and writes a SUMMARY line.
+//
+// We treat ORPHAN as halt-worthy (a worktree directory exists but
+// `git rev-parse --git-dir` fails or no branch is checked out — almost
+// certainly leftover from a crashed session that needs cleanup). DIRTY
+// is logged but doesn't halt (user may be actively working in it).
+//
+// Returns one of:
+//   { ok: true, summary }                — no orphans; proceed
+//   { ok: false, prompt, orphans, summary } — halt; caller emits user_prompt
+//   { ok: true, skipped: true }          — script missing / no worktrees dir / disabled
+function runWorktreeHealthCheck(profile, projectRoot) {
+  if (!profile.worktree_health_check_on_boot) {
+    return { ok: true, skipped: true, reason: 'disabled' };
+  }
+  if (!profile.worktree_enabled) {
+    return { ok: true, skipped: true, reason: 'worktrees_disabled' };
+  }
+  const script = path.join(projectRoot, '_Sprintpilot', 'scripts', 'health-check.js');
+  if (!fs.existsSync(script)) {
+    return { ok: true, skipped: true, reason: 'script_missing' };
+  }
+  const worktreesDir = path.join(projectRoot, '.worktrees');
+  if (!fs.existsSync(worktreesDir)) {
+    return { ok: true, skipped: true, reason: 'no_worktrees_dir' };
+  }
+
+  const { execFileSync: runFile } = require('node:child_process');
+  let stdout = '';
+  try {
+    stdout = runFile(
+      'node',
+      [
+        script,
+        '--worktrees-dir',
+        worktreesDir,
+        '--base-branch',
+        profile.base_branch || 'main',
+      ],
+      {
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+        cwd: projectRoot,
+        timeout: 60_000,
+      },
+    );
+  } catch (e) {
+    // Health check failure isn't fatal — log and proceed. A broken
+    // script shouldn't gate the autopilot.
+    return {
+      ok: true,
+      skipped: true,
+      reason: 'health_check_error',
+      error: e.message || String(e),
+    };
+  }
+
+  const lines = stdout.split(/\r?\n/).filter(Boolean);
+  const summaryLine = lines.find((l) => l.startsWith('SUMMARY:')) || '';
+  // SUMMARY:total:cleanDone:committed:stale:dirty:orphan
+  const parts = summaryLine.split(':');
+  const summary = {
+    total: parseInt(parts[1] || '0', 10),
+    clean_done: parseInt(parts[2] || '0', 10),
+    committed: parseInt(parts[3] || '0', 10),
+    stale: parseInt(parts[4] || '0', 10),
+    dirty: parseInt(parts[5] || '0', 10),
+    orphan: parseInt(parts[6] || '0', 10),
+  };
+  const orphans = lines
+    .filter((l) => l.startsWith('ORPHAN:'))
+    .map((l) => l.slice('ORPHAN:'.length));
+
+  if (summary.orphan > 0) {
+    return {
+      ok: false,
+      summary,
+      orphans,
+      prompt:
+        `Found ${summary.orphan} orphaned worktree(s) under .worktrees/ from a previous (possibly crashed) session: ${orphans.join(', ')}. ` +
+        `Run \`git worktree prune\` and remove the leftover directories before resuming, or run \`node _Sprintpilot/scripts/health-check.js --worktrees-dir .worktrees\` to see all categories.`,
+    };
+  }
+
+  return { ok: true, summary };
+}
+
 function cmdStart(opts) {
   const projectRoot = resolveProjectRoot(opts);
   const { typed: profile } = resolveProfile(projectRoot, opts.profile);
@@ -1254,6 +1344,40 @@ function cmdStart(opts) {
       },
       { projectRoot },
     );
+  }
+
+  // Worktree health check — once per session, after lock acquire so we
+  // don't compete with another active session for the same .worktrees
+  // directory.
+  const healthOutcome = runWorktreeHealthCheck(profile, projectRoot);
+  ledger.append(
+    {
+      kind: 'worktree_health_check',
+      detail: {
+        ok: healthOutcome.ok,
+        skipped: !!healthOutcome.skipped,
+        reason: healthOutcome.reason || null,
+        summary: healthOutcome.summary || null,
+      },
+    },
+    { projectRoot },
+  );
+  if (!healthOutcome.ok) {
+    const haltAction = {
+      type: 'user_prompt',
+      reason: 'worktree_orphans_detected',
+      prompt: healthOutcome.prompt,
+      orphans: healthOutcome.orphans,
+      summary: healthOutcome.summary,
+    };
+    ledger.append(
+      { kind: 'action_emitted', phase: persisted.current_bmad_step || null, action: haltAction },
+      { projectRoot },
+    );
+    process.stdout.write(
+      `${JSON.stringify({ action: haltAction, phase: persisted.current_bmad_step || null }, null, 2)}\n`,
+    );
+    return 0;
   }
 
   // Persist the new queue BEFORE composing runtime state so the queue
@@ -1564,4 +1688,5 @@ module.exports = {
   decorateRunScript,
   composeRuntimeState,
   acquireAutopilotLock,
+  runWorktreeHealthCheck,
 };

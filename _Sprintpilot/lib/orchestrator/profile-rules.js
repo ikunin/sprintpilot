@@ -96,6 +96,15 @@ function flatToProfile(resolved, profileName) {
     conditional_boot_work: coerceBool(get(resolved, 'autopilot.conditional_boot_work'), false),
     granularity: coerceEnum(get(resolved, 'git.granularity'), VALID_GRANULARITIES, 'story'),
     worktree_enabled: coerceBool(get(resolved, 'git.worktree.enabled'), true),
+    // git.worktree.health_check_on_boot — when true, cmdStart runs
+    // scripts/health-check.js once per session and halts if it finds
+    // ORPHAN worktrees (left over from crashed sessions). Documented in
+    // modules/git/config.yaml ("check for orphaned worktrees from
+    // crashed sessions").
+    worktree_health_check_on_boot: coerceBool(
+      get(resolved, 'git.worktree.health_check_on_boot'),
+      true,
+    ),
     squash_on_merge: coerceBool(get(resolved, 'git.squash_on_merge'), false),
     reuse_user_branch: coerceBool(get(resolved, 'git.reuse_user_branch'), false),
     merge_strategy: coerceEnum(

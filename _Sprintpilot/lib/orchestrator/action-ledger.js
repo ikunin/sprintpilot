@@ -39,6 +39,11 @@ const VALID_KINDS = [
   // `--epic`. Logged once per start invocation so resume/audit can see
   // why a queue head differs from sprint-status's natural order.
   'story_queue_set',
+  // Worktree health check result, logged once per cmdStart when
+  // git.worktree.health_check_on_boot is true (the default). Detail
+  // includes `summary` (counts) or `reason` ('disabled' / 'no_worktrees_dir'
+  // / 'script_missing' / 'health_check_error' / 'worktrees_disabled').
+  'worktree_health_check',
 ];
 
 function isPlainObject(v) {
