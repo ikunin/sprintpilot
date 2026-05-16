@@ -1,5 +1,26 @@
 # Changelog
 
+## [2.2.29] - 2026-05-16
+
+**`state-store.parseYamlNarrow` silently dropped block-form YAML lists.** Reported from a live session: the user hit divergence loops on `autopilot start --force --stories <csv>` retries after intermediate halts. Root cause: when state had a `story_queue:` block followed by `- item` lines (the standard YAML list form), the narrow parser hit the no-colon line, `continue`d, and never appended to the list. The story queue silently became an empty object `{}`. The user's workaround was manual inline-JSON `story_queue: ["k1","k2"]`.
+
+`dumpYaml` (state-store's writer) always emits inline JSON for arrays, so a roundtrip through the orchestrator's own writer was unaffected. The bug only bit foreign writers: hand edits, migration scripts, or any tool that emits block-form YAML.
+
+### Fixed
+
+- **`parseYamlNarrow`** now handles block-form list items: `- scalar`, `- key: value`, `- key:` (with deeper-indented children). When the first `- ` line is encountered at the children-indent of a key, the container is promoted from `{}` to `[]` and items append in order. Backwards-compatible: inline JSON arrays (`key: [a, b]`) still parse the same way through `parseScalar`.
+
+### Added
+
+- 3 regression tests in `state-store.test.ts`:
+  - Block-form scalar list (`story_queue: \n  - 4-6-realm\n  - 10-5-ui`) — the exact shape from the bug report.
+  - Block-form list of objects (`- key: value`).
+  - Inline JSON form preserved (backwards-compat).
+
+### Why this matters
+
+Any user editing `autopilot-state.yaml` by hand (e.g. to manually inject a `story_queue` for a custom run order, recover from a stuck state, or move stories between sessions) would see their edits silently ignored. The autopilot would then fall back to `resolveNextStoryKey` against `sprint-status.yaml`, picking a different story than the user asked for. Combined with the divergence-detection that compares `bmadTree` shas between sessions, this could wedge `autopilot start --force` retries in a loop.
+
 ## [2.2.28] - 2026-05-16
 
 **`git.lint.output_limit` and `git.lint.linters` are now actually honored.** Both fields landed in the typed Profile (v2.2.23) and v2.2.24 wired the script invocation, but neither knob actually flowed through to `lint-changed.js`. Users who configured a custom output limit or preferred linter order saw no behavior change — `lint-changed.js` used its hardcoded default of 100 lines and its hardcoded per-language priority.

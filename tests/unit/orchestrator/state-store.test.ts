@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -145,6 +145,61 @@ describe('read', () => {
     expect(state.count).toBe(7);
     expect(state.ready).toBe(true);
     expect(state.list).toEqual([1, 2, 3]);
+  });
+
+  it('parses block-form YAML arrays (regression: pre-2.2.29 silently dropped them)', () => {
+    // Real-world bug: hand-edited or migrated state files use block-form
+    // `- item` syntax, which the narrow parser dropped via the `continue`
+    // on no-colon lines. Workaround was inline JSON. dumpYaml always
+    // emits inline JSON so its own roundtrip was fine; the bug only bit
+    // foreign writers (manual edits, migration scripts).
+    const stateFile = join(
+      projectRoot,
+      '_bmad-output',
+      'implementation-artifacts',
+      'autopilot-state.yaml',
+    );
+    mkdirSync(join(projectRoot, '_bmad-output', 'implementation-artifacts'), { recursive: true });
+    writeFileSync(
+      stateFile,
+      'current_bmad_step: dev_red\nstory_queue:\n  - 4-6-realm\n  - 10-5-ui\ncurrent_story: 4-6-realm\n',
+      'utf8',
+    );
+    const state = read({ projectRoot });
+    expect(state.story_queue).toEqual(['4-6-realm', '10-5-ui']);
+    expect(state.current_story).toBe('4-6-realm');
+    expect(state.current_bmad_step).toBe('dev_red');
+  });
+
+  it('parses block-form list of objects (`- key: value` form)', () => {
+    const stateFile = join(
+      projectRoot,
+      '_bmad-output',
+      'implementation-artifacts',
+      'autopilot-state.yaml',
+    );
+    mkdirSync(join(projectRoot, '_bmad-output', 'implementation-artifacts'), { recursive: true });
+    writeFileSync(
+      stateFile,
+      'relevant_decisions:\n  - id: D1\n  - id: D2\n',
+      'utf8',
+    );
+    const state = read({ projectRoot });
+    expect(state.relevant_decisions).toEqual([{ id: 'D1' }, { id: 'D2' }]);
+  });
+
+  it('inline JSON array shape still works (backwards-compatible)', () => {
+    // dumpYaml's roundtrip path — array as `key: [...]`.
+    const stateFile = join(
+      projectRoot,
+      '_bmad-output',
+      'implementation-artifacts',
+      'autopilot-state.yaml',
+    );
+    mkdirSync(join(projectRoot, '_bmad-output', 'implementation-artifacts'), { recursive: true });
+    writeFileSync(stateFile, 'story_queue: ["a", "b", "c"]\n', 'utf8');
+    const state = read({ projectRoot });
+    expect(state.story_queue).toEqual(['a', 'b', 'c']);
   });
 });
 

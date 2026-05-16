@@ -96,30 +96,101 @@ function readStateFile(fs, filePath) {
 // Narrow YAML parser sufficient for our write shape (the same shape we
 // produce via dumpYaml above). We deliberately avoid js-yaml so we don't
 // pull a runtime dep into the install-time script bundle.
+//
+// Supports:
+//   key: scalar               (inline scalar)
+//   key: [a, b]               (inline JSON array via parseScalar)
+//   key:                      (nested object — children at deeper indent)
+//     subkey: value
+//   key:                      (nested array — `- item` lines at deeper indent)
+//     - item-scalar
+//     - item-key: item-value
+//
+// The block-form array path was added in v2.2.29 — pre-2.2.29 the
+// parser unconditionally `continue`d on any line without `:`, silently
+// dropping every `- item` entry. Hand-edited state files (or any
+// roundtrip through a tool that emits block-form YAML) lost their
+// `story_queue`, leaving the autopilot's queue mysteriously empty.
 function parseYamlNarrow(text) {
   if (!text) return {};
   const lines = text.split(/\r?\n/);
   const root = {};
-  const stack = [{ indent: -1, obj: root }];
+  // Stack frame:
+  //   indent       — indent of the KEY that opened this container (its
+  //                  children live at indent > frame.indent)
+  //   container    — the object or array we're populating
+  //   isArray      — true once we've promoted container from {} to []
+  //   parentObj    — owner of container (used to swap {} → [] when the
+  //                  first child is a `- ` line)
+  //   parentKey    — slot on parentObj that holds container
+  const stack = [{ indent: -1, container: root, isArray: false, parentObj: null, parentKey: null }];
   for (const raw of lines) {
     const hashIdx = raw.indexOf('#');
     const line = hashIdx === -1 ? raw : raw.slice(0, hashIdx);
     if (!line.trim()) continue;
     const indent = line.match(/^( *)/)[1].length;
     const content = line.slice(indent).trimEnd();
+    while (stack.length > 1 && stack[stack.length - 1].indent >= indent) stack.pop();
+    const top = stack[stack.length - 1];
+
+    // List item shape: `- ` or bare `-`.
+    if (content === '-' || content.startsWith('- ')) {
+      // Promote container to array if this is the first list item seen
+      // for the current key. Root-level lists aren't supported (state
+      // files always have an object root) — skip cleanly.
+      if (!top.isArray) {
+        if (!top.parentObj || top.parentKey == null) continue;
+        const arr = [];
+        top.parentObj[top.parentKey] = arr;
+        top.container = arr;
+        top.isArray = true;
+      }
+      const rest = content === '-' ? '' : content.slice(2).trim();
+      if (rest === '') {
+        // Bare `-` with children below — append a fresh object and let
+        // subsequent deeper-indent lines populate it.
+        const child = {};
+        top.container.push(child);
+        stack.push({ indent, container: child, isArray: false, parentObj: null, parentKey: null });
+        continue;
+      }
+      const colon = rest.indexOf(':');
+      if (colon === -1) {
+        // Plain scalar list item.
+        top.container.push(parseScalar(rest));
+        continue;
+      }
+      // `- key: value` or `- key:` (object item).
+      const k = rest.slice(0, colon).trim();
+      const v = rest.slice(colon + 1).trim();
+      if (v === '') {
+        const child = {};
+        const wrapper = { [k]: child };
+        top.container.push(wrapper);
+        stack.push({ indent, container: child, isArray: false, parentObj: wrapper, parentKey: k });
+      } else {
+        top.container.push({ [k]: parseScalar(v) });
+      }
+      continue;
+    }
+
+    // Object key: value
     const colon = content.indexOf(':');
     if (colon === -1) continue;
     const key = content.slice(0, colon).trim();
     const rest = content.slice(colon + 1).trim();
-    while (stack.length > 1 && stack[stack.length - 1].indent >= indent) stack.pop();
-    const parent = stack[stack.length - 1].obj;
-    if (rest === '') {
-      const child = {};
-      parent[key] = child;
-      stack.push({ indent, obj: child });
+    if (top.isArray) {
+      // Defensive: a stray `key:` inside an array context is malformed.
+      // Skip rather than corrupt the array.
       continue;
     }
-    parent[key] = parseScalar(rest);
+    if (rest === '') {
+      const child = {};
+      top.container[key] = child;
+      stack.push({ indent, container: child, isArray: false, parentObj: top.container, parentKey: key });
+      continue;
+    }
+    top.container[key] = parseScalar(rest);
   }
   return root;
 }
