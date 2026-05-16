@@ -8,8 +8,14 @@ import autopilot from '../../../_Sprintpilot/bin/autopilot.js';
 // @ts-expect-error — CommonJS module
 import profileRules from '../../../_Sprintpilot/lib/orchestrator/profile-rules.js';
 
-const { decorateGitOp, composeRuntimeState } = autopilot as {
+const { decorateGitOp, decorateRunScript, composeRuntimeState } = autopilot as {
   decorateGitOp: (
+    action: Record<string, unknown>,
+    state: Record<string, unknown>,
+    profile: Record<string, unknown>,
+    projectRoot?: string,
+  ) => Record<string, unknown>;
+  decorateRunScript: (
     action: Record<string, unknown>,
     state: Record<string, unknown>,
     profile: Record<string, unknown>,
@@ -895,5 +901,54 @@ describe('composeRuntimeState — bug #3: queue consumption gated to story-start
     } finally {
       cleanup();
     }
+  });
+});
+
+describe('decorateRunScript — inlines land.js#planLand steps for land_as_you_go (v2.2.12 fix)', () => {
+  const landProfile = () => ({ ...flatToProfile({}, 'medium'), merge_strategy: 'land_as_you_go' });
+
+  it('expands op:land_story run_script into an argv steps[] list', () => {
+    // Pre-v2.2.12 the action emitted by STORY_LAND was metadata-only:
+    //   { type: "run_script", op: "land_story", helper: "lib/orchestrator/land.js",
+    //     land_when: "ci_pass", squash_on_merge: false, ... }
+    // No `args` / `command` / `steps` — the LLM had to invent its own
+    // gh invocation. v2.2.12: decorateRunScript calls land.planLand and
+    // inlines the resulting argv steps.
+    const action = {
+      type: 'run_script',
+      phase: 'story_land',
+      op: 'land_story',
+      story_key: '4-12-foo',
+      profile: 'medium',
+      land_when: 'ci_pass',
+      land_wait_minutes: 30,
+      squash_on_merge: false,
+      helper: 'lib/orchestrator/land.js',
+    };
+    const state = {
+      phase: 'story_land',
+      story_key: '4-12-foo',
+      current_epic: '4',
+    };
+    const r = decorateRunScript(action, state, landProfile(), '/tmp/sp');
+    expect(r.type).toBe('run_script');
+    expect(Array.isArray(r.steps)).toBe(true);
+    // Steps should be non-empty — at minimum a stack-snapshot and a
+    // land-this-pr invocation.
+    expect((r.steps as unknown[]).length).toBeGreaterThan(0);
+    // The branch should be computed from story_key via gitPlan.branchName.
+    expect(r.branch).toBe('story/4-12-foo');
+  });
+
+  it('leaves non-run_script actions untouched', () => {
+    const gitOpAction = { type: 'git_op', op: 'commit_and_push_story' };
+    const r = decorateRunScript(gitOpAction, {}, landProfile(), '/tmp/sp');
+    expect(r).toBe(gitOpAction);
+  });
+
+  it('leaves run_script actions with other ops untouched', () => {
+    const otherRunScript = { type: 'run_script', op: 'something_else', command: ['echo'] };
+    const r = decorateRunScript(otherRunScript, {}, landProfile(), '/tmp/sp');
+    expect(r).toBe(otherRunScript);
   });
 });

@@ -39,6 +39,7 @@ const userCommands = require('../lib/orchestrator/user-commands');
 const divergence = require('../lib/orchestrator/divergence');
 const reportRenderer = require('../lib/orchestrator/report');
 const gitPlan = require('../lib/orchestrator/git-plan');
+const land = require('../lib/orchestrator/land');
 const {
   parseStatuses: parseSprintStatuses,
   remainingFrom: remainingStoriesFrom,
@@ -844,6 +845,42 @@ function decorateGitOp(action, state, profile, projectRoot) {
   }
 }
 
+// run_script actions for op=land_story carry only metadata (helper,
+// land_when, squash_on_merge, ...) — the state machine's comment
+// promises "The CLI edge composes the actual argv via land.js#planLand"
+// but that wiring was missing pre-v2.2.12. Without it, LLMs driving
+// land_as_you_go got a metadata-only action and had to improvise.
+// Symmetric to decorateGitOp: call land.planLand(state, profile,
+// options), inline the resulting `steps[]` onto the action.
+function decorateRunScript(action, state, profile, projectRoot) {
+  if (!action || action.type !== 'run_script') return action;
+  if (action.op !== 'land_story') return action;
+  try {
+    const root = projectRoot || process.cwd();
+    const scriptsDir = path.join(root, '_Sprintpilot', 'scripts');
+    const snapshotPath = path.join(
+      root,
+      '_bmad-output',
+      'implementation-artifacts',
+      '.land-snapshots',
+      `${state.story_key || 'sprint'}.json`,
+    );
+    const branch = gitPlan.branchName(profile, state.story_key, state.current_epic, state);
+    const platform = profile.platform_provider || 'auto';
+    const planned = land.planLand(state, profile, {
+      scriptsDir,
+      snapshotPath,
+      branch,
+      platform,
+      projectRoot: root,
+    });
+    return { ...action, branch: planned.branch, steps: planned.steps };
+  } catch (e) {
+    log.warn(`land-plan failed for op=${action.op}: ${e.message}`);
+    return action;
+  }
+}
+
 // Detect whether a branch exists, locally OR on origin. Used by
 // decorateGitOp so the create_branch plan can degrade to a plain switch
 // when the branch is already known. Checking remote refs avoids the
@@ -1108,7 +1145,12 @@ function cmdStart(opts) {
     return 0;
   }
 
-  const action = decorateGitOp(stateMachine.nextAction(runtime, profile), runtime, profile, projectRoot);
+  const action = decorateRunScript(
+    decorateGitOp(stateMachine.nextAction(runtime, profile), runtime, profile, projectRoot),
+    runtime,
+    profile,
+    projectRoot,
+  );
   ledger.append({ kind: 'action_emitted', phase: runtime.phase, action }, { projectRoot });
   persistRuntimeState(runtime, profile, projectRoot);
   if (profile.coalesce_state_writes) stateStore.flush(profile, { projectRoot, story: runtime.story_key });
@@ -1137,7 +1179,12 @@ function cmdNext(opts) {
     return 0;
   }
 
-  const action = decorateGitOp(stateMachine.nextAction(runtime, profile), runtime, profile, projectRoot);
+  const action = decorateRunScript(
+    decorateGitOp(stateMachine.nextAction(runtime, profile), runtime, profile, projectRoot),
+    runtime,
+    profile,
+    projectRoot,
+  );
   ledger.append({ kind: 'action_emitted', phase: runtime.phase, action }, { projectRoot });
   // Persist any mutations done by lockUserBranchIfNeeded — without this
   // every cmdNext under reuse_user_branch=true re-detects the branch and
@@ -1264,7 +1311,12 @@ function cmdRecord(opts) {
   }
 
   const payload = {
-    action: decorateGitOp(result.nextAction, result.newState, result.newProfile, projectRoot),
+    action: decorateRunScript(
+      decorateGitOp(result.nextAction, result.newState, result.newProfile, projectRoot),
+      result.newState,
+      result.newProfile,
+      projectRoot,
+    ),
     verdict: result.verdict,
     phase: result.newState.phase,
     profile: result.newProfile.name,
@@ -1353,4 +1405,4 @@ if (require.main === module) {
   process.exit(main(process.argv.slice(2)));
 }
 
-module.exports = { main, SUBCOMMANDS, decorateGitOp, composeRuntimeState };
+module.exports = { main, SUBCOMMANDS, decorateGitOp, decorateRunScript, composeRuntimeState };

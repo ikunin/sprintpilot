@@ -1,5 +1,20 @@
 # Changelog
 
+## [2.2.12] - 2026-05-16
+
+**`land_as_you_go` STORY_LAND now emits inlined argv steps.** Real-world report: a user on `land_as_you_go` saw the orchestrator emit a metadata-only `run_script` action (`helper: 'lib/orchestrator/land.js'`, `op: 'land_story'`, `land_when`, `squash_on_merge`, …) with no `args` / `command` / `steps`. The state machine's comment promised "The CLI edge composes the actual argv via land.js#planLand" but the wiring was never built. LLMs/runners had to invent their own `gh` invocations.
+
+### Fixed
+
+- **`decorateRunScript` in `autopilot.js`** — symmetric to `decorateGitOp`. For `type: 'run_script'` + `op: 'land_story'`, calls `land.planLand(state, profile, options)` with computed `scriptsDir` / `snapshotPath` / `branch` / `platform` / `projectRoot`, then inlines the resulting `steps[]` and `branch` onto the action. Wired into all three call sites (`cmdStart` / `cmdNext` / `cmdRecord`).
+
+### Added
+
+- 3 regression tests in `autopilot-decorate-git-op.test.ts`:
+  - `op: land_story` action gets non-empty `steps[]` and correct `branch`
+  - non-`run_script` actions untouched
+  - `run_script` with other `op` values untouched
+
 ## [2.2.11] - 2026-05-16
 
 **Forbid LLM-initiated pause.** Real-world report: a user's autopilot stopped after 1 story (well before `session_story_limit`) because the LLM driving the session sent a `user_input { kind: 'pause' }` with details `"Story 4-11 complete and PR #42 opened. Natural pause point — CI + human review before 4-12 keeps the merge cadence sane."` The orchestrator did the right thing — `pause` is a legitimate user-input command — but the LLM developed a "natural breakpoint" heuristic that defeats the autopilot's purpose. The user expected the autopilot to drive without stopping until `session_story_limit` or a TRUE BLOCKER.
