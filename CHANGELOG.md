@@ -1,5 +1,28 @@
 # Changelog
 
+## [2.2.25] - 2026-05-16
+
+**Acceptance Criteria and Tasks regex now tolerate stylistic variations.** The pre-2.2.25 `verifyCreateStory` AC pattern required *exactly* `## Acceptance Criteria` (level-2 heading, capitalized, full spelling) followed by `\n- ` (dash bullet). BMad templates and real-world stories use enough stylistic variation that legitimate stories were rejected as "Acceptance Criteria section missing or empty":
+
+- `### Acceptance Criteria` (level 3, when AC is nested under Dev Notes)
+- `## Acceptance criteria` (lowercase second word)
+- `## AC` (abbreviation used in some templates)
+- Numbered lists `1. AC one` / `1) AC one` instead of bullets
+- Asterisk bullets `* AC one` instead of dashes
+
+### Fixed
+
+- **`verifyCreateStory` AC pattern** — now matches heading levels 2/3/4, accepts `Acceptance Criteria` / `Acceptance criteria` / `AC` headings, and recognizes `-` / `*` / `1.` / `1)` list markers.
+- **`verifyCreateStory` Tasks pattern** — accepts heading levels 2/3/4 (BMad templates occasionally nest Tasks under Dev Notes with `### Tasks`).
+
+### Added
+
+- 4 regression tests: nested `### Acceptance Criteria`, numbered AC list, asterisk-bullet AC, and the `## AC` abbreviation form.
+
+### Why this matters
+
+Each rejected story burned 3 verifier-retry attempts before the LLM gave up or the user intervened. The stricter regex didn't catch any real defects — every variation here is a valid AC section by BMad conventions. The fix preserves the substantive check (heading + at least one list entry) while relaxing the cosmetic gating.
+
 ## [2.2.24] - 2026-05-16
 
 **`git.lint.*` is now actually wired** (supersedes the v2.2.23 experimental warning). The `scripts/post-green-gates.js` composed pipeline (lint-changed + lint-test-pitfalls + ci-parity scan) had a comment header reading "Called by the orchestrator after a `bmad-dev-story` GREEN phase completes verify" — but nothing actually called it. v2.2.24 closes that gap.

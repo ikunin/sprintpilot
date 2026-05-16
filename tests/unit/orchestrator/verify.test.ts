@@ -199,6 +199,56 @@ describe('verify CREATE_STORY', () => {
     );
     expect(r.ok).toBe(true);
   });
+
+  it('accepts ### Acceptance Criteria (heading level 3, nested under Dev Notes)', () => {
+    // BMad templates sometimes nest AC inside another section using ###.
+    // Pre-2.2.25 the regex required exactly ##, rejecting valid stories.
+    const path = makeStoryFile(
+      '---\nstory_key: S1\n---\n\n## Dev Notes\n\n### Acceptance Criteria\n- AC1\n\n## Tasks\n- [ ] do it\n',
+    );
+    const r = verify(
+      { phase: STATES.CREATE_STORY, story_key: 'S1', story_file_path: path },
+      {},
+      { projectRoot },
+    );
+    expect(r.ok).toBe(true);
+  });
+
+  it('accepts numbered AC list (1. / 1)) instead of bullet -', () => {
+    const path = makeStoryFile(
+      '---\nstory_key: S1\n---\n\n## Acceptance Criteria\n1. AC one\n2. AC two\n\n## Tasks\n- [ ] do it\n',
+    );
+    const r = verify(
+      { phase: STATES.CREATE_STORY, story_key: 'S1', story_file_path: path },
+      {},
+      { projectRoot },
+    );
+    expect(r.ok).toBe(true);
+  });
+
+  it('accepts `* AC` markers (asterisk bullets) instead of dash', () => {
+    const path = makeStoryFile(
+      '---\nstory_key: S1\n---\n\n## Acceptance Criteria\n* AC one\n\n## Tasks\n- [ ] do it\n',
+    );
+    const r = verify(
+      { phase: STATES.CREATE_STORY, story_key: 'S1', story_file_path: path },
+      {},
+      { projectRoot },
+    );
+    expect(r.ok).toBe(true);
+  });
+
+  it('accepts the AC abbreviation as heading', () => {
+    const path = makeStoryFile(
+      '---\nstory_key: S1\n---\n\n## AC\n- a\n\n## Tasks\n- [ ] do it\n',
+    );
+    const r = verify(
+      { phase: STATES.CREATE_STORY, story_key: 'S1', story_file_path: path },
+      {},
+      { projectRoot },
+    );
+    expect(r.ok).toBe(true);
+  });
 });
 
 describe('verify CHECK_READINESS', () => {

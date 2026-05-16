@@ -324,15 +324,27 @@ function verifyCreateStory(state, _out, ctx) {
     const override = ctx.augmented || {};
     const ackMissingFm = override && override.acknowledge_missing_front_matter === true;
     if (!fm && !ackMissingFm) issues.push('story file missing YAML front-matter');
-    // AC presence — look for "## Acceptance Criteria" section with at least one bullet.
-    if (text && !/##\s+Acceptance Criteria[\s\S]*?\n-\s+/.test(text)) {
+    // AC presence — look for an Acceptance Criteria section with at
+    // least one list entry. Accepts:
+    //   - heading levels ##, ###, #### (BMad standard is ##; some templates
+    //     nest AC under Dev Notes which would use ###)
+    //   - "Acceptance Criteria" / "Acceptance criteria" / "AC" (the abbr
+    //     appears in some templates)
+    //   - bullet markers `-` or `*` or numbered `1.` / `1)` lists
+    if (
+      text &&
+      !/#{2,4}\s+(?:Acceptance Criteria|Acceptance criteria|AC)\b[\s\S]*?\n[ \t]*(?:[-*]|\d+[.)])\s+\S/i.test(
+        text,
+      )
+    ) {
       issues.push('Acceptance Criteria section missing or empty');
     }
     // Tasks/Subtasks section with at least one task checkbox — required by
     // BMad bookkeeping. `bmad-create-story` produces unchecked `[ ]`
     // entries; `bmad-dev-story` flips them to `[x]`. If neither is present,
-    // dev-story will have nothing to check off.
-    if (text && !/##\s+Tasks(?:\s*\/\s*Subtasks)?[\s\S]*?(?:\[ \]|\[x\])/i.test(text)) {
+    // dev-story will have nothing to check off. Accept heading levels
+    // ## / ### / #### (templates sometimes nest Tasks under Dev Notes).
+    if (text && !/#{2,4}\s+Tasks(?:\s*\/\s*Subtasks)?[\s\S]*?(?:\[ \]|\[x\])/i.test(text)) {
       issues.push(
         'Tasks (or Tasks/Subtasks) section with at least one `[ ]` or `[x]` checkbox missing',
       );
