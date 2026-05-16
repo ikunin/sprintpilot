@@ -321,8 +321,15 @@ function verifyDevRed(state, out, ctx) {
     }
   }
   if (testFiles.length === 0) issues.push('no test_files reported');
+  // Resolve relative paths against projectRoot. LLM-supplied test_files
+  // are often relative like "apps/gateway/tests/x.test.ts" but the
+  // verifier runs from wherever cmdRecord was invoked. Without the
+  // resolve, fileExists checks against process.cwd() and reports
+  // "test file missing" for paths that actually exist.
   for (const f of testFiles) {
-    if (!fileExists(ctx.fs, f)) issues.push(`test file missing: ${f}`);
+    const resolved =
+      nodePath.isAbsolute(f) || !ctx.projectRoot ? f : nodePath.join(ctx.projectRoot, f);
+    if (!fileExists(ctx.fs, resolved)) issues.push(`test file missing: ${f}`);
   }
   // 2. Run the tests via the injected runner; expect non-zero exit (RED).
   if (ctx.runner) {
@@ -584,7 +591,11 @@ function verifyWithOverride(state, signalOutput, context, override) {
   // exists in expected_paths, treat 'test file missing' issues as satisfied
   // when at least one of the expected_paths exists.
   const fs = (context && context.fs) || nodeFs;
-  const someExists = override.expected_paths.some((p) => fileExists(fs, p));
+  const root = context && context.projectRoot;
+  const someExists = override.expected_paths.some((p) => {
+    const resolved = nodePath.isAbsolute(p) || !root ? p : nodePath.join(root, p);
+    return fileExists(fs, resolved);
+  });
   if (someExists) {
     const filtered = (base.issues || []).filter((i) => !/test file missing/.test(i));
     return { ok: filtered.length === 0, issues: filtered };

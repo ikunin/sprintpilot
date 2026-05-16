@@ -1,5 +1,18 @@
 # Changelog
 
+## [2.2.18] - 2026-05-16
+
+**`test file missing` rejected paths that actually existed.** Real-world report (continued audit of the same user's ledger): `verify_rejected dev_red issues=["test file missing: apps/gateway/tests/auth/keycloak-admin.test.ts", "test file missing: apps/gateway/tests/routes/auth.register.test.ts", "test file missing: apps/gateway/tests/routes/auth.change-password.test.ts"]`. The files existed at exactly those paths in the project. The bug: `fileExists` resolved relative paths against `process.cwd()` (wherever the autopilot CLI was invoked from), not against `ctx.projectRoot`.
+
+### Fixed
+
+- **`verifyDevRed` resolves relative `test_files` paths against `ctx.projectRoot`.** LLM-supplied paths like `apps/gateway/tests/x.test.ts` now correctly resolve to `<projectRoot>/apps/gateway/tests/x.test.ts` for the `fileExists` check. Absolute paths pass through unchanged.
+- **`verifyWithOverride.expected_paths` also resolves against `projectRoot`** so the `verify_override` escape hatch behaves consistently when the LLM supplies repo-relative paths.
+
+### Added
+
+- 1 regression test asserting a real-world-shaped relative path under `apps/gateway/tests/` resolves correctly against `projectRoot`.
+
 ## [2.2.17] - 2026-05-16
 
 **Three recurring verifier halts auto-recover instead of bricking the session.** Audit of real-world `ledger.jsonl` from a user's active project showed the same three `verify_rejected` patterns recurring across sessions — each one consuming a full retry-budget worth of LLM calls before halting:

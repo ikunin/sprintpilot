@@ -293,6 +293,21 @@ describe('verify DEV_RED', () => {
     expect(r.autodetected_test_files).toBeUndefined();
   });
 
+  it('resolves relative test_files paths against projectRoot (not process.cwd())', () => {
+    // Real user pain: LLM reports test_files as repo-relative paths like
+    // "apps/gateway/tests/auth/x.test.ts" but fileExists checked them
+    // against process.cwd() — the file was there but the verifier said
+    // "test file missing".
+    mkdirSync(join(projectRoot, 'apps', 'gateway', 'tests'), { recursive: true });
+    writeFileSync(join(projectRoot, 'apps', 'gateway', 'tests', 'a.test.ts'), 't', 'utf8');
+    const r = verify(
+      { phase: STATES.DEV_RED },
+      { test_files: ['apps/gateway/tests/a.test.ts'] },
+      { projectRoot, runner: () => ({ exit_code: 1 }) },
+    );
+    expect(r.ok).toBe(true);
+  });
+
   it('falls through to strict rejection when working tree has no test-shaped files', () => {
     const { execFileSync } = require('node:child_process') as typeof import('node:child_process');
     execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: projectRoot });
