@@ -1,5 +1,22 @@
 # Changelog
 
+## [2.2.23] - 2026-05-16
+
+**`git.lint.*` config plumbed + experimental warning.** The entire lint configuration block (`enabled`, `blocking`, `output_limit`, plus the per-language `linters` map) was documented in `modules/git/config.yaml` but never read by `profile-rules.js`. Users who set `git.lint.enabled: true` saw no behavior change because there was no LINT_CHECK state machine phase to drive lint execution.
+
+### Added
+
+- **Typed Profile fields** in `profile-rules.js`:
+  - `lint_enabled` (default `false`) — reads `git.lint.enabled`
+  - `lint_blocking` (default `false`) — reads `git.lint.blocking`
+  - `lint_output_limit` (default `100`) — reads `git.lint.output_limit`
+- **Experimental warning at cmdStart** when `lint_enabled=true` — mirrors the `parallel_stories` honesty pattern from v2.2.16. Stderr WARN + `lint_experimental_warning` ledger entry pointing users to bake lint into their test command until v2.3.0+ ships the dedicated `LINT_CHECK` state phase.
+- 2 regression tests: profile-rules defaults + override coverage, CLI warning fires when `git.lint.enabled=true`.
+
+### Not changed
+
+The full lint phase implementation (new state machine phase between DEV_GREEN and CODE_REVIEW, language detection, per-linter invocation, output truncation to `lint_output_limit`, blocking vs non-blocking gate) is a v2.3.0+ effort. Shipping the config plumbing without execution would be misleading; the explicit warning is the honest move. Same pattern as v2.2.16's `parallel_stories` handling.
+
 ## [2.2.22] - 2026-05-16
 
 **`verifyNanoQuickDev` now also auto-recovers `tests_run` from runner output.** Completes the auto-recovery coverage for `tests_run` started in v2.2.21 across all three test-result-producing phases (DEV_GREEN, PATCH_RETEST, NANO_QUICK_DEV).

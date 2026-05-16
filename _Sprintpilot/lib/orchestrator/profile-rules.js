@@ -172,6 +172,16 @@ function flatToProfile(resolved, profileName) {
     // --stale-minutes. 0 disables the auto-takeover entirely (locks are
     // never considered stale; manual `autopilot off` required).
     lock_stale_timeout_minutes: coerceInt(get(resolved, 'git.lock.stale_timeout_minutes'), 30),
+    // git.lint.* — documented in modules/git/config.yaml as a future
+    // post-DEV_GREEN lint phase. Currently NOT wired into the state
+    // machine (no LINT_CHECK phase emitted). v2.2.23 plumbs the config
+    // to the typed Profile so users see the shape and cmdStart emits an
+    // experimental warning when lint_enabled=true (mirroring
+    // parallel_stories handling). Full state-machine integration is
+    // tracked for v2.3.0+.
+    lint_enabled: coerceBool(get(resolved, 'git.lint.enabled'), false),
+    lint_blocking: coerceBool(get(resolved, 'git.lint.blocking'), false),
+    lint_output_limit: coerceInt(get(resolved, 'git.lint.output_limit'), 100),
     // git.platform.provider + base_url — forwarded to create-pr.js when
     // the orchestrator opens or polls PRs. 'auto' delegates platform
     // detection to create-pr.js (currently defaults to github).

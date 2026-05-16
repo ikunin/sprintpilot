@@ -110,6 +110,32 @@ describe('autopilot start', () => {
     expect(parsed.action.skill).toBe('bmad-create-story');
   });
 
+  it('logs an experimental warning when git.lint.enabled=true (LINT_CHECK phase not yet wired)', () => {
+    // Same honesty pattern as parallel_stories — config is parsed but
+    // the state machine has no LINT_CHECK phase, so users who enable
+    // lint must know it's not running.
+    const gitCfgDir = join(projectRoot, '_Sprintpilot', 'modules', 'git');
+    mkdirSync(gitCfgDir, { recursive: true });
+    writeFileSync(
+      join(gitCfgDir, 'config.yaml'),
+      'enabled: false\nlint:\n  enabled: true\n',
+      'utf8',
+    );
+    runCli(['start']);
+    const ledgerPath = join(
+      projectRoot,
+      '_bmad-output',
+      'implementation-artifacts',
+      'ledger.jsonl',
+    );
+    const lines = readFileSync(ledgerPath, 'utf8').trim().split('\n');
+    const entries = lines.map((l) => JSON.parse(l));
+    const warning = entries.find(
+      (e) => e.detail && e.detail.lint_experimental_warning,
+    );
+    expect(warning).toBeDefined();
+  });
+
   it('logs an experimental warning when ma.parallel_stories=true (state-machine not yet wired)', () => {
     // Document the gap explicitly: planBatch + dispatch-layer.js exist
     // as building blocks but nextAction never emits parallel_batch.

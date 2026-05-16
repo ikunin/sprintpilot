@@ -151,6 +151,20 @@ describe('flatToProfile', () => {
     ).toBe(false);
   });
 
+  it('git.lint.* fields default false/false/100 and honor overrides', () => {
+    const def = flatToProfile({}, 'medium');
+    expect(def.lint_enabled).toBe(false);
+    expect(def.lint_blocking).toBe(false);
+    expect(def.lint_output_limit).toBe(100);
+    const overridden = flatToProfile(
+      { git: { lint: { enabled: true, blocking: true, output_limit: 50 } } },
+      'medium',
+    );
+    expect(overridden.lint_enabled).toBe(true);
+    expect(overridden.lint_blocking).toBe(true);
+    expect(overridden.lint_output_limit).toBe(50);
+  });
+
   it('push.auto / push.create_pr default true; honor explicit overrides', () => {
     const def = flatToProfile({}, 'medium');
     expect(def.push_auto).toBe(true);

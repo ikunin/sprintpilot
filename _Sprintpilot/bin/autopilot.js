@@ -1460,6 +1460,24 @@ function cmdStart(opts) {
       '[autopilot] WARN ma.parallel_stories=true but the state machine is not yet wired for parallel dispatch (planned for v2.3.0). Stories will run sequentially this session.\n',
     );
   }
+  if (profile.lint_enabled) {
+    // Same honesty pattern as parallel_stories. Config is parsed; no
+    // state-machine integration yet. Users on lint_enabled=true would
+    // otherwise assume lint runs post-DEV_GREEN — it doesn't.
+    ledger.append(
+      {
+        kind: 'state_transition',
+        detail: {
+          lint_experimental_warning:
+            'git.lint.enabled=true: config is read into the typed Profile but the state machine has no LINT_CHECK phase yet. Lint enforcement (per-language linters, blocking/non-blocking gate, output_limit) is tracked for v2.3.0+. Until then, bake lint into your test command (bmad-dev-story GREEN phase will catch failures).',
+        },
+      },
+      { projectRoot },
+    );
+    process.stderr.write(
+      '[autopilot] WARN git.lint.enabled=true but no LINT_CHECK phase exists yet (planned for v2.3.0). Bake lint into your test command for now.\n',
+    );
+  }
 
   // Worktree health check — once per session, after lock acquire so we
   // don't compete with another active session for the same .worktrees
