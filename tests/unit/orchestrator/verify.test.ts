@@ -258,6 +258,56 @@ describe('verify DEV_RED', () => {
     );
     expect(r.ok).toBe(false);
   });
+
+  it('auto-detects test_files from untracked files when LLM omits the array', () => {
+    // Real user pain point: LLM does the work, writes the test, but signals
+    // `success` with empty output. Verifier should recover from this by
+    // scanning the working tree for newly added test-shaped files.
+    const { execFileSync } = require('node:child_process') as typeof import('node:child_process');
+    execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: projectRoot });
+    execFileSync('git', ['config', 'user.email', 't@t'], { cwd: projectRoot });
+    execFileSync('git', ['config', 'user.name', 't'], { cwd: projectRoot });
+    execFileSync('git', ['commit', '--allow-empty', '-m', 'init', '-q'], { cwd: projectRoot });
+    // LLM wrote this but didn't echo it back. It's untracked.
+    mkdirSync(join(projectRoot, 'src'), { recursive: true });
+    writeFileSync(join(projectRoot, 'src', 'feature.test.ts'), 'test', 'utf8');
+    const r = verify(
+      { phase: STATES.DEV_RED },
+      {}, // no test_files array — the bug we're fixing
+      { projectRoot, runner: () => ({ exit_code: 1 }) },
+    ) as { ok: boolean; issues: string[]; autodetected_test_files?: string[] };
+    expect(r.ok).toBe(true);
+    expect(r.autodetected_test_files).toBeDefined();
+    expect(r.autodetected_test_files?.[0]).toContain('feature.test.ts');
+  });
+
+  it('does not autodetect when test_files IS provided (LLM-supplied takes precedence)', () => {
+    const tf = join(projectRoot, 't.test.ts');
+    writeFileSync(tf, 'test', 'utf8');
+    const r = verify(
+      { phase: STATES.DEV_RED },
+      { test_files: [tf] },
+      { projectRoot, runner: () => ({ exit_code: 1 }) },
+    ) as { ok: boolean; autodetected_test_files?: string[] };
+    expect(r.ok).toBe(true);
+    expect(r.autodetected_test_files).toBeUndefined();
+  });
+
+  it('falls through to strict rejection when working tree has no test-shaped files', () => {
+    const { execFileSync } = require('node:child_process') as typeof import('node:child_process');
+    execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: projectRoot });
+    execFileSync('git', ['config', 'user.email', 't@t'], { cwd: projectRoot });
+    execFileSync('git', ['config', 'user.name', 't'], { cwd: projectRoot });
+    execFileSync('git', ['commit', '--allow-empty', '-m', 'init', '-q'], { cwd: projectRoot });
+    writeFileSync(join(projectRoot, 'README.md'), 'not a test', 'utf8');
+    const r = verify(
+      { phase: STATES.DEV_RED },
+      {},
+      { projectRoot, runner: () => ({ exit_code: 1 }) },
+    );
+    expect(r.ok).toBe(false);
+    expect(r.issues.join(' ')).toContain('no test_files reported');
+  });
 });
 
 describe('verify DEV_GREEN', () => {
@@ -344,6 +394,40 @@ describe('verify CODE_REVIEW', () => {
       { projectRoot },
     );
     expect(r.ok).toBe(false);
+  });
+
+  it('accepts a story file with "### Review Findings" section (what bmad-code-review actually writes)', () => {
+    // Real-world: bmad-code-review's step-04-present.md writes findings INTO
+    // the story file's Tasks/Subtasks block, NOT to _bmad-output/reviews/<k>.md.
+    // The pre-2.2.17 verifier rejected every real run because it checked for
+    // a file the skill never creates.
+    const storyDir = join(projectRoot, '_bmad-output', 'stories');
+    mkdirSync(storyDir, { recursive: true });
+    const storyPath = join(storyDir, 'S1.md');
+    writeFileSync(
+      storyPath,
+      '## Tasks\n\n- [x] implement\n\n### Review Findings\n- F1: defer (minor)\n',
+      'utf8',
+    );
+    const r = verify(
+      { phase: STATES.CODE_REVIEW, story_key: 'S1', story_file_path: storyPath },
+      { findings: [{ id: 'F1', action: 'defer', rationale: 'minor' }] },
+      { projectRoot },
+    );
+    expect(r.ok).toBe(true);
+  });
+
+  it('accepts the legacy implementation-artifacts/code-review-<key>.md location', () => {
+    // Some repos in the wild have this older layout. Don't break them.
+    const artDir = join(projectRoot, '_bmad-output', 'implementation-artifacts');
+    mkdirSync(artDir, { recursive: true });
+    writeFileSync(join(artDir, 'code-review-S1.md'), '# review\n', 'utf8');
+    const r = verify(
+      { phase: STATES.CODE_REVIEW, story_key: 'S1' },
+      { findings: [{ id: 'F1', action: 'defer', rationale: 'minor' }] },
+      { projectRoot },
+    );
+    expect(r.ok).toBe(true);
   });
 });
 
@@ -436,6 +520,49 @@ describe('verify STORY_DONE', () => {
     );
     expect(r.ok).toBe(false);
     expect(r.issues.join(' ')).toContain('git_steps_completed must be true');
+  });
+
+  it('auto-confirms git_steps_completed when commit exists locally + origin/<branch> matches', () => {
+    // Real user pain point: the LLM did the commit AND the push, but
+    // forgot to echo `git_steps_completed: true` in signal.output.
+    // Without this fix the verifier rejects, retry budget burns, halt.
+    //
+    // Probe path: cat-file -e <sha> + ls-remote --heads origin <branch>.
+    // Set up a local repo with a bare "origin" sibling so the push step
+    // can actually run and ls-remote can resolve the sha.
+    const { execFileSync } = require('node:child_process') as typeof import('node:child_process');
+    const { mkdtempSync } = require('node:fs') as typeof import('node:fs');
+    const originRoot = mkdtempSync(join(tmpdir(), 'sp-verify-origin-'));
+    try {
+      execFileSync('git', ['init', '--bare', '-q', '-b', 'main', originRoot]);
+      execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: projectRoot });
+      execFileSync('git', ['config', 'user.email', 't@t'], { cwd: projectRoot });
+      execFileSync('git', ['config', 'user.name', 't'], { cwd: projectRoot });
+      execFileSync('git', ['remote', 'add', 'origin', originRoot], { cwd: projectRoot });
+      execFileSync('git', ['commit', '--allow-empty', '-m', 'init', '-q'], { cwd: projectRoot });
+      execFileSync('git', ['checkout', '-qb', 'story/S1'], { cwd: projectRoot });
+      execFileSync('git', ['commit', '--allow-empty', '-m', 'feat: S1', '-q'], { cwd: projectRoot });
+      execFileSync('git', ['push', '-q', 'origin', 'story/S1'], { cwd: projectRoot });
+      const sha = execFileSync('git', ['rev-parse', 'HEAD'], {
+        encoding: 'utf8',
+        cwd: projectRoot,
+      }).trim();
+      seedSprintStatus('development_status:\n  S1: done\n');
+      const storyPath = seedStoryFileWithTasks(0, 1);
+      const r = verify(
+        { phase: STATES.STORY_DONE, story_key: 'S1', story_file_path: storyPath },
+        {
+          commit_sha: sha,
+          branch: 'story/S1',
+          story_key: 'S1',
+          // git_steps_completed deliberately omitted — the recovery path
+        },
+        { projectRoot },
+      );
+      expect(r.ok).toBe(true);
+    } finally {
+      rmSync(originRoot, { recursive: true, force: true });
+    }
   });
 
   it('fails when sprint-status.yaml is missing', () => {

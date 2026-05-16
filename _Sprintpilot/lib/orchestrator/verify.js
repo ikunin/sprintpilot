@@ -95,6 +95,113 @@ function readSprintStatus(fs, projectRoot) {
   return readFileSafe(fs, p);
 }
 
+// Auto-detect test files added/modified since the story branch started.
+// Used by verifyDevRed when the LLM forgets to echo `test_files` in
+// signal.output — a recurring user pain point: the LLM did the work but
+// signaled `success` with empty output, causing the verifier to halt with
+// "no test_files reported", retry budget exhausted, session dies.
+//
+// Lists git diff vs base-branch + untracked files, filters to test-shaped
+// paths via TEST_FILE_PATTERNS. Returns [] on any error so the caller
+// falls through to the strict rejection rather than silently accepting.
+const TEST_FILE_PATTERNS = [
+  /(^|\/)[^/]+\.test\.(?:[mc]?jsx?|[mc]?tsx?)$/i,
+  /(^|\/)[^/]+\.spec\.(?:[mc]?jsx?|[mc]?tsx?)$/i,
+  /(^|\/)test_[^/]+\.py$/i,
+  /(^|\/)[^/]+_test\.py$/i,
+  /(^|\/)[^/]+_test\.go$/i,
+  /(^|\/)tests?\/[^/]+\.rs$/i,
+  /(^|\/)[^/]+Tests?\.swift$/i,
+  /(^|\/)[^/]+Test\.(?:kt|java)$/i,
+  /(^|\/)[^/]+_test\.rb$/i,
+  /(^|\/)[^/]+_spec\.rb$/i,
+];
+
+function looksLikeTestFile(p) {
+  return TEST_FILE_PATTERNS.some((re) => re.test(p));
+}
+
+function autoDetectTestFiles(ctx, baseBranch) {
+  if (!ctx || !ctx.projectRoot) return [];
+  const projectRoot = ctx.projectRoot;
+  const NUL = String.fromCharCode(0);
+  const base = baseBranch || 'main';
+  const cp = require('node:child_process');
+  function runGit(extra) {
+    try {
+      return cp.execFileSync(
+        'git',
+        ['-C', projectRoot, ...extra],
+        { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 5_000 },
+      );
+    } catch {
+      return null;
+    }
+  }
+  // Prefer base...HEAD; fall back to a 5-commit window if origin/<base>
+  // isn't fetched. -z separates entries with NUL so filenames with spaces
+  // survive intact.
+  let raw = runGit(['diff', '--name-only', '--no-renames', '-z', base + '...HEAD']);
+  if (raw === null) raw = runGit(['diff', '--name-only', '--no-renames', '-z', 'HEAD~5..HEAD']);
+  const untracked = runGit(['ls-files', '--others', '--exclude-standard', '-z']);
+  const parts = [];
+  for (const buf of [raw, untracked]) {
+    if (!buf) continue;
+    for (const p of buf.split(NUL)) {
+      const t = p.trim();
+      if (t) parts.push(t);
+    }
+  }
+  const seen = new Set();
+  const out = [];
+  for (const p of parts) {
+    if (!looksLikeTestFile(p)) continue;
+    const abs = nodePath.isAbsolute(p) ? p : nodePath.join(projectRoot, p);
+    if (seen.has(abs)) continue;
+    seen.add(abs);
+    out.push(abs);
+  }
+  return out;
+}
+
+// Probe the underlying git state to confirm a STORY_DONE signal whose
+// `git_steps_completed` flag was omitted. Returns true iff:
+//   - commit_sha resolves locally (git cat-file -e <sha>)
+//   - origin/<branch> resolves to the same sha (git ls-remote)
+//
+// Both checks must pass; either alone is insufficient (local commit
+// without push, or remote pointing at a different commit, means the
+// story isn't really done).
+//
+// Returns false on any error / missing tooling so the caller falls
+// through to the strict rejection.
+function verifyGitStepsViaProbe(out, ctx) {
+  if (!ctx || !ctx.projectRoot) return false;
+  if (!out || !out.commit_sha || !out.branch) return false;
+  const projectRoot = ctx.projectRoot;
+  const cp = require('node:child_process');
+  function runGit(args) {
+    try {
+      return cp.execFileSync(
+        'git',
+        ['-C', projectRoot, ...args],
+        { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 5_000 },
+      );
+    } catch {
+      return null;
+    }
+  }
+  // Local commit exists?
+  const local = runGit(['cat-file', '-e', out.commit_sha]);
+  if (local === null) return false;
+  // Remote tracks the same sha? -h restricts to refs/heads/<branch>.
+  const remote = runGit(['ls-remote', '--heads', 'origin', out.branch]);
+  if (!remote) return false;
+  // ls-remote output is "<sha>\trefs/heads/<branch>\n"
+  const remoteSha = remote.split(/\s+/)[0];
+  return typeof remoteSha === 'string' && remoteSha === out.commit_sha;
+}
+
 // Per-phase verifiers. Each receives (state, signalOutput, context) and
 // returns { ok, issues[] }. `context` carries injected dependencies.
 const VERIFIERS = {
@@ -199,8 +306,20 @@ function verifyCheckReadiness(state, _out, ctx) {
 
 function verifyDevRed(state, out, ctx) {
   const issues = [];
-  // 1. Test files claimed in output exist.
-  const testFiles = isNonEmptyArray(out.test_files) ? out.test_files : [];
+  // 1. Test files claimed in output exist. If the LLM omitted test_files
+  //    (a recurring failure mode), auto-detect from git diff / untracked
+  //    files in the project tree so the verifier doesn't halt on a
+  //    cosmetic signaling gap. Detected paths flow through the same
+  //    fileExists check as LLM-supplied paths.
+  let testFiles = isNonEmptyArray(out.test_files) ? out.test_files : [];
+  let autodetected = false;
+  if (testFiles.length === 0 && ctx && ctx.projectRoot) {
+    const detected = autoDetectTestFiles(ctx, state && state.base_branch);
+    if (detected.length > 0) {
+      testFiles = detected;
+      autodetected = true;
+    }
+  }
   if (testFiles.length === 0) issues.push('no test_files reported');
   for (const f of testFiles) {
     if (!fileExists(ctx.fs, f)) issues.push(`test file missing: ${f}`);
@@ -220,7 +339,9 @@ function verifyDevRed(state, out, ctx) {
       `source files changed in RED phase: ${out.source_files_changed.join(',')} — expected tests only`,
     );
   }
-  return { ok: issues.length === 0, issues };
+  const result = { ok: issues.length === 0, issues };
+  if (autodetected) result.autodetected_test_files = testFiles;
+  return result;
 }
 
 function verifyDevGreen(state, out, ctx) {
@@ -247,14 +368,44 @@ function verifyDevGreen(state, out, ctx) {
 
 function verifyCodeReview(state, out, ctx) {
   const issues = [];
-  const reviewPath = nodePath.join(
+  // bmad-code-review (.claude/skills/bmad-code-review/steps/step-04-present.md)
+  // writes findings as a "### Review Findings" subsection INSIDE the story
+  // file's Tasks/Subtasks block — NOT a separate _bmad-output/reviews/<key>.md.
+  // The pre-2.2.17 check for that file rejected every real run because the
+  // skill never creates one (recurring user pain: "review artifact missing:
+  // <path>" halts).
+  //
+  // Accept any of:
+  //   - story file contains a `### Review Findings` section
+  //   - legacy `_bmad-output/reviews/<key>.md` exists (older repos)
+  //   - legacy `_bmad-output/implementation-artifacts/code-review-<key>.md` exists
+  // Reject only when NONE of the above exist AND the LLM didn't supply
+  // findings[] inline.
+  const storyKey = state.story_key || 'unknown';
+  const reviewLegacy = nodePath.join(
     ctx.projectRoot,
     '_bmad-output',
     'reviews',
-    `${state.story_key || 'unknown'}.md`,
+    `${storyKey}.md`,
   );
-  if (!fileExists(ctx.fs, reviewPath)) {
-    issues.push(`review artifact missing: ${reviewPath}`);
+  const reviewArtifact = nodePath.join(
+    ctx.projectRoot,
+    '_bmad-output',
+    'implementation-artifacts',
+    `code-review-${storyKey}.md`,
+  );
+  const storyFile = state.story_file_path;
+  let foundReview = false;
+  if (fileExists(ctx.fs, reviewLegacy) || fileExists(ctx.fs, reviewArtifact)) {
+    foundReview = true;
+  } else if (storyFile) {
+    const text = readFileSafe(ctx.fs, storyFile);
+    if (text && /^#{2,4}\s+Review Findings\b/m.test(text)) foundReview = true;
+  }
+  if (!foundReview) {
+    issues.push(
+      `review artifact missing: expected one of (a) "### Review Findings" section in ${storyFile || '<story file>'}, (b) ${reviewLegacy}, or (c) ${reviewArtifact}`,
+    );
   }
   const findings = Array.isArray(out.findings) ? out.findings : null;
   if (findings === null) {
@@ -320,10 +471,19 @@ function verifyStoryDone(state, out, ctx) {
   // `git commit` and report success — leaving the story branch unpushed.
   // Confirmed live in greenfield e2e: signal had commit_sha+branch but
   // origin/<branch> never appeared on remote.
+  //
+  // Recovery path (recurring user pain): the LLM did the work but forgot
+  // to echo `git_steps_completed: true`. Probe the underlying git state —
+  // if the commit_sha exists locally AND origin/<branch> resolves to it,
+  // accept the signal. The full audit trail is in the ledger via the
+  // verify_result entry, so a false-positive auto-accept stays observable.
   if (out.git_steps_completed !== true) {
-    issues.push(
-      'git_steps_completed must be true — set to true ONLY after every step in action.steps (git add, commit, push) exited 0. Skipping git push is the most common cause.',
-    );
+    const autoConfirmed = verifyGitStepsViaProbe(out, ctx);
+    if (!autoConfirmed) {
+      issues.push(
+        'git_steps_completed must be true — set to true ONLY after every step in action.steps (git add, commit, push) exited 0. Skipping git push is the most common cause.',
+      );
+    }
   }
   // BMad bookkeeping: sprint-status.yaml MUST record this story as `done`.
   // Without this check, the LLM can claim STORY_DONE while sprint-status

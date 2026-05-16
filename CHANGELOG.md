@@ -1,5 +1,27 @@
 # Changelog
 
+## [2.2.17] - 2026-05-16
+
+**Three recurring verifier halts auto-recover instead of bricking the session.** Audit of real-world `ledger.jsonl` from a user's active project showed the same three `verify_rejected` patterns recurring across sessions — each one consuming a full retry-budget worth of LLM calls before halting:
+
+1. `verify_rejected dev_red issues=["no test_files reported"]` — the LLM wrote the test, ran `bmad-dev-story` (RED), signaled success, but forgot to echo `test_files: [...]` in `signal.output`.
+2. `verify_rejected story_done issues=["git_steps_completed must be true ..."]` — the LLM committed AND pushed correctly, but forgot to set `git_steps_completed: true` in the signal.
+3. `verify_rejected code_review issues=["review artifact missing: .../reviews/<key>.md"]` — the verifier expected a file the `bmad-code-review` skill never creates. The skill (`steps/step-04-present.md`) actually writes findings as a `### Review Findings` section INSIDE the story file's Tasks/Subtasks block, NOT to a separate `_bmad-output/reviews/<key>.md`. The check had been broken from day one.
+
+### Fixed
+
+- **`verifyDevRed` auto-detects test files** from git when `signal.output.test_files` is missing. Lists `git diff --no-renames -z <base>...HEAD` (with fallback to `HEAD~5..HEAD`) + `git ls-files --others --exclude-standard -z`, filters to test-shaped paths via a 10-pattern regex covering JS/TS/Python/Go/Rust/Swift/Kotlin/Java/Ruby conventions. Detected paths flow through the same `fileExists` check as LLM-supplied paths. Result includes `autodetected_test_files: [...]` so the audit trail records what was used.
+- **`verifyStoryDone` auto-confirms `git_steps_completed`** by probing the actual git state. If the flag is omitted, runs `git cat-file -e <commit_sha>` AND `git ls-remote --heads origin <branch>` — only when both succeed AND the remote sha matches the local commit sha does verification accept. False-positive auto-accepts stay observable via the `verify_result` ledger entry.
+- **`verifyCodeReview` matches the skill's actual output convention.** Now accepts ANY of: (a) `### Review Findings` section in the story file (what `bmad-code-review` writes), (b) `_bmad-output/reviews/<key>.md` (legacy/test fixtures), or (c) `_bmad-output/implementation-artifacts/code-review-<key>.md` (some older repos).
+
+### Added
+
+- 6 regression tests covering: autodetect from untracked files, no-autodetect when LLM-supplied, strict fallback when no test-shaped files present, git-probe auto-confirm with real bare-origin setup, story-file Review Findings section accept, legacy code-review-<key>.md accept.
+
+### Why this matters
+
+The autopilot's main pain point reported by users was sessions halting on cosmetic LLM signal omissions — the actual work (tests, commits, reviews) was correct but the signal echo was incomplete. The verifier's job is to catch LIES about the world, not punish formatting mistakes. v2.2.17 replaces the strict-flag checks with state probes wherever a probe is feasible. Strict rejection remains the fallback when probes can't confirm.
+
 ## [2.2.16] - 2026-05-16
 
 **Two parallel-stories config truths surfaced.** Auditing revealed both a config-contract bug AND a feature gap:
