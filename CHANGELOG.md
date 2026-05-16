@@ -1,5 +1,18 @@
 # Changelog
 
+## [2.2.21] - 2026-05-16
+
+**`tests_run` count auto-recovers from runner output** (extends v2.2.17's recovery pattern). `verifyDevGreen` and `verifyPatchRetest` both require `signal.output.tests_run > 0`. When the LLM signaled success after tests passed but omitted the count, the verifier rejected with "tests_run must be a positive number" — burning retry budget on a cosmetic signaling gap.
+
+### Fixed
+
+- **`verifyDevGreen`** — accepts when `ctx.runner` reports `tests_run > 0` even if `signal.output.tests_run` is missing. The cross-check (LLM count vs runner count) still runs when both are present.
+- **`verifyPatchRetest`** — same auto-recovery for the post-patch retest phase.
+
+### Added
+
+- 1 regression test: runner-reported `tests_run: 9` accepted when LLM omits `tests_run`.
+
 ## [2.2.20] - 2026-05-16
 
 **`worktree.cleanup_on_merge` is now actually wired.** Documented since the original git config (`modules/git/config.yaml`: "false = keep worktrees after epic completion for inspection") and exposed via `complexity_profile`. The state machine emitted `MERGE_EPIC` git_ops, the merge plan deleted the branch (`gh pr merge --delete-branch` or `glab mr merge --remove-source-branch`), but the `.worktrees/<key>/` directory was left orphan on disk. Over multiple epics the user's project accumulated `.worktrees/` entries that the v2.2.15 boot-time health check then flagged as ORPHAN, halting startup until manual cleanup.

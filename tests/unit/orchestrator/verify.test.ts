@@ -353,11 +353,11 @@ describe('verify DEV_GREEN', () => {
     expect(r.ok).toBe(false);
   });
 
-  it('fails when tests_run is missing or zero', () => {
+  it('fails when tests_run is missing AND runner does not report it', () => {
     const r1 = verify(
       { phase: STATES.DEV_GREEN },
       {},
-      { projectRoot, runner: () => ({ exit_code: 0 }) },
+      { projectRoot, runner: () => ({ exit_code: 0 }) }, // no tests_run from runner
     );
     expect(r1.ok).toBe(false);
     const r2 = verify(
@@ -366,6 +366,18 @@ describe('verify DEV_GREEN', () => {
       { projectRoot, runner: () => ({ exit_code: 0 }) },
     );
     expect(r2.ok).toBe(false);
+  });
+
+  it('accepts when runner reports tests_run > 0 even if LLM omits it', () => {
+    // Recurring pain: LLM signals success with tests passing but forgets
+    // to echo tests_run. Verifier should accept when the runner provides
+    // a positive count.
+    const r = verify(
+      { phase: STATES.DEV_GREEN },
+      {}, // LLM forgot tests_run
+      { projectRoot, runner: () => ({ exit_code: 0, tests_run: 9 }) },
+    );
+    expect(r.ok).toBe(true);
   });
 });
 

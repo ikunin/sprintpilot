@@ -353,22 +353,33 @@ function verifyDevRed(state, out, ctx) {
 
 function verifyDevGreen(state, out, ctx) {
   const issues = [];
+  let runnerTestsRun = null;
   if (ctx.runner) {
     const result = ctx.runner({ phase: 'green', files: out.test_files || [] });
     if (!result || typeof result.exit_code !== 'number') {
       issues.push('runner did not report exit_code');
     } else if (result.exit_code !== 0) {
       issues.push(`tests still failing on GREEN: exit ${result.exit_code}`);
-    } else if (typeof result.tests_run === 'number' && typeof out.tests_run === 'number') {
-      if (result.tests_run !== out.tests_run) {
-        issues.push(
-          `LLM reported ${out.tests_run} tests run but runner reported ${result.tests_run}`,
-        );
+    } else {
+      if (typeof result.tests_run === 'number') runnerTestsRun = result.tests_run;
+      if (typeof result.tests_run === 'number' && typeof out.tests_run === 'number') {
+        if (result.tests_run !== out.tests_run) {
+          issues.push(
+            `LLM reported ${out.tests_run} tests run but runner reported ${result.tests_run}`,
+          );
+        }
       }
     }
   }
+  // If the LLM omitted tests_run but the runner reported a positive
+  // count, accept the runner's number (same pattern as test_files
+  // auto-detect). A non-runner setup still requires the LLM to report.
   if (typeof out.tests_run !== 'number' || out.tests_run <= 0) {
-    issues.push('tests_run must be a positive number (per AGENTS.md test-result format)');
+    if (typeof runnerTestsRun === 'number' && runnerTestsRun > 0) {
+      // Recovered — don't push the "must be a positive number" issue.
+    } else {
+      issues.push('tests_run must be a positive number (per AGENTS.md test-result format)');
+    }
   }
   return { ok: issues.length === 0, issues };
 }
@@ -449,6 +460,7 @@ function verifyPatchApply(state, out, _ctx) {
 
 function verifyPatchRetest(state, out, ctx) {
   const issues = [];
+  let runnerTestsRun = null;
   if (ctx.runner) {
     const result = ctx.runner({
       phase: 'rereview',
@@ -458,10 +470,16 @@ function verifyPatchRetest(state, out, ctx) {
       issues.push('runner did not report exit_code');
     } else if (result.exit_code !== 0) {
       issues.push(`tests failed after patch: exit ${result.exit_code}`);
+    } else if (typeof result.tests_run === 'number') {
+      runnerTestsRun = result.tests_run;
     }
   }
+  // Same auto-recovery as verifyDevGreen: accept the runner's count when
+  // the LLM omits tests_run.
   if (typeof out.tests_run !== 'number' || out.tests_run <= 0) {
-    issues.push('tests_run must be a positive number');
+    if (!(typeof runnerTestsRun === 'number' && runnerTestsRun > 0)) {
+      issues.push('tests_run must be a positive number');
+    }
   }
   return { ok: issues.length === 0, issues };
 }
