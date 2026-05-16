@@ -566,10 +566,26 @@ function verifyRetrospective(state, _out, ctx) {
 
 function verifyNanoQuickDev(state, out, ctx) {
   const issues = [];
+  // tests_run: accept the runner's count if the LLM omitted it (same
+  // pattern as verifyDevGreen). Nano flow can also have ctx.runner.
+  let runnerTestsRun = null;
+  if (ctx.runner) {
+    const result = ctx.runner({ phase: 'quick', files: out.test_files || [] });
+    if (result && typeof result.tests_run === 'number') runnerTestsRun = result.tests_run;
+  }
   if (typeof out.tests_run !== 'number' || out.tests_run <= 0) {
-    issues.push('tests_run must be a positive number');
+    if (!(typeof runnerTestsRun === 'number' && runnerTestsRun > 0)) {
+      issues.push('tests_run must be a positive number');
+    }
   }
   if (typeof out.tests_failed !== 'number') {
+    // tests_failed missing: if LLM signaled success AND runner exit_code
+    // was 0 OR all tests passed (out.tests_run > 0 with no failure
+    // indicator), default to 0. Otherwise reject.
+    // Conservative: only auto-fill 0 when we have positive evidence of
+    // no failures (LLM count present and matches success status).
+    // Keeping the strict check by default — tests_failed is a key
+    // signal the verifier uses for nano escalation.
     issues.push('tests_failed required (number; 0 for clean)');
   }
   if (!out.commit_sha) issues.push('commit_sha required');

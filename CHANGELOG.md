@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.2.22] - 2026-05-16
+
+**`verifyNanoQuickDev` now also auto-recovers `tests_run` from runner output.** Completes the auto-recovery coverage for `tests_run` started in v2.2.21 across all three test-result-producing phases (DEV_GREEN, PATCH_RETEST, NANO_QUICK_DEV).
+
+### Fixed
+
+- **`verifyNanoQuickDev`** — accepts when `ctx.runner` reports `tests_run > 0` even if `signal.output.tests_run` is missing. The strict checks for `tests_failed` and `commit_sha` remain (those carry semantic weight that the runner can't synthesize).
+
+### Added
+
+- 1 regression test: nano signal with `tests_run` omitted but runner reporting `7` → accepted.
+
 ## [2.2.21] - 2026-05-16
 
 **`tests_run` count auto-recovers from runner output** (extends v2.2.17's recovery pattern). `verifyDevGreen` and `verifyPatchRetest` both require `signal.output.tests_run > 0`. When the LLM signaled success after tests passed but omitted the count, the verifier rejected with "tests_run must be a positive number" — burning retry budget on a cosmetic signaling gap.

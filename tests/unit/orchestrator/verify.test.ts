@@ -739,6 +739,16 @@ describe('verify NANO_QUICK_DEV', () => {
     expect(r.ok).toBe(false);
     expect(r.issues.join(' ')).toContain("expected 'done'");
   });
+
+  it('accepts when runner reports tests_run > 0 even if LLM omits it', () => {
+    seedSprintStatus('development_status:\n  S1: done\n');
+    const r = verify(
+      { phase: STATES.NANO_QUICK_DEV, story_key: 'S1' },
+      { tests_failed: 0, commit_sha: 'abc' }, // no tests_run
+      { projectRoot, runner: () => ({ exit_code: 0, tests_run: 7 }) },
+    );
+    expect(r.ok).toBe(true);
+  });
 });
 
 describe('verify RETROSPECTIVE', () => {
