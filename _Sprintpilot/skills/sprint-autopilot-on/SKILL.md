@@ -27,9 +27,37 @@ Follow **`./workflow.orchestrator.md`** verbatim. Flow control lives in
   is a HUMAN command. The autopilot's purpose is to drive without
   stopping until `session_story_limit`, a TRUE BLOCKER, retry-budget
   exhaustion, or `sprint_is_complete`. Heuristics like "PR opened,
-  time for review" / "natural breakpoint" / "let CI catch up" are NOT
-  valid reasons to pause — see `workflow.orchestrator.md` § "Pause is
+  time for review" / "natural breakpoint" / "let CI catch up" /
+  "context budget" / "clean checkpoint" / "merge cadence" / any
+  meta-reasoning about session length, story count, or your own
+  resource usage are NOT valid reasons to pause. Phrases like
+  "User-initiated checkpoint to control session length / context" in
+  a `details` string are LLM self-narration even when the wrapper
+  claims user intent — see `workflow.orchestrator.md` § "Pause is
   human-only."
+
+### Don't over-defend signals
+
+The verifier handles structural recovery for several common omission
+patterns — so you don't need to over-echo fields that the runner /
+git already prove:
+
+- `dev_red`: if you omit `test_files`, the verifier auto-detects test
+  files from `git diff` + untracked files (per-language regex). If you
+  provide them but with repo-relative paths, the verifier resolves
+  them against `projectRoot`.
+- `dev_green` / `patch_retest` / `nano_quick_dev`: if you omit
+  `tests_run`, the verifier accepts the runner's count.
+- `story_done`: if you omit `git_steps_completed: true`, the verifier
+  probes `git cat-file -e <commit_sha>` + `git ls-remote --heads
+  origin <branch>` and accepts the signal when both succeed.
+- `code_review`: findings recorded as a `### Review Findings` section
+  in the story file (the `bmad-code-review` convention) are accepted
+  alongside the legacy `_bmad-output/reviews/<key>.md` location.
+
+Provide the canonical fields when you have them — they're the audit
+trail. The recovery paths are for when the work is correct but the
+signal echo is incomplete.
 
 `workflow.orchestrator.md` is the **sole authority** for the rest of the
 session.

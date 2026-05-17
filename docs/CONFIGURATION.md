@@ -109,8 +109,11 @@ Placeholder resolution chain: sprint-status.yaml → story file → fallback val
 | `lint.output_limit` | `100` | Max lines injected into context |
 | `lint.output_strategy` | `errors-first` | Show errors before warnings |
 | `lint.full_output_file` | `true` | Save full output to file |
+| `lint.linters.<language>` | (defaults below) | Per-language linter preference. Ordered list; first installed wins. Empty list disables linting for that language. `javascript` and `typescript` keys merge into a single `js-ts` bucket (both share eslint/biome tooling). |
 
-Supported linters per language:
+The lint pipeline (`scripts/post-green-gates.js`) runs after `dev_green` verify passes when `lint.enabled: true`. It composes three gates: `lint-changed.js` (per-language linter), `lint-test-pitfalls.js` (LLM-test smell scan), and `scan.js` (CI-only failure pattern scan). `lint.blocking: true` rejects verify on any failed gate; `false` records the failure but doesn't gate the autopilot.
+
+Default linter preferences:
 
 | Language | Linters (first found wins) |
 |----------|---------------------------|
@@ -126,6 +129,17 @@ Supported linters per language:
 | PL/SQL | sqlfluff |
 | Kotlin | ktlint, detekt |
 | PHP | phpstan, phpcs |
+
+Override example:
+
+```yaml
+git:
+  lint:
+    linters:
+      python: [pylint]       # skip ruff/flake8, always use pylint
+      typescript: [biome]    # prefer biome over eslint
+      go: []                 # disable go linting entirely
+```
 
 See [Extending](EXTENDING.md) to add more languages.
 
@@ -163,7 +177,7 @@ See [Extending](EXTENDING.md) to add more languages.
 |-----|---------|-------------|
 | `lock.enabled` | `true` | Prevent concurrent autopilot sessions |
 | `lock.file` | `.autopilot.lock` | Lock file path (in project root) |
-| `lock.stale_timeout_minutes` | `30` | Auto-remove locks older than this |
+| `lock.stale_timeout_minutes` | `30` | Auto-take-over locks older than this. `0` disables auto-takeover entirely (locks are never considered stale; manual `/sprint-autopilot-off` required to release). |
 
 ### Platform Detection
 

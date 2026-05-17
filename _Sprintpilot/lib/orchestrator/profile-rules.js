@@ -98,9 +98,6 @@ function flatToProfile(resolved, profileName) {
     // and the .timings/<story>.jsonl shards stop receiving events. Set
     // false on the `legacy` profile (no parallel coordination, no need
     // for granular timing). Default true on every other profile.
-    // Pre-2.2.26: flatToProfile didn't include this field, so
-    // `profile.phase_timings === false` was always false (undefined !==
-    // false), meaning the legacy override never took effect.
     phase_timings: coerceBool(get(resolved, 'autopilot.phase_timings'), true),
     granularity: coerceEnum(get(resolved, 'git.granularity'), VALID_GRANULARITIES, 'story'),
     worktree_enabled: coerceBool(get(resolved, 'git.worktree.enabled'), true),
@@ -180,22 +177,16 @@ function flatToProfile(resolved, profileName) {
     // --stale-minutes. 0 disables the auto-takeover entirely (locks are
     // never considered stale; manual `autopilot off` required).
     lock_stale_timeout_minutes: coerceInt(get(resolved, 'git.lock.stale_timeout_minutes'), 30),
-    // git.lint.* — documented in modules/git/config.yaml as a future
-    // post-DEV_GREEN lint phase. Currently NOT wired into the state
-    // machine (no LINT_CHECK phase emitted). v2.2.23 plumbs the config
-    // to the typed Profile so users see the shape and cmdStart emits an
-    // experimental warning when lint_enabled=true (mirroring
-    // parallel_stories handling). Full state-machine integration is
-    // tracked for v2.3.0+.
+    // git.lint.* — post-DEV_GREEN lint gate (scripts/post-green-gates.js).
+    // verifyDevGreen invokes it when lint_enabled=true; lint_blocking
+    // governs whether a failed gate rejects verify or just records.
+    // lint_output_limit caps lines of lint output per gate.
     lint_enabled: coerceBool(get(resolved, 'git.lint.enabled'), false),
     lint_blocking: coerceBool(get(resolved, 'git.lint.blocking'), false),
     lint_output_limit: coerceInt(get(resolved, 'git.lint.output_limit'), 100),
-    // git.lint.linters — per-language preference map. v2.2.28+ forwards
-    // this to lint-changed.js as --linters-json so users can reorder
-    // priorities or disable individual linters. The default-shipped
-    // priority order in lint-changed.js matches the documented config
-    // defaults, so most users see no behavior change. Setting an empty
-    // array for a language disables linting for that language entirely.
+    // git.lint.linters — per-language preference map. Forwarded to
+    // lint-changed.js as --linters-json. Empty list disables a language.
+    // javascript + typescript merge into js-ts (shared eslint/biome tooling).
     lint_linters: (() => {
       const v = get(resolved, 'git.lint.linters');
       return v && typeof v === 'object' && !Array.isArray(v) ? v : null;

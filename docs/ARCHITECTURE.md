@@ -274,6 +274,49 @@ When `parallel_stories: true` AND host_supports_parallel AND active layer ≥ 2 
 
 Cross-epic parallelism (`parallel_epics: true`, EXPERIMENTAL) is gated behind `preflight-merge.js` — a per-pair dry-run merge probe with 60s lock, startup cleanup of stale preflight branches, and per-pair try/finally that returns HEAD to base. Off on every profile by default.
 
+### Resume Divergence
+
+On every `autopilot start`, the orchestrator fingerprints `_bmad-output/`, `sprint-status.yaml`, and per-story branch HEADs (`divergence.fingerprint()`) and compares against the fingerprint stamped at the last halt (`divergence.diff()`). The fingerprint includes:
+
+- `sprintStatusSha` — sha256 of `sprint-status.yaml`
+- `bmadTree` — map of file paths under `_bmad-output/` to size (cheap drift detection without re-hashing every artifact)
+- `branchHeads` — map of branch name to commit sha for every per-story branch
+- `worktreePaths` — sorted list of `.worktrees/*/` directories
+
+Two escape paths proceed past a divergent fingerprint without manual state surgery:
+
+1. **External-completion auto-acknowledge.** When the persisted `current_story` is `done` in sprint-status (story merged outside the autopilot), `cmdStart` clears the stale story identity (`current_story` / `story_file_path` / `current_epic` / `current_bmad_step` all nulled) and proceeds. `composeRuntimeState` then picks the next pending story from queue or sprint-status. Ledger: `kind: resume, divergence: {kind: 'divergence_accepted', reason: 'external_completion', story: <key>}`.
+
+2. **`--accept-divergence` flag.** Catch-all for divergence the auto-path doesn't cover. Logged with `reason: 'explicit_accept'`. Lets users bypass the check when they know the state is intentional (multiple stories completed externally, branch heads moved due to rebase, etc.).
+
+Divergences outside both paths emit `resume_divergence` with the diff so the user/LLM can resolve via `user_input` (`force_continue` / `override_decision`).
+
+### Verify Recovery Paths
+
+`verify.js` enforces BMad bookkeeping after every `success` signal but probes the underlying world for several common signal-format omissions instead of punishing the LLM for incomplete echo:
+
+| Phase | Field | Recovery |
+|---|---|---|
+| `dev_red` | `test_files` missing | Auto-detect from `git diff --name-only --no-renames -z <base>...HEAD` + `git ls-files --others --exclude-standard -z`, filtered by language convention (10-pattern regex). Detected paths flow through the same `fileExists` check. |
+| `dev_red` | `test_files` paths relative | Resolved against `ctx.projectRoot` (not `process.cwd()`). |
+| `dev_green` / `patch_retest` / `nano_quick_dev` | `tests_run` missing | Accept the runner's count when `ctx.runner` reports `tests_run > 0`. |
+| `story_done` | `git_steps_completed` missing | Probe `git cat-file -e <commit_sha>` + `git ls-remote --heads origin <branch>`. Accept when both succeed and the remote sha matches the local commit sha. |
+| `code_review` | review artifact location | Accept the `### Review Findings` section in the story file (what `bmad-code-review` actually writes) OR `_bmad-output/reviews/<key>.md` OR `_bmad-output/implementation-artifacts/code-review-<key>.md`. |
+
+Each recovery is observable in the `verify_result` ledger entry. Strict rejection remains the fallback when probes can't confirm — the verifier's job is catching lies about the world, not punishing formatting mistakes.
+
+### Post-GREEN Lint Pipeline
+
+When `git.lint.enabled: true`, `verify.js#verifyDevGreen` invokes `scripts/post-green-gates.js` after the standard `dev_green` checks pass. The pipeline composes three gates:
+
+1. **`lint-changed.js`** — runs the configured linter for each language present in the changed file set. Per-language priority follows `git.lint.linters.<language>: [list]` when configured, else hardcoded defaults. Auto-detects via `node_modules/.bin/<tool>` first, then PATH.
+2. **`lint-test-pitfalls.js`** — scans changed test files for common LLM-test smells (missing assertions, hardcoded paths, fixture-setup gaps).
+3. **`scan.js`** — pattern scan for CI-only failure modes (`process.env.CI` skips, hardcoded localhost ports).
+
+Each gate's output is truncated to `git.lint.output_limit` lines. `git.lint.blocking: true` rejects verify on the first failing gate (LLM enters a fix-loop). `git.lint.blocking: false` records the failure in the `verify_result` ledger entry but doesn't gate the autopilot.
+
+`javascript` and `typescript` keys in `lint.linters` merge into a single `js-ts` bucket (both share eslint/biome). An empty list disables linting for that language entirely.
+
 ### Worktree Cost Mitigation
 
 - `with-retry.js` — 3-attempt jittered backoff (500ms–2s) triggered ONLY when stderr matches a ref-lock regex. Non-matching failures pass through.

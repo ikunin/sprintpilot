@@ -20,7 +20,9 @@
 //     --output-limit:  max lines of lint output per gate (forwarded to
 //                      lint-changed.js as --limit). Honors
 //                      `git.lint.output_limit` from config when called
-//                      from the orchestrator (v2.2.28+).
+//                      from the orchestrator.
+//     --linters-json:  per-language linter map (forwarded to
+//                      lint-changed.js). See git.lint.linters.
 //
 // Each gate runs in a child process via execFileSync. Argv-only — no shell.
 

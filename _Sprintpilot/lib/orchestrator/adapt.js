@@ -275,9 +275,8 @@ function handleBlocked(state, signal, profile, sideEffects) {
     case 'missing_dependency':
       // Emit an abstract install action. The CLI edge (autopilot.js
       // decorateRunScript) detects the project's language(s) from
-      // manifest files and inlines the concrete `command`. Pre-2.2.19
-      // this hardcoded `npm install`, which failed on non-Node projects
-      // (Python, Rust, Go, Ruby, etc.).
+      // manifest files (package.json, pyproject.toml, Cargo.toml, etc.)
+      // and inlines the concrete `command` per language.
       return {
         newState: state,
         newProfile: profile,
@@ -413,14 +412,12 @@ function handleUserInput(state, signal, profile, sideEffects) {
   // checks all reference the wrong story.
   //
   // Phase advance: when the alternative carries `phase` and it's a
-  // valid STATES value, also advance state.phase. Pre-v2.2.6 the
-  // dispatch was one-shot — the alternative ran for ONE emission then
-  // state.phase reverted, defeating use cases like "skip dev_red /
-  // dev_green / code_review because the work is already done on the
-  // branch from a prior session." The user explicitly proposes the
-  // alternative including a target phase; they accept the consequences
-  // (e.g. verify may reject the new phase if its preconditions aren't
-  // met). Without this, accept_alternative is useless for cycle skips.
+  // valid STATES value, also advance state.phase. The user explicitly
+  // proposes the alternative including a target phase; they accept the
+  // consequences (e.g. verify may reject the new phase if its
+  // preconditions aren't met). This enables cycle skips like "jump to
+  // STORY_DONE because the work is already on the branch from a prior
+  // session."
   const dispatch = applied.sideEffects.find((e) => e && e.kind === 'dispatch_action');
   if (dispatch && dispatch.action) {
     const a = dispatch.action;

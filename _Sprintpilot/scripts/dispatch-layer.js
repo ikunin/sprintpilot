@@ -79,10 +79,9 @@ function planLayer({ keys, maxParallel, projectRoot, branchPrefix, baseBranch })
   }
   const effectiveParallel = Math.max(1, Math.min(maxParallel | 0, dedupedKeys.length));
   // CAP: only dispatch the first `effectiveParallel` stories. The
-  // remaining keys are deferred — the autopilot loop will pick them up
-  // in the next iteration after this batch completes. Pre-2.0.8 the
-  // script created worktrees for ALL keys regardless of the cap, then
-  // the workflow spawned N agents anyway, fully ignoring --max-parallel.
+  // remaining keys are deferred — the autopilot loop picks them up
+  // in the next iteration after this batch completes. Honors
+  // --max-parallel as the upper bound on concurrent worktree creation.
   const dispatchedKeys = dedupedKeys.slice(0, effectiveParallel);
   const deferredKeys = dedupedKeys.slice(effectiveParallel);
   const worktrees = dispatchedKeys.map((key) => ({
@@ -112,10 +111,10 @@ function writePlan(projectRoot, plan) {
 }
 
 // Match git's "branch already exists" diagnostic. We retry without -b
-// only when the FIRST attempt failed for this specific reason —
-// pre-2.0.8 the bare retry fired on ANY first-attempt failure and
-// silently checked out whatever stale branch happened to exist at the
-// requested name (e.g. last week's commits from an abandoned story).
+// ONLY when the first attempt failed for this specific reason. A bare
+// retry on any other failure would silently check out whatever stale
+// branch happened to exist at the requested name (e.g. last week's
+// commits from an abandoned story).
 const BRANCH_EXISTS_RE = /a branch named .* already exists/i;
 
 function createWorktree({ projectRoot, worktree, branch, baseBranch }) {
@@ -147,11 +146,9 @@ function createWorktree({ projectRoot, worktree, branch, baseBranch }) {
   };
 }
 
-// After a worktree is created, disable gc.auto on it. The sequential
-// path in workflow.md does this at line 738; pre-2.0.8 the parallel
-// path skipped it, so concurrent sub-agents in heavy repos could
-// trigger gc on each worktree mid-dispatch. Best-effort — never block
-// dispatch on a config write.
+// After a worktree is created, disable gc.auto on it so concurrent
+// sub-agents in heavy repos don't trigger gc on each worktree mid-
+// dispatch. Best-effort — never block dispatch on a config write.
 function disableGcAutoOnWorktree(worktree) {
   spawnSync('git', ['-C', worktree, 'config', '--local', 'gc.auto', '0'], {
     encoding: 'utf8',
@@ -197,8 +194,8 @@ function dispatch({ keys, maxParallel, projectRoot, branchPrefix, baseBranch, dr
     return results;
   }
   // Real dispatch. Track successful creates so we can roll them back if
-  // a later create fails — leaving an orphan worktree + a plan file
-  // claiming it succeeded was the v2.0.7 partial-failure bug.
+  // a later create fails — partial success would leave orphan worktrees
+  // alongside a plan file that claims everything succeeded.
   const succeeded = [];
   let failureIndex = -1;
   for (let i = 0; i < plan.stories.length; i++) {

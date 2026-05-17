@@ -149,9 +149,9 @@ function resolveNextStoryKey(projectRoot) {
     const remaining = remainingStoriesFrom(stories);
     // parseStatuses returns every key under `development_status:` —
     // including BMad's epic rollup headers (`epic-4: in-progress`).
-    // Filter them out so we don't ask the orchestrator to branch on an
-    // epic identifier (the v2.1.4 hotfix shipped without this filter and
-    // a user reported branch: story/epic-4 instead of story/4-8-...).
+    // Filter them out so the orchestrator never branches on an epic
+    // identifier (which would produce `story/epic-4` instead of
+    // `story/4-8-...`).
     const realStories = remaining.filter(looksLikeStoryKey);
     return realStories.length > 0 ? realStories[0] : null;
   } catch (_e) {
@@ -165,7 +165,7 @@ function resolveNextStoryKey(projectRoot) {
 // orchestrator should drop it and re-resolve).
 //
 // NARROW filter (vs looksLikeStoryKey which is strict). Only rejects:
-//   - `epic-N` shape (epic-rollup header) — the v2.1.3/v2.1.4 poison
+//   - `epic-N` shape (epic-rollup header — not a story id)
 //   - bare numeric `N` (legacy bare-id epic form)
 //   - `*-retrospective` shape
 // Accepts everything else as a plausible story key (including short test
@@ -179,7 +179,7 @@ function resolveNextStoryKey(projectRoot) {
 function persistedStoryRejectionReason(key, projectRoot) {
   if (typeof key !== 'string' || !key) return 'not a string';
   if (isObviouslyEpicHeader(key)) {
-    return 'matches epic-rollup header shape (epic-N or bare N) — v2.1.3/v2.1.4 poisoned state';
+    return 'matches epic-rollup header shape (epic-N or bare N) — not a story id';
   }
   if (/-retrospective$/i.test(key)) {
     return 'matches retrospective entry shape — not a story';
@@ -196,11 +196,10 @@ function persistedStoryRejectionReason(key, projectRoot) {
   return null;
 }
 
-// Catch only the documented poisoned shapes that pre-v2.1.5 orchestrator
-// versions could write to persisted.current_story:
+// Catch documented poisoned shapes that may appear in persisted.current_story
+// (e.g. when sprint-status drift left a stale entry):
 //   - `epic-N` with no further hyphen-separated segments (epic rollup
-//     header — composeRuntimeState in v2.1.3/v2.1.4 picked this as the
-//     first non-done entry before the looksLikeStoryKey filter shipped).
+//     header that should never have been written as a story id).
 //   - bare numeric `N` (legacy BMad bare-id epic form).
 // Does NOT reject short test keys like `S1` / `S1.2` or other non-BMad
 // naming conventions — those are valid persisted state.
@@ -223,10 +222,9 @@ function isObviouslyEpicHeader(key) {
 //      Status tracks whether the per-epic retro ritual has run; not a
 //      story to dev.
 //
-// Reject (2) and (3). The v2.1.4 hotfix shipped without this filter and
-// the user reported `branch: story/epic-4` instead of the real next
-// pending story. The v2.1.5 hotfix extends the filter to retrospectives
-// after a follow-up report.
+// Reject (2) and (3) so the orchestrator never picks a rollup or
+// retrospective entry as the next story (which would produce branches
+// like `story/epic-4` or `story/4-retrospective`).
 function looksLikeStoryKey(key) {
   if (typeof key !== 'string' || !key) return false;
   // Retrospective entries (`-retrospective` suffix, with or without epic
@@ -349,9 +347,8 @@ function readSprintStatuses(projectRoot) {
 // out-of-scope without lying that they shipped:
 //   - skipped / wont_do / cancelled / deferred — explicit user intent
 //   - abandoned — alternate spelling seen in the wild
-// Pre-2.2.31 only `done` counted, so any deferred 4-N story trapped the
-// orchestrator on next-story routing instead of letting the user close
-// out the epic with a retrospective.
+// Any entry in TERMINAL_STATUSES is treated as non-remaining for
+// epic-done routing.
 const TERMINAL_STATUSES = new Set([
   'done',
   'skipped',
@@ -493,13 +490,8 @@ function composeRuntimeState(persisted, profile, projectRoot) {
   // skill invocation. PREPARE_STORY_BRANCH with no story_key would be
   // a confusing emission to act on.
   // Validate persisted.current_story against sprint-status before
-  // trusting it. Older orchestrator versions (v2.1.3 / v2.1.4) could
-  // poison this field with an epic-rollup header (e.g. `epic-4`) when
-  // resolveNextStoryKey scanned sprint-status without filtering. The
-  // v2.1.5 hotfix added looksLikeStoryKey but only at resolution time —
-  // already-persisted poisoned values ride forward through every
-  // upgrade, producing emissions like `branch: story/epic-4` on every
-  // session boot.
+  // trusting it. Persisted state can drift from reality when stories
+  // get renamed, deleted, or merged externally between sessions.
   //
   // Treat persisted.current_story as null when:
   //   - it doesn't look like a real story key (epic header, retro, garbage)
@@ -524,9 +516,9 @@ function composeRuntimeState(persisted, profile, projectRoot) {
       // a poisoned-state signal when state.phase is a story-bound phase
       // (CHECK_READINESS through STORY_LAND) — at STORY_DONE the story
       // IS expected to be marked done in sprint-status (verifyStoryDone
-      // enforces it). Pre-2.2.9 fix: any "done" rejection nulled
-      // story_key mid-record, producing branch "story/unknown" on
-      // commit_and_push_story.
+      // enforces it). Skipping the rejection at those phases avoids
+      // nulling story_key mid-record (which would produce branch
+      // "story/unknown" on commit_and_push_story).
       //
       // Epic-rollup-header / retrospective / not-in-sprint-status
       // rejections are ALWAYS poison and fire regardless of phase.
@@ -546,8 +538,7 @@ function composeRuntimeState(persisted, profile, projectRoot) {
         process.stderr.write(
           `[autopilot] WARN persisted current_story "${persistedCurrentStory}" rejected: ${rejection}. ` +
             'Treating as null and falling through to queue / sprint-status resolution. ' +
-            'This typically means state was poisoned by an older orchestrator version (v2.1.3 / v2.1.4 pre-filter); ' +
-            'next emission will clean it up.\n',
+            'Next emission will clean it up.\n',
         );
         resolvedStoryKey = null;
         resolvedEpic = null;
@@ -636,17 +627,15 @@ function composeRuntimeState(persisted, profile, projectRoot) {
     }
   }
 
-  // Count non-done stories in the current epic. state-machine.js's
+  // Count non-terminal stories in the current epic. state-machine.js's
   // EPIC_BOUNDARY_CHECK reads this to decide between RETROSPECTIVE (end
-  // of epic, count === 0) and next-story-start (count > 0). Pre-2.2.2
-  // this field was passthrough-only — never written by the orchestrator
-  // — so the count stayed at 0 and EVERY story triggered a
-  // retrospective. Now: recompute from sprint-status.yaml each emission
-  // when current_epic is known.
+  // of epic, count === 0) and next-story-start (count > 0). Recomputed
+  // from sprint-status.yaml each emission when current_epic is known.
   //
-  // Count semantics: excludes done stories AND non-story entries (epic
-  // rollup headers, -retrospective entries) via the same looksLikeStoryKey
-  // filter resolveNextStoryKey uses.
+  // Count semantics: excludes any TERMINAL_STATUSES entry (done,
+  // skipped, wont_do, cancelled, deferred, abandoned, …) AND non-story
+  // entries (epic rollup headers, -retrospective entries) via the same
+  // looksLikeStoryKey filter resolveNextStoryKey uses.
   let remainingStoriesInEpic = persisted.remaining_stories_in_epic || 0;
   if (resolvedEpic && projectRoot) {
     const epicStories = resolveStoriesForEpic(projectRoot, resolvedEpic);
@@ -657,13 +646,11 @@ function composeRuntimeState(persisted, profile, projectRoot) {
   // coherent action AND we still don't have one after every resolution
   // path (queue / validator / sprint-status), reset phase to flowStart.
   //
-  // Real-world scenario: a previous orchestrator version nulled
-  // current_story (e.g., v2.2.4's overzealous rejection) but didn't
-  // reset state.phase. Persisted state ends up with current_story: null
-  // at story_done. v2.2.9's reset only fires inside the rejection branch,
-  // so a NULL story_key doesn't trigger it (no rejection to fire). This
-  // guard catches that case + any future bug class where story_key
-  // ends up null at a story-bound phase.
+  // Real-world scenario: persisted state ends up with current_story: null
+  // at story_done (e.g. from manual edits or migration). The rejection-
+  // branch reset only fires when there's a rejection to fire; a NULL
+  // story_key doesn't trigger one. This guard catches that case + any
+  // bug class where story_key ends up null at a story-bound phase.
   //
   // The reset is safe: the next emission re-enters story-start (or
   // PREPARE_STORY_BRANCH per the migration rule) and picks the next
@@ -878,13 +865,10 @@ function decorateGitOp(action, state, profile, projectRoot) {
   }
 }
 
-// run_script actions for op=land_story carry only metadata (helper,
-// land_when, squash_on_merge, ...) — the state machine's comment
-// promises "The CLI edge composes the actual argv via land.js#planLand"
-// but that wiring was missing pre-v2.2.12. Without it, LLMs driving
-// land_as_you_go got a metadata-only action and had to improvise.
-// Symmetric to decorateGitOp: call land.planLand(state, profile,
-// options), inline the resulting `steps[]` onto the action.
+// run_script actions for op=land_story carry only metadata from the
+// state machine (helper, land_when, squash_on_merge, ...). The CLI edge
+// composes the actual argv via land.js#planLand and inlines it here —
+// symmetric to decorateGitOp for git_op actions.
 function decorateRunScript(action, state, profile, projectRoot) {
   if (!action || action.type !== 'run_script') return action;
   if (action.op === 'land_story') {
@@ -1506,34 +1490,30 @@ function cmdStart(opts) {
     );
   }
 
-  // parallel_stories: surface honestly that the documented flag is not
-  // yet wired through the BMad state machine. The supporting pieces
-  // (planBatch, dispatch-layer.js, agent-adapter.js, merge-shards.js)
-  // exist as building blocks but nextAction never emits a parallel_batch
-  // action — every story still flows through the 7-phase cycle one at a
-  // time. A user who sets `ma.parallel_stories: true` and doesn't see
-  // this notice would assume parallelism is happening when it isn't.
+  // parallel_stories: when the flag is set, surface that the BMad state
+  // machine emits stories sequentially even though the dispatch-layer
+  // building blocks (planBatch, dispatch-layer.js, agent-adapter.js,
+  // merge-shards.js) are wired. Without the notice users could assume
+  // parallel emission is happening when it isn't.
   if (profile.parallel_stories) {
     ledger.append(
       {
         kind: 'state_transition',
         detail: {
-          parallel_stories_experimental_warning:
-            'ma.parallel_stories=true is honored by the planBatch / dispatch-layer.js building blocks but the BMad state machine still emits one story at a time. Full intra-epic parallel dispatch is tracked for v2.3.0+. Stories continue sequentially in this session.',
+          parallel_stories_notice:
+            'ma.parallel_stories=true: the planBatch / dispatch-layer.js building blocks are honored, but the BMad state machine emits one story at a time in this build. Stories run sequentially.',
         },
       },
       { projectRoot },
     );
     process.stderr.write(
-      '[autopilot] WARN ma.parallel_stories=true but the state machine is not yet wired for parallel dispatch (planned for v2.3.0). Stories will run sequentially this session.\n',
+      '[autopilot] NOTICE ma.parallel_stories=true honored at the dispatch-layer level; state-machine emission remains sequential in this build.\n',
     );
   }
   if (profile.lint_enabled) {
-    // v2.2.24: lint_enabled wires verifyDevGreen → post-green-gates.js
+    // lint_enabled routes verifyDevGreen through post-green-gates.js
     // (lint-changed + lint-test-pitfalls + ci-parity scan). lint_blocking
-    // governs whether a failed gate halts the autopilot or passes
-    // through with a warning. The v2.2.23 "not wired" warning is gone —
-    // lint runs for real now.
+    // governs whether a failed gate rejects verify or just records.
     ledger.append(
       {
         kind: 'state_transition',

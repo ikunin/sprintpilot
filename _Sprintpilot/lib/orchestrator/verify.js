@@ -188,12 +188,11 @@ function runPostGreenGates(ctx) {
   }
   const cp = require('node:child_process');
   const args = [scriptAbs, '--json', '--project-root', ctx.projectRoot];
-  // Forward output_limit (v2.2.28). Pre-2.2.28 the typed-profile field
-  // existed but lint-changed.js used its hardcoded default of 100.
+  // Forward output_limit so lint-changed.js honors git.lint.output_limit.
   if (typeof ctx.profile.lint_output_limit === 'number' && ctx.profile.lint_output_limit > 0) {
     args.push('--output-limit', String(ctx.profile.lint_output_limit));
   }
-  // Forward per-language linter map (v2.2.28). Lets users reorder or
+  // Forward the per-language linter map. Users reorder priorities or
   // disable linters via git.lint.linters.{language}: [list].
   if (ctx.profile.lint_linters && typeof ctx.profile.lint_linters === 'object') {
     try {
@@ -459,10 +458,8 @@ function verifyDevGreen(state, out, ctx) {
   }
   // Post-GREEN gates: lint-changed + lint-test-pitfalls + ci-parity scan.
   // Composed pipeline lives in scripts/post-green-gates.js. Only fires
-  // when profile.lint_enabled === true. Blocking vs non-blocking
-  // governed by profile.lint_blocking. Pre-2.2.24 the script existed
-  // and was documented as "called by the orchestrator after GREEN
-  // verify" but nothing actually invoked it.
+  // when profile.lint_enabled === true. Blocking vs non-blocking is
+  // governed by profile.lint_blocking.
   const lintResult = runPostGreenGates(ctx);
   if (lintResult) {
     if (lintResult.failed && (ctx.profile && ctx.profile.lint_blocking)) {
@@ -476,17 +473,13 @@ function verifyDevGreen(state, out, ctx) {
 
 function verifyCodeReview(state, out, ctx) {
   const issues = [];
-  // bmad-code-review (.claude/skills/bmad-code-review/steps/step-04-present.md)
-  // writes findings as a "### Review Findings" subsection INSIDE the story
-  // file's Tasks/Subtasks block — NOT a separate _bmad-output/reviews/<key>.md.
-  // The pre-2.2.17 check for that file rejected every real run because the
-  // skill never creates one (recurring user pain: "review artifact missing:
-  // <path>" halts).
-  //
-  // Accept any of:
+  // bmad-code-review writes findings as a "### Review Findings"
+  // subsection inside the story file's Tasks/Subtasks block (see
+  // .claude/skills/bmad-code-review/steps/step-04-present.md). Older
+  // repo layouts also use a separate review file. Accept any of:
   //   - story file contains a `### Review Findings` section
-  //   - legacy `_bmad-output/reviews/<key>.md` exists (older repos)
-  //   - legacy `_bmad-output/implementation-artifacts/code-review-<key>.md` exists
+  //   - `_bmad-output/reviews/<key>.md` exists
+  //   - `_bmad-output/implementation-artifacts/code-review-<key>.md` exists
   // Reject only when NONE of the above exist AND the LLM didn't supply
   // findings[] inline.
   const storyKey = state.story_key || 'unknown';

@@ -106,11 +106,8 @@ function readStateFile(fs, filePath) {
 //     - item-scalar
 //     - item-key: item-value
 //
-// The block-form array path was added in v2.2.29 — pre-2.2.29 the
-// parser unconditionally `continue`d on any line without `:`, silently
-// dropping every `- item` entry. Hand-edited state files (or any
-// roundtrip through a tool that emits block-form YAML) lost their
-// `story_queue`, leaving the autopilot's queue mysteriously empty.
+// dumpYaml emits inline JSON for arrays; the block-form path handles
+// hand edits and tools that emit `- item` lines.
 function parseYamlNarrow(text) {
   if (!text) return {};
   const lines = text.split(/\r?\n/);

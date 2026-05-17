@@ -6,8 +6,7 @@ state machine that enforces the BMad 7-step sequence. You own the
 *in-skill execution, diagnosis, triage, and small-judgment decisions* —
 not the flow.
 
-This file is the **≤150-line** authoritative workflow. It is the only
-workflow shipped — the v2.0.x prose `workflow.md` is gone.
+This file is the **≤150-line** authoritative workflow.
 
 ## The loop
 
@@ -83,7 +82,7 @@ Wrap everything in `{ "status": "...", ... }` and pass to
 | `failure`             | `reason`, `diagnosis` (first-class — fed back into next retry), `recoverable: boolean`           |
 | `blocked`             | `blocker_kind` (one of the 5 TRUE BLOCKERS or recoverable kinds), `details`, `user_input_needed`, `consecutive_count?` |
 | `propose_alternative` | `reason`, `alternative` (full Action object), `urgency_hint?` (raises impact only). Low impact → auto-accepted; medium / high → orchestrator stores the alternative in `state.pending_alternative` and emits `user_prompt`. The user accepts via `user_input` `{ kind: 'accept_alternative' }` or rejects via `force_continue` (both clear `pending_alternative`). |
-| `user_input`          | `commands: UserCommand[]` (validated server-side; see user-commands.js). Kinds: `skip_story`, `abort_sprint`, `force_continue`, `override_decision`, `change_profile`, `pause` (cleanly halts THIS session; next `/sprint-autopilot-on` resumes), `accept_alternative` (dispatches the stored `pending_alternative`), `trigger_retrospective` (v2.2.31+ — force-routes to RETROSPECTIVE for the current epic regardless of `remaining_stories_in_epic`; use when the user explicitly says "close out epic N with retro" while non-terminal stories remain). **NEVER send `pause` on your own initiative** — see "Pause is human-only" below. |
+| `user_input`          | `commands: UserCommand[]` (validated server-side; see user-commands.js). Kinds: `skip_story`, `abort_sprint`, `force_continue`, `override_decision`, `change_profile`, `pause` (cleanly halts THIS session; next `/sprint-autopilot-on` resumes), `accept_alternative` (dispatches the stored `pending_alternative`), `trigger_retrospective` (force-routes to RETROSPECTIVE for the current epic regardless of `remaining_stories_in_epic`; use when the user explicitly says "close out epic N with retro" while non-terminal stories remain). **NEVER send `pause` on your own initiative** — see "Pause is human-only" below. |
 | `verify_override`     | `evidence: { decision_log_ref?, explanation, expected_paths? }` — used when verify.js is wrong   |
 
 ## Pause is human-only
@@ -148,11 +147,11 @@ bookkeeping you'd otherwise be tempted to skip:
 | Phase | Bookkeeping that MUST be true before you signal `success` |
 |---|---|
 | `prepare_story_branch` | Every step in `action.steps` exited 0 — HEAD is on `action.branch` (verify with `git rev-parse --abbrev-ref HEAD`). Emitted only when `git.granularity ∈ {story, epic}` AND `git.reuse_user_branch=false`. Under `reuse_user_branch=true` this phase is skipped — the user-locked branch is detected at cmdStart instead. |
-| `create_story` | Story file has an Acceptance Criteria section (heading level 2-4: `##`/`###`/`####`; title `Acceptance Criteria` or `AC`) with at least one list entry (`-`, `*`, or numbered `1.` / `1)`) AND a `## Tasks` (or `## Tasks/Subtasks`) section with at least one `[ ]` or `[x]` checkbox. v2.2.25+ relaxed cosmetic variants. |
-| `dev_red` / `dev_green` | Test files exist on disk; runner exit codes match the phase contract; `tests_run` matches the runner's count. If `test_files` is omitted (v2.2.17+), the verifier auto-detects them from `git diff` + untracked files filtered by language convention. If `tests_run` is omitted (v2.2.21/22+), the runner's count is accepted. Relative paths are resolved against `projectRoot` (v2.2.18+). |
-| `code_review` | Findings recorded in any of: (a) `### Review Findings` section in the story file (what `bmad-code-review` actually writes), (b) `_bmad-output/reviews/<story_key>.md` (legacy), or (c) `_bmad-output/implementation-artifacts/code-review-<story_key>.md` (older repos). `findings[]` carries `{id, severity, category, action: 'block'\|'patch'\|'defer', rationale}` for every finding. v2.2.17+ accepts all three locations. |
+| `create_story` | Story file has an Acceptance Criteria section (heading level 2-4: `##`/`###`/`####`; title `Acceptance Criteria` or `AC`) with at least one list entry (`-`, `*`, or numbered `1.` / `1)`) AND a `## Tasks` (or `## Tasks/Subtasks`) section with at least one `[ ]` or `[x]` checkbox. |
+| `dev_red` / `dev_green` | Test files exist on disk; runner exit codes match the phase contract; `tests_run` matches the runner's count. Relative `test_files` paths resolve against `projectRoot`. The verifier auto-detects `test_files` from `git diff` + untracked files (language-shape filter) when the LLM omits the array, and accepts the runner's `tests_run` when the LLM omits the count — so signal echo of these two fields is optional when the underlying work is correct. |
+| `code_review` | Findings recorded in any of: (a) `### Review Findings` section in the story file (what `bmad-code-review` writes), (b) `_bmad-output/reviews/<story_key>.md`, or (c) `_bmad-output/implementation-artifacts/code-review-<story_key>.md`. `findings[]` carries `{id, severity, category, action: 'block'\|'patch'\|'defer', rationale}` for every finding. |
 | `patch_apply` | Every `patch_finding` id present in `state.patch_findings` is included in `applied_finding_ids`. |
-| `story_done` (and `nano_quick_dev`) | sprint-status.yaml shows this story as `done` (under `development_status.<story_key>` or inline). Story file has zero remaining `[ ]` task boxes — dev-story is responsible for flipping them to `[x]`. `commit_sha` and `branch` reported; `story_key` matches. **`git_steps_completed: true` in success output** — set this ONLY after every step in `action.steps` (the orchestrator's decorated git plan: `git add`, `git commit`, `git push -u origin <branch>`) has exited 0. If the flag is omitted, v2.2.17+ verifies the underlying git state directly: probes `git cat-file -e <commit_sha>` AND `git ls-remote --heads origin <branch>` — when both succeed and match, the signal is accepted. The flag remains the canonical signal; the probe is a recovery path. |
+| `story_done` (and `nano_quick_dev`) | sprint-status.yaml shows this story as `done` (under `development_status.<story_key>` or inline). Story file has zero remaining `[ ]` task boxes — dev-story is responsible for flipping them to `[x]`. `commit_sha` and `branch` reported; `story_key` matches. **`git_steps_completed: true` in success output** — set this ONLY after every step in `action.steps` (the orchestrator's decorated git plan: `git add`, `git commit`, `git push -u origin <branch>`) has exited 0. The flag is the canonical signal; when omitted, the verifier probes `git cat-file -e <commit_sha>` AND `git ls-remote --heads origin <branch>` and accepts the signal when both succeed and the remote sha matches. |
 | `retrospective` | `_bmad-output/retrospectives/<epic>.md` exists. |
 
 Skipping any of these — even when the code is "obviously done" — produces
@@ -194,9 +193,36 @@ land step from `state.land_pending`.
 On the next `autopilot start`, the orchestrator fingerprints
 `_bmad-output/`, sprint-status.yaml, and per-story branch HEADs against
 the fingerprint recorded at the last halt. Any divergence is emitted as
-`{ kind: 'resume_divergence', differences: ... }`. Forward the diff to
-the user; let them resolve via `user_input` (`force_continue` or
-`override_decision`).
+`{ kind: 'resume_divergence', differences: ... }`. Two escape paths
+proceed despite a divergent fingerprint:
+
+- **External-completion auto-acknowledge.** When the persisted
+  `current_story` is `done` in sprint-status (story merged outside the
+  autopilot — manual PR merge, hotfix, UI action), `autopilot start`
+  clears the stale story identity and proceeds. The next story is
+  picked from the queue or sprint-status as normal. Ledger records
+  `kind: resume, divergence: { kind: 'divergence_accepted', reason:
+  'external_completion', story: <key> }`.
+- **`--accept-divergence` flag** — catch-all for divergence patterns
+  the auto-acknowledge doesn't cover (multiple stories completed
+  externally, branch heads moved, etc.). Logged with
+  `reason: 'explicit_accept'`.
+
+For divergences that fit neither path (genuine corruption, unexpected
+state), forward the diff to the user and let them resolve via
+`user_input` (`force_continue` or `override_decision`).
+
+## Post-GREEN lint gate
+
+When `git.lint.enabled` is true, the verifier runs the composed
+lint pipeline (`scripts/post-green-gates.js`: lint-changed +
+lint-test-pitfalls + ci-parity scan) after the standard `dev_green`
+checks pass. `git.lint.blocking` governs whether a failed gate halts
+the autopilot for the LLM to fix-loop, or passes through with the
+failure logged for visibility. `git.lint.output_limit` truncates each
+gate's output; `git.lint.linters.<language>: [...]` overrides the
+default per-language linter priority (empty list disables a language;
+`javascript` + `typescript` keys merge into a single `js-ts` bucket).
 
 ## What you must NEVER do
 

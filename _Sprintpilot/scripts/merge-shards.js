@@ -76,17 +76,17 @@ function implArtifactsDir(projectRoot) {
 // Cross-process merge lock
 // ──────────────────────────────────────────────────────────────────
 //
-// Pre-2.0.8 two concurrent merge invocations would each compute the
-// merge in-memory then both rename their tmp file over autopilot-state
-// .yaml. Tmp filenames are unique, so the renames never collided on
-// the source — but the LAST rename wins on the destination, and the
-// earlier merge (potentially with newer shard data) was clobbered.
-// Combined with the archive race below, the loser's archived shards
-// were also gone — silent state rewind.
+// Two concurrent merge invocations would each compute the merge in
+// memory then both rename their tmp file over autopilot-state.yaml.
+// Tmp filenames are unique so renames don't collide on the source,
+// but the LAST rename wins on the destination — the earlier merge
+// (potentially with newer shard data) would be clobbered. Combined
+// with archive races below, the loser's archived shards would also
+// vanish — a silent state rewind.
 //
-// The fix: a sibling lock file. If another invocation holds the lock,
-// either wait briefly + retry, or fail with a clear message naming
-// the holder's pid and start time so the operator can diagnose.
+// A sibling lock file serializes merges. If another invocation holds
+// the lock, callers wait briefly + retry, or fail with a clear message
+// naming the holder's pid and start time so the operator can diagnose.
 
 const MERGE_LOCK_FILE = '.merge-shards.lock';
 const STALE_LOCK_AGE_MS = 5 * 60 * 1000; // 5 minutes — merges are fast
@@ -186,10 +186,10 @@ function compareStamps(a, b) {
 }
 
 // Snapshot file stat at read time so we can verify it's unchanged
-// before archiving. Pre-2.0.8: a worker writing a fresh shard between
-// merge-read and archive-rename would have its shard moved into
-// .archive/ without ever being folded into the merged YAML — silent
-// data loss under parallel dispatch.
+// before archiving. Without the guard, a worker writing a fresh shard
+// between merge-read and archive-rename would have its shard moved
+// into .archive/ without being folded into the merged YAML —
+// silent data loss under parallel dispatch.
 function snapshotShard(file) {
   try {
     const st = fs.statSync(file);
@@ -242,10 +242,8 @@ function mergeStateShards(projectRoot) {
 }
 
 // Parse a timestamp string defensively: malformed `ts` returns 0
-// rather than NaN (which Array.sort treats unpredictably). Pre-2.0.8
-// `Date.parse('not-a-date')` returned NaN, NaN comparisons returned
-// 0, and entries clustered in undefined order — the documented
-// "sort by ts ascending" claim was silently violated.
+// rather than NaN (which Array.sort treats unpredictably; NaN
+// comparisons always return 0 and entries cluster in undefined order).
 function tsToMs(ts) {
   if (!ts) return 0;
   const v = Date.parse(ts);
@@ -281,11 +279,11 @@ function mergeDecisionShards(projectRoot) {
     }
     snapshots[story] = snap;
   }
-  // Deterministic dedup: sort by (id asc, ts DESC) first, then keep the
-  // first entry for each id — that's the latest-by-ts. Pre-2.0.8 the
-  // dedup was iteration-order-dependent (filesystem readdir order is
-  // unspecified), so identical inputs produced different outputs across
-  // OSes. Idempotency claim was filesystem-dependent.
+  // Deterministic dedup: sort by (id asc, ts DESC) first, then keep
+  // the first entry for each id — that's the latest-by-ts. The
+  // explicit sort avoids depending on filesystem readdir order, which
+  // is unspecified and varies by OS, so identical inputs always
+  // produce identical outputs.
   entries.sort((a, b) => {
     const ai = a.id !== undefined && a.id !== null ? String(a.id) : '';
     const bi = b.id !== undefined && b.id !== null ? String(b.id) : '';

@@ -137,16 +137,10 @@ describe('autopilot start', () => {
     expect(lintEntry.detail.lint_blocking).toBe(true);
   });
 
-  it('logs an experimental warning when ma.parallel_stories=true (state-machine not yet wired)', () => {
-    // Document the gap explicitly: planBatch + dispatch-layer.js exist
-    // as building blocks but nextAction never emits parallel_batch.
-    // cmdStart MUST surface this so users who set the flag don't assume
-    // parallel dispatch is happening.
-    // resolve-profile wraps modules/ma/config.yaml content under `ma:`
-    // for the merged tree; profile-rules.js then reads `ma.parallel_stories`.
-    // The shipped modules/ma/config.yaml wraps under `multi_agent:` (legacy
-    // namespace) which doesn't reach profile-rules — that's a separate
-    // config-contract bug. Test the path profile-rules actually consumes.
+  it('logs a parallel_stories_notice when ma.parallel_stories=true', () => {
+    // planBatch / dispatch-layer.js are wired as building blocks but
+    // nextAction emits stories sequentially. cmdStart logs a notice so
+    // users who set the flag see the actual emission mode.
     const maCfgDir = join(projectRoot, '_Sprintpilot', 'modules', 'ma');
     mkdirSync(maCfgDir, { recursive: true });
     writeFileSync(
@@ -163,10 +157,10 @@ describe('autopilot start', () => {
     );
     const lines = readFileSync(ledgerPath, 'utf8').trim().split('\n');
     const entries = lines.map((l) => JSON.parse(l));
-    const warning = entries.find(
-      (e) => e.detail && e.detail.parallel_stories_experimental_warning,
+    const notice = entries.find(
+      (e) => e.detail && e.detail.parallel_stories_notice,
     );
-    expect(warning).toBeDefined();
+    expect(notice).toBeDefined();
   });
 
   it('writes the ledger and state on start', () => {

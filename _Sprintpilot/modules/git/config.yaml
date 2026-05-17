@@ -65,13 +65,18 @@ git:
     story-title: "from story file title, fallback to story-key"
     patch-title: "from review finding title, fallback to 'code review fix'"
 
-  # Linting
+  # Linting — runs after dev_green verify passes via
+  # scripts/post-green-gates.js (lint-changed + lint-test-pitfalls +
+  # ci-parity scan).
   lint:
-    enabled: true
-    blocking: false # true = lint errors halt the autopilot; false = warn only
-    output_limit: 100 # max lines of lint output injected into context
-    # Linter preference per language — first found wins.
-    # Override to force a specific tool (e.g., set typescript: [biome] to skip eslint).
+    enabled: true # gate runs only when true
+    blocking: false # true = lint errors reject verify (LLM fix-loops); false = recorded but non-gating
+    output_limit: 100 # max lines of lint output injected back into context
+    # Per-language linter preference, first-installed wins. Empty list
+    # disables linting for that language. `javascript` and `typescript`
+    # merge into a single js-ts bucket (both share eslint/biome tooling).
+    # To add a new language, add an entry here AND a matching resolver
+    # block in scripts/lint-changed.js.
     linters:
       python: [ruff, flake8, pylint]
       javascript: [eslint, biome]
@@ -87,7 +92,6 @@ git:
       plsql: [sqlfluff]
       kotlin: [ktlint, detekt]
       php: [phpstan, phpcs]
-      # To add a new language: add an entry here and a matching block in scripts/lint-changed.js
 
   # Push & PR
   push:
@@ -103,9 +107,11 @@ git:
     cleanup_on_merge: true # false = keep worktrees after epic completion for inspection
     health_check_on_boot: true # check for orphaned worktrees from crashed sessions
 
-  # Lock file (.autopilot.lock — prevents concurrent autopilot sessions)
+  # Lock file (.autopilot.lock — prevents concurrent autopilot sessions
+  # on the same project). Acquired by `autopilot start`; released by
+  # `/sprint-autopilot-off`.
   lock:
-    stale_timeout_minutes: 30 # auto-remove locks older than this
+    stale_timeout_minutes: 30 # auto-take-over locks older than this (0 disables)
 
   # Platform detection
   platform:

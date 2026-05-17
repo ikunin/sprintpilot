@@ -47,10 +47,8 @@ const META_MAX_BYTES = 2048;
 const LINE_MAX_BYTES = 4096; // POSIX PIPE_BUF floor — single write() is atomic
 const VALID_ACTIONS = ['start', 'end', 'once', 'mark'];
 // Marker filenames are `.mark.<story>.json` — built by `markerPath()`.
-// Pre-2.0.5 used a single global `.mark.json`, which corrupted timing
-// data under parallel dispatch (concurrent sub-agents racing on one
-// rename target). The constant is gone; runtime always uses per-story
-// paths.
+// Per-story paths so parallel dispatch (concurrent sub-agents) can't
+// race on a shared rename target.
 //
 // Sanity ceiling for a single duration record. Phase durations longer
 // than this are treated as overflow (likely a stale marker from an
@@ -304,12 +302,10 @@ function clearMarker(projectRoot, story) {
  * for a given story emits no duration record — there's no "previous
  * phase" yet for that story.
  *
- * Pre-2.0.5 used a single global marker file shared across stories,
- * which under parallel dispatch (sub-agents marking different stories
- * concurrently against the same project root) raced on a single file —
- * one rename clobbered the other and durations were attributed to the
- * wrong (story, phase). Per-story markers eliminate the race entirely:
- * each story has its own marker file `.mark.<story>.json`.
+ * Per-story marker files (`.mark.<story>.json`) ensure parallel
+ * dispatch is race-free — sub-agents marking different stories
+ * concurrently never share a rename target, so durations are always
+ * attributed to the correct (story, phase) pair.
  *
  * Use phase = "_end" to close THIS story's last open phase without
  * starting a new one (e.g. at sprint-complete time, or per-story

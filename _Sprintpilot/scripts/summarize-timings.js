@@ -139,9 +139,8 @@ function pairEvents(events) {
       // mark-API records arrive already paired. Anomalous records
       // (clock_skew / over_threshold) are tallied separately and never
       // contribute to p50/p95/max — otherwise a single backstep or
-      // stale marker poisons aggregates the way the v2.0.4 raw clamp
-      // did before the split. duration_ms must be a finite non-negative
-      // number; defensive against hand-edited shards.
+      // stale marker would poison the aggregates. duration_ms must be
+      // a finite non-negative number; defensive against hand-edited shards.
       //
       // Truthy comparison (not `=== true`) so a hand-edited shard with
       // `clock_skew: 1` or any other truthy value is still recognized

@@ -1,30 +1,32 @@
 # Multi-Agent Configuration
 #
-# Top-level key MUST be `ma:` — resolve-profile.js merges this under the
+# Top-level key MUST be `ma:`. resolve-profile.js merges this under the
 # `ma` namespace, and profile-rules.js reads `ma.parallel_stories` /
-# `ma.max_parallel_stories`. The legacy `multi_agent:` wrapper used in
-# pre-2.2.16 versions was silently ignored (deep-merge produced
-# `resolved.ma.multi_agent.*` instead of `resolved.ma.*`).
+# `ma.max_parallel_stories`.
 
 ma:
   enabled: true
   max_parallel_review_layers: 3 # Always 3: blind, edge-case, acceptance
   max_parallel_research: 3 # Max concurrent research agents per batch
   max_parallel_analysis: 5 # Max concurrent codebase analysis agents
-  # session_story_limit NOT duplicated here — uses autopilot's single authoritative limit
+  # session_story_limit lives under autopilot.* — single source of truth.
 
-  # PR 11: intra-epic parallel story execution.
-  #   parallel_stories: true enables dispatch-layer.js on Claude Code;
-  #     other hosts silently fall back to sequential (per agent-adapter.js
-  #     detection — confidence high + supports_parallel true).
-  #   max_parallel_stories: cap on concurrent sub-agents per layer.
-  #   min_epic_duration_for_parallel_sec: skip parallelism for epics
-  #     whose estimated wall-clock is below this threshold (saves
-  #     dispatch overhead).
-  #   max_consecutive_conflicts: disable parallelism for the rest of the
-  #     session once N consecutive merge conflicts occur.
-  #   effective_parallel_floor: never drop below this mid-session even
-  #     after failure-driven concurrency reduction.
+  # Intra-epic parallel story execution.
+  #
+  # parallel_stories: true enables the dispatch-layer.js building blocks
+  # (planBatch, resolve-dag.js, merge-shards.js, agent-adapter.js). The
+  # state machine emits stories one at a time; the autopilot logs a
+  # clear notice at session start when this flag is set so behavior is
+  # unambiguous. Intra-epic parallel emission is planned for a future
+  # minor release.
+  #
+  # max_parallel_stories: cap on concurrent sub-agents per layer.
+  # min_epic_duration_for_parallel_sec: skip parallelism for epics whose
+  #   estimated wall-clock is below this threshold (saves dispatch overhead).
+  # max_consecutive_conflicts: disable parallelism for the rest of the
+  #   session once N consecutive merge conflicts occur.
+  # effective_parallel_floor: never drop below this mid-session even
+  #   after failure-driven concurrency reduction.
   parallel_stories: false
   max_parallel_stories: 2
   min_epic_duration_for_parallel_sec: 300
@@ -32,25 +34,25 @@ ma:
   max_consecutive_conflicts: 2
   effective_parallel_floor: 1
 
-  # EXPERIMENTAL: enable parallel_stories dispatch on Gemini CLI.
+  # Experimental: parallel_stories dispatch on Gemini CLI.
   #
   # Gemini CLI has a subagent primitive (invoke_subagent) but its
-  # worktree-scoped variant is not yet shipped upstream (tracker:
-  # github.com/google-gemini/gemini-cli#22967) and real-world parallelism
+  # worktree-scoped variant is tracked upstream
+  # (github.com/google-gemini/gemini-cli#22967). Real-world parallelism
   # reports serialization + quota throttling. Sprintpilot detects Gemini
   # CLI via GEMINI_CLI=1 (env, HIGH confidence) or parent process `gemini`
-  # (MEDIUM), but supports_parallel stays false by default.
+  # (MEDIUM); supports_parallel stays false by default.
   #
-  # Flip to true PER PROJECT once upstream worktree support lands (or to
-  # experiment at your own risk). Workflow logs an "experimental parallel"
-  # warning once per session when this is true AND host=gemini-cli.
+  # Flip to true PER PROJECT to opt into the experimental path. The
+  # workflow logs an "experimental parallel" warning once per session
+  # when this is true AND host=gemini-cli.
   experimental_parallel_on_gemini: false
 
-  # PR 12 — cross-epic parallelism (EXPERIMENTAL).
-  # Off by default on ALL profiles including large. Enabling requires:
+  # Cross-epic parallelism (experimental). Off by default on every
+  # profile, including large. Enabling requires:
   #   1. Both epics carry `independent: true` in dependencies.yaml.
   #   2. preflight-merge.js reports no conflicts between them.
-  #   3. max_parallel_epics is hardcoded at 2 — no tuning knob.
+  #   3. max_parallel_epics is fixed at 2 — no tuning knob.
   # A single cross-epic merge conflict in a session disables parallel_epics
   # for the rest of the session.
   parallel_epics: false

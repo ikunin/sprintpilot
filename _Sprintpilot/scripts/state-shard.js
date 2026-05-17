@@ -88,11 +88,9 @@ function validateKind(k) {
 }
 
 // Read BMad's `output_folder` config so a project that customized its
-// output location doesn't end up with shards split between
-// `_bmad-output/` (writer hardcoded) and `<output_folder>/` (reader
-// honoring config). Pre-2.0.8 this script ignored output_folder
-// entirely, contradicting sibling scripts (mark-done-stories-tasks.js)
-// that did read it.
+// output location keeps shards in the configured directory. Sibling
+// scripts (mark-done-stories-tasks.js) read the same config, so all
+// writers stay consistent.
 function readOutputFolder(projectRoot) {
   const cfg = path.join(projectRoot, '_bmad', 'bmm', 'config.yaml');
   if (!fs.existsSync(cfg)) return null;

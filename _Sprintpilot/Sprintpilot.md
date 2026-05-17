@@ -31,9 +31,16 @@ Edit `_Sprintpilot/modules/autopilot/config.yaml`:
 
 | Setting | Default | Values | Purpose |
 |---------|---------|--------|---------|
-| `autopilot.session_story_limit` | `3` (nano: `5`) | integer ≥ 0 | Stories fully implemented per autopilot run before checkpoint. `0` = unlimited. Retuned in 2.0.1 after context-rot exposure on longer sessions; nano is cheaper per story so fits a higher cap. |
+| `autopilot.session_story_limit` | `3` (nano: `5`) | integer ≥ 0 | Stories fully implemented per autopilot run before checkpoint. `0` = unlimited. Nano is cheaper per story and fits a higher cap. |
 | `autopilot.retrospective_mode` | `auto` | `auto` / `stop` / `skip` | How epic-end retrospectives are handled (see below). |
-| `autopilot.auto_infer_dependencies` | `true` (nano + legacy: `false`) | bool | 2.0.2 — autopilot session infers inter-story DAG once after `bmad-sprint-planning` and writes `_Sprintpilot/sprints/dependencies.yaml`. Hand-authored sidecars (no `# AUTO-INFERRED` marker) are detected and respected. See "Dependency Inference" below. |
+| `autopilot.auto_infer_dependencies` | `true` (nano + legacy: `false`) | bool | Autopilot session infers an inter-story DAG once after `bmad-sprint-planning` and writes `_Sprintpilot/sprints/dependencies.yaml`. Hand-authored sidecars (no `# AUTO-INFERRED` marker) are detected and respected. See "Dependency Inference" below. |
+| `git.lock.stale_timeout_minutes` | `30` | integer ≥ 0 | `.autopilot.lock` older than this is auto-taken-over by the next session. `0` disables auto-takeover (locks held until released manually). |
+| `git.worktree.health_check_on_boot` | `true` | bool | At session start, scan `.worktrees/` for orphans from crashed sessions and halt with a prune hint when any are found. |
+| `git.worktree.cleanup_on_merge` | `true` | bool | After an epic merges, prune worktree metadata and remove `.worktrees/<key>/` directories whose branches no longer exist locally or on origin. |
+| `git.lint.enabled` | `false` | bool | After `dev_green` verify passes, run the composed lint pipeline (`scripts/post-green-gates.js`: lint-changed + lint-test-pitfalls + ci-parity scan). |
+| `git.lint.blocking` | `false` | bool | When true, a failing lint gate rejects verify so the LLM gets a fix-loop. When false, failures are recorded but don't gate the autopilot. |
+| `git.lint.output_limit` | `100` | integer ≥ 0 | Max lines of lint output injected back as context. |
+| `git.lint.linters` | (auto-detect) | map of language → ordered list | Per-language linter preference. Languages: `python` / `javascript` / `typescript` / `rust` / `go` / `ruby` / `java` / `c` / `cpp` / `csharp` / `swift` / `sql` / `kotlin` / `php`. `javascript` and `typescript` merge into a single `js-ts` bucket. An empty list disables linting for that language. |
 
 `retrospective_mode` options:
 - **`auto`** *(default)* — autopilot writes a deterministic retrospective artifact from `sprint-status.yaml` + `decision-log.yaml`, then continues. Single pass, no external skill call, safe under every CLI.
@@ -46,13 +53,30 @@ Both settings are prompted during `sprintpilot install` (interactive mode) with 
 
 After `bmad-sprint-planning` completes, the autopilot session reads `epics.md`, `architecture.md`, and `sprint-status.yaml` and emits a JSON dependency envelope. `_Sprintpilot/scripts/infer-dependencies.js` validates it (schema, unknown keys, self-deps, cross-epic edges, missing rationales, cycles) and writes `_Sprintpilot/sprints/dependencies.yaml` with an `# AUTO-INFERRED` marker header. The script never calls an LLM — the autopilot session is the inference caller.
 
-This unblocks parallel story dispatch (`parallel_stories: true` + `dispatch-layer.js`) without requiring users to discover and hand-author the sidecar. Hand-authored files (no marker) are respected silently. Failure modes (invalid JSON, validation errors) log and continue — `resolve-dag.js` falls back to its safe linear `ordering` strategy on dispatch.
+The DAG underwrites the `dispatch-layer.js` infrastructure (`planBatch`, `resolve-dag.js`, `merge-shards.js`, `agent-adapter.js`). Hand-authored sidecars (no marker) are respected silently. Failure modes (invalid JSON, validation errors) log and continue — `resolve-dag.js` falls back to its safe linear `ordering` strategy on dispatch.
+
+`ma.parallel_stories: true` enables the dispatch-layer building blocks but the state machine still emits stories one at a time; intra-epic parallel emission lands in a future minor release. The autopilot logs a clear notice at session start when the flag is set so the behavior is unambiguous.
 
 ### Mandatory fresh-context finalize
 
 Independent of `session_story_limit`, the autopilot forces an extra session at end-of-sprint. When step 2 detects all stories are done, it writes `current_bmad_step = sprint-finalize-pending` to the state file and halts — it does **not** run step 10 (cleanup) in that session. The next `/sprint-autopilot-on` invocation reads the marker in step 1 and jumps directly to step 10 with a clean context window, where seven CRITICAL deterministic script calls run the cleanup (checkbox marking, worktree removal, lock release, artifact commit, sprint-complete state, verification, state-file delete).
 
-This behavior is not configurable: it's a mitigation for late-session instruction decay that was reliably dropping cleanup actions in long single-session runs. The extra session is short (typically ~60-100 turns, under $2). Enforced by the `sprint_finalize_pending` terminal state in `_Sprintpilot/lib/orchestrator/state-machine.js`.
+This behavior is not configurable: it's a mitigation for late-session instruction decay that drops cleanup actions in long single-session runs. The extra session is short (typically ~60-100 turns, under $2). Enforced by the `sprint_finalize_pending` terminal state in `_Sprintpilot/lib/orchestrator/state-machine.js`.
+
+### Resume divergence
+
+At session start, the orchestrator fingerprints `_bmad-output/`, sprint-status.yaml, and per-story branch HEADs and compares against the fingerprint stamped at the last halt. When they differ, two escape paths proceed without manual state surgery:
+
+- **External completion (auto)** — when the persisted `current_story` is `done` in sprint-status (story merged outside the autopilot: manual PR merge, hotfix, UI action), the stale story identity is cleared and the orchestrator picks the next pending story. Logged as `divergence_accepted, reason: external_completion`.
+- **`--accept-divergence` flag** — catch-all for divergence patterns the auto-acknowledge doesn't cover (multiple stories completed externally, branch heads moved, etc.). Logged as `reason: explicit_accept`.
+
+Divergences outside both paths emit `resume_divergence` with the diff so the user/LLM can resolve.
+
+### Terminal statuses for epic-done routing
+
+A story counts as "non-remaining" for end-of-epic detection when its sprint-status entry is any of: `done` / `skipped` / `wont_do` / `won't_do` / `cancelled` / `canceled` / `deferred` / `abandoned`. Hand-edit sprint-status to flag deferred work without lying it shipped — the orchestrator routes to RETROSPECTIVE once every entry in the epic is terminal.
+
+When deferred entries can't be reclassified in time, the LLM can emit `user_input { kind: 'trigger_retrospective' }` to force-route to RETROSPECTIVE for the current epic regardless of `remaining_stories_in_epic`. This is the canonical way to "close out epic N with retro" while non-terminal stories remain.
 
 ---
 
