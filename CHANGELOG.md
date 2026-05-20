@@ -1473,13 +1473,7 @@ The entries below document the final versions of the now-deprecated `bmad-autopi
 
 ### Added
 
-#### Multi-Agent Skills (7 new skills, 19 subagent prompts)
-
-- **bmad-ma-code-review** — Parallel 3-layer code review
-  - Blind Hunter (adversarial, diff-only)
-  - Edge Case Hunter (boundary conditions, full project access)
-  - Acceptance Auditor (AC verification)
-  - Triage with deduplication and contradiction handling
+#### Multi-Agent Skills
 
 - **bmad-ma-codebase-map** — 5-stream parallel codebase analysis
   - Stack Analyzer, Architecture Mapper, Quality Assessor
@@ -1503,8 +1497,6 @@ The entries below document the final versions of the now-deprecated `bmad-autopi
   - Produces `migration-plan.md`, `migration-epics.md`, `migration-tracking.yaml`
 
 - **bmad-ma-research** — Parallel research fan-out with WebSearch/WebFetch
-
-- **bmad-ma-party-mode** — Real parallel multi-persona discussions
 
 #### Git Workflow Integration
 - Enhanced `bmad-autopilot-on` with git operations between skill invocations
