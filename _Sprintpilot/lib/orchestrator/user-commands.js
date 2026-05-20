@@ -27,6 +27,25 @@
 //     stories, so the orchestrator otherwise counts them as remaining
 //     and routes to next-story instead of retro).
 //
+// v2.3.0 — plan-aware mid-flight commands. These operate on
+// sprint-plan.yaml via the Phase 2 primitives. DAG-aware validation
+// lives in the applier (it needs the live plan + helper).
+//   reorder_queue { order: string[] }
+//     Rewrite priorities so the plan's pending stories match `order`.
+//     Validated against the DAG: every upstream of each story must be
+//     positioned BEFORE it OR plan-terminal. Inline edit — no phase
+//     change.
+//   add_to_sprint { story_keys: string[], position?: 'end'|'after:<key>'|<int>, issue_ids?: object }
+//     Add stories to plan.stories[]. Each key must exist in sprint-status,
+//     be non-terminal there, and not already in plan. Optional issue_ids
+//     map populates issue_id per added story.
+//   remove_from_sprint { story_keys: string[], mark_status?: 'skipped'|'deferred' }
+//     Mark stories with plan_status=skipped (default) or 'deferred'.
+//     Downstream-in-plan stories get a warning side effect.
+//   replan_sprint { reason?: string }
+//     Halt at next story_done boundary and emit invoke_skill for
+//     /sprintpilot-plan-sprint. The skill rebuilds the plan from scratch.
+//
 // Validation returns { ok: true, command } | { ok: false, errors: string[] }.
 
 'use strict';
@@ -42,10 +61,16 @@ const COMMAND_KINDS = [
   'pause',
   'accept_alternative',
   'trigger_retrospective',
+  // v2.3.0 — plan-aware mid-flight commands.
+  'reorder_queue',
+  'add_to_sprint',
+  'remove_from_sprint',
+  'replan_sprint',
 ];
 
 const STORY_KEY_RE = /^[A-Za-z0-9._-]{1,64}$/;
 const DECISION_ID_RE = /^[A-Za-z0-9._-]{1,64}$/;
+const VALID_REMOVE_STATUSES = ['skipped', 'deferred'];
 
 function isPlainObject(v) {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -85,6 +110,93 @@ function validateOne(cmd) {
     case 'trigger_retrospective': {
       if ('reason' in cmd && cmd.reason !== undefined && typeof cmd.reason !== 'string')
         errors.push(`${cmd.kind}.reason must be string when present`);
+      break;
+    }
+    case 'reorder_queue': {
+      if (!Array.isArray(cmd.order) || cmd.order.length === 0) {
+        errors.push('reorder_queue.order must be a non-empty array of story keys');
+        break;
+      }
+      const seen = new Set();
+      for (const k of cmd.order) {
+        if (!nonEmptyString(k) || !STORY_KEY_RE.test(k)) {
+          errors.push(`reorder_queue.order entry ${JSON.stringify(k)} must match [A-Za-z0-9._-]{1,64}`);
+          continue;
+        }
+        if (seen.has(k)) {
+          errors.push(`reorder_queue.order contains duplicate key ${JSON.stringify(k)}`);
+          continue;
+        }
+        seen.add(k);
+      }
+      break;
+    }
+    case 'add_to_sprint': {
+      if (!Array.isArray(cmd.story_keys) || cmd.story_keys.length === 0) {
+        errors.push('add_to_sprint.story_keys must be a non-empty array');
+        break;
+      }
+      for (const k of cmd.story_keys) {
+        if (!nonEmptyString(k) || !STORY_KEY_RE.test(k)) {
+          errors.push(
+            `add_to_sprint.story_keys entry ${JSON.stringify(k)} must match [A-Za-z0-9._-]{1,64}`,
+          );
+        }
+      }
+      if (cmd.position !== undefined && cmd.position !== null) {
+        const p = cmd.position;
+        const isEnd = p === 'end';
+        const isAfter = typeof p === 'string' && p.startsWith('after:') && p.length > 6;
+        const isInt = typeof p === 'number' && Number.isFinite(p);
+        if (!isEnd && !isAfter && !isInt) {
+          errors.push(
+            "add_to_sprint.position must be 'end', 'after:<key>', or an integer index",
+          );
+        }
+      }
+      if (cmd.issue_ids !== undefined && cmd.issue_ids !== null) {
+        if (!isPlainObject(cmd.issue_ids)) {
+          errors.push('add_to_sprint.issue_ids must be an object map { story_key: issue_id }');
+        } else {
+          for (const [k, v] of Object.entries(cmd.issue_ids)) {
+            if (!STORY_KEY_RE.test(k)) {
+              errors.push(
+                `add_to_sprint.issue_ids key ${JSON.stringify(k)} must match [A-Za-z0-9._-]{1,64}`,
+              );
+            }
+            if (typeof v !== 'string' && v !== null) {
+              errors.push(`add_to_sprint.issue_ids[${k}] must be a string or null`);
+            }
+          }
+        }
+      }
+      break;
+    }
+    case 'remove_from_sprint': {
+      if (!Array.isArray(cmd.story_keys) || cmd.story_keys.length === 0) {
+        errors.push('remove_from_sprint.story_keys must be a non-empty array');
+        break;
+      }
+      for (const k of cmd.story_keys) {
+        if (!nonEmptyString(k) || !STORY_KEY_RE.test(k)) {
+          errors.push(
+            `remove_from_sprint.story_keys entry ${JSON.stringify(k)} must match [A-Za-z0-9._-]{1,64}`,
+          );
+        }
+      }
+      if (cmd.mark_status !== undefined && cmd.mark_status !== null) {
+        if (!VALID_REMOVE_STATUSES.includes(cmd.mark_status)) {
+          errors.push(
+            `remove_from_sprint.mark_status must be one of ${VALID_REMOVE_STATUSES.join(', ')}`,
+          );
+        }
+      }
+      break;
+    }
+    case 'replan_sprint': {
+      if ('reason' in cmd && cmd.reason !== undefined && typeof cmd.reason !== 'string') {
+        errors.push('replan_sprint.reason must be string when present');
+      }
       break;
     }
     case 'override_decision': {
@@ -127,6 +239,8 @@ function validate(input) {
 module.exports = {
   COMMAND_KINDS,
   VALID_PROFILE_NAMES,
+  VALID_REMOVE_STATUSES,
+  STORY_KEY_RE,
   validate,
   validateOne,
 };

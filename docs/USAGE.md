@@ -152,28 +152,18 @@ This trades one short extra session (~60-100 turns, usually under $2) for reliab
 
 ### Dependency Inference
 
-After `bmad-sprint-planning` completes, the autopilot infers inter-story dependencies via one LLM call per epic and writes the result to `_Sprintpilot/sprints/dependencies.yaml`. This unlocks parallel story dispatch (`parallel_stories: true`) without requiring you to hand-author the sidecar.
+**v2.3.0:** dependency inference moved into the opt-in `/sprintpilot-plan-sprint` workflow. The default `autopilot start` no longer infers anything — it runs stories in sprint-status order. To get LLM-inferred dependencies + a curated execution plan, either:
 
-The generated file starts with:
+1. Run `/sprintpilot-plan-sprint` manually any time after `bmad-sprint-planning`, or
+2. Set `autopilot.auto_plan_on_start: true` so missing-plan triggers the skill automatically on next `autopilot start`.
 
-```yaml
-# AUTO-INFERRED — regenerate via infer-dependencies.js
-# DO NOT hand-edit `stories:` directly — it is regenerated on the next
-# planning cycle. To pin a relationship, add to `overrides:` instead.
-# Hash: <12-char content hash>
-```
+See the **Sprint Planning + DAG-Aware Execution (v2.3.0)** section below for the full walkthrough.
 
-Each story entry includes a `rationale` field — a single sentence the LLM produced citing the AC, file path, or architecture line that justifies the edge. **Review these before parallel dispatch begins** — over-serialization (LLM emits a spurious dep) silently slows the sprint without breaking anything; the rationale is your safety net.
+**Legacy v2.0–v2.2.x behavior:** the autopilot ran an automatic LLM inference pass after `bmad-sprint-planning` and wrote `_Sprintpilot/sprints/dependencies.yaml`. That file is auto-migrated on first v2.3.0 `autopilot start` (see migration notes below) and the auto-inference behavior has been retired. The new flow gives the same DAG awareness *plus* curation, mid-flight reordering, cross-epic edges, issue-tracker links, and a visual mermaid render — but only when you opt in.
 
-**Opting out:**
-- Per-profile: set `autopilot.auto_infer_dependencies: false` in `_Sprintpilot/modules/autopilot/config.yaml` (default `true` on small/medium/large; `false` on nano and legacy).
-- Per-sprint: hand-author `_Sprintpilot/sprints/dependencies.yaml` before `bmad-sprint-planning` runs. The autopilot detects the missing `# AUTO-INFERRED` marker and respects your file (one-line skip notice in the log).
+**Pinning relationships:** edit the `overrides:` block in `sprint-plan.yaml` — `force_independent: [keys]` drops inbound edges; `force_sequential: [keys]` chains. The skill's regeneration only touches `dependencies.stories.*` and `cross_epic_deps`; `overrides:` is preserved verbatim.
 
-**Pinning relationships the LLM gets wrong:**
-Edit the `overrides:` block — `force_independent: [keys]` to drop inbound edges; `force_sequential: [keys]` to chain. The auto-regeneration only touches the `stories:` block; `overrides:` and `epics:` are preserved verbatim across cycles.
-
-**Failure modes:**
-If the LLM emits invalid JSON or the script rejects it (cycle, unknown key, cross-epic edge), the error envelope is logged and the autopilot continues. `resolve-dag.js` falls back to its safe linear `ordering` strategy on the next dispatch — parallelism is disabled for that sprint, but nothing breaks.
+**Failure modes:** if the LLM emits invalid JSON or the script rejects it, `infer-dependencies.js dry-run` returns the errors and the skill iterates (max 3 retries per epic). On 3 consecutive failures, the skill saves `sprint-plan.yaml.partial` + a `.sprint-plan-validation-failed` sentinel and halts so you can inspect.
 
 ### Submodules
 
@@ -478,3 +468,358 @@ Orphan worktrees from a crashed session are flagged. The `--worktrees-dir .workt
 - Inspect each: `ls .worktrees/<name>`.
 - If safe to remove: `git worktree prune` then `rm -rf .worktrees/<name>` per orphan.
 - The autopilot's `worktree.cleanup_on_merge` (default `true`) prevents this accumulating during normal runs — the failure mode is crashed sessions before merge.
+
+---
+
+## Sprint Planning + DAG-Aware Execution (v2.3.0)
+
+### Default behavior (no plan, no setup)
+
+`autopilot start` runs stories in **sprint-status.yaml order** — exactly as it has since v1.0.5. No `sprint-plan.yaml`, no LLM-driven inference, no skill invocations. Greenfield projects upgrading from v2.2.x see zero behavior change.
+
+### When to opt in to sprint planning
+
+Sprint planning becomes useful when:
+
+- You want **dependency-aware ordering** so `1-3-add-auth` runs after its dependencies (`1-1-bootstrap`, `1-2-models`) rather than alphabetical sprint-status order.
+- You want **cross-epic dependencies** honored (epic-2 stories that depend on something in epic-1).
+- You want to **curate a subset** of sprint-status stories into the active sprint while keeping the others for context.
+- You want **external issue tracker links** (Jira / Linear / GitHub / GitLab IDs persisted per story).
+- You want **mid-flight reordering** with DAG validation against your dependency graph.
+
+### Invoking the planner
+
+```
+/sprintpilot-plan-sprint
+```
+
+The skill reads `epics.md`, `architecture.md`, and `sprint-status.yaml`, infers per-epic + cross-epic dependencies via piped LLM envelopes (validated server-side by `infer-dependencies.js`), presents the DAG, lets you curate which stories belong in the active plan, and writes `_bmad-output/implementation-artifacts/sprint-plan.yaml`. See `_Sprintpilot/skills/sprintpilot-plan-sprint/workflow.md` for the 14-step flow.
+
+### Selecting what goes into the next sprint
+
+The planning skill's curation step (Step 11) controls which stories the autopilot actually runs vs. which are kept around for context only. The interactive prompt looks like this:
+
+```
+Which stories do you want to run in this sprint?
+Default: ALL non-done stories.
+  [Enter]  accept default
+  [e]      edit selection (toggle individual stories by number)
+  [a:KEY]  add a specific story
+  [r:KEY]  remove a specific story
+```
+
+**What "included" vs "excluded" means:**
+
+| Selection | `plan_status` | Picked by queue? | Visible in plan? |
+|---|---|---|---|
+| Included (default) | `pending` | Yes — runs in priority order | Yes |
+| Excluded via `[r:KEY]` | `excluded` | No | Yes (kept for context — e.g., as upstream of an included story already done in sprint-status) |
+| Not selected during `[e]` toggle | `excluded` | No | Yes (same as above) |
+| Added via `[a:KEY]` | `pending` | Yes | Yes |
+
+Excluded stories aren't deleted — they remain in `sprint-plan.yaml` so the DAG can still reason about their relationships. They just don't enter the execution queue. This matters when an excluded story is upstream of an included one: the validator (Step 12) flags this and asks you to either add the upstream or accept the downstream blocking.
+
+**Three common curation patterns:**
+
+```
+# 1. Accept everything (full sprint of all non-done stories)
+[Enter]
+
+# 2. Focused mini-sprint (only the auth epic this week)
+[e]
+> deselect: 2-1, 2-2, 3-1, 4-1
+> [Enter] to confirm
+
+# 3. Cherry-pick specific stories
+[a:1-3-add-auth]
+[a:2-1-foo]
+[Enter]
+```
+
+**Natural-language entry:**
+
+You can also tell the LLM session what you want directly — it translates into the structured selection:
+
+> "Only include the bootstrap and auth stories for this sprint."
+> → planner deselects everything else; presents the result; you confirm.
+
+> "Skip story 2-3-payments for now."
+> → planner adds `2-3-payments` to the excluded set.
+
+> "Add 4-1-admin-panel to the next sprint."
+> → planner adds it as `plan_status: pending`.
+
+**Validation pass (Step 12):**
+
+Before writing the plan, the skill checks every selected story's transitive upstreams. If a story is included but one of its upstreams is excluded AND not done in sprint-status, you'll see:
+
+> "Story `1-3-add-auth` (included) depends on `1-1-bootstrap` which is not in the plan and not done. Options:
+>   [a] add `1-1-bootstrap` to the plan
+>   [r] remove `1-3-add-auth` from the plan
+>   [x] exclude `1-3-add-auth` (keeps it visible but won't run)"
+
+This loop continues until the selection is DAG-consistent — the autopilot will never start a story whose upstream isn't satisfied.
+
+**Mid-flight curation (after the plan exists):**
+
+Once `sprint-plan.yaml` is written, you don't need to re-run the full skill to adjust the sprint. Use the `user_input` commands during an autopilot session:
+
+| Want to... | Use |
+|---|---|
+| Add stories to the active plan | `add_to_sprint { story_keys: [...], position?, issue_ids? }` |
+| Remove stories (mark skipped/deferred) | `remove_from_sprint { story_keys: [...], mark_status? }` |
+| Reorder execution priority | `reorder_queue { order: [...] }` (DAG-validated) |
+| Rebuild the plan from scratch | `replan_sprint { reason? }` |
+
+The LLM session translates natural-language directives ("add the payments story", "skip 2-3 for now", "do auth before models") into these structured commands.
+
+### Auto-derive triggers (opt-in)
+
+After your first manual `/sprintpilot-plan-sprint`, subsequent `autopilot start` calls auto-detect plan staleness and re-run the planner when:
+
+- A story was **added** to `sprint-status.yaml` that's not in the plan (`reason: stale_added_stories`).
+- A story was **removed** from `sprint-status.yaml` but still appears in the plan (`reason: stale_removed_stories`).
+
+To opt into auto-derive on greenfield projects (no plan yet), set in `_Sprintpilot/modules/autopilot/config.yaml`:
+
+```yaml
+autopilot:
+  auto_plan_on_start: true
+```
+
+Default is `false` — greenfield projects fall back to sprint-status order.
+
+To skip auto-derive for a single run: `autopilot start --no-auto-plan`.
+
+### Migration from pre-v2.3.0 (`_Sprintpilot/sprints/dependencies.yaml`)
+
+If your project has a legacy `_Sprintpilot/sprints/dependencies.yaml` sidecar (from v2.0.2–v2.2.x's `auto_infer_dependencies` flow), the autopilot auto-migrates it on the first `autopilot start` of v2.3.0:
+
+- `_Sprintpilot/sprints/dependencies.yaml` → archived to `.archive/dependencies.yaml.migrated`
+- Stories + overrides imported into `_bmad-output/implementation-artifacts/sprint-plan.yaml`
+- Legacy `epics: {independent: ...}` block dropped with a `warning` field (parallel execution moves to v2.4.0 mechanisms).
+
+Or run the migrate command manually:
+
+```
+node _Sprintpilot/scripts/infer-dependencies.js migrate --project-root .
+```
+
+Idempotent — no-op when the legacy file is absent.
+
+### Mid-flight commands
+
+While the autopilot is running, send these as `user_input` signals from chat. The LLM session translates natural-language directives into structured commands.
+
+| Command | Effect |
+|---|---|
+| `reorder_queue { order: [...] }` | Rewrite priorities. DAG-validated against per-epic + cross-epic upstreams; violations surface as a `plan_reorder_rejected` ledger entry with `suggestion` strings. |
+| `add_to_sprint { story_keys: [...], position?, issue_ids? }` | Add stories to the plan. `position` accepts `'end'` (default), `'after:<key>'`, or an integer index. Optional `issue_ids` map populates `issue_id` per story. |
+| `remove_from_sprint { story_keys: [...], mark_status? }` | Mark stories `plan_status: skipped` (default) or `'deferred'`. Doesn't delete entries — keeps them visible for context. |
+| `replan_sprint { reason? }` | Halts at the next story boundary and emits `invoke_skill: sprintpilot-plan-sprint` on the next `autopilot start`. |
+
+### `autopilot progress` CLI
+
+Snapshot view of where the autopilot is. When `sprint-plan.yaml` has an `issue_tracker` block configured + per-story `issue_id` fields, those are surfaced inline so the output cross-references back to your Jira / Linear / GitHub / GitLab tickets:
+
+```
+$ node _Sprintpilot/bin/autopilot.js progress
+Sprint plan: plan_id=abc-123
+Progress: 3/8 done, 5 pending
+Bar: [===========                   ] 37%
+Issue tracking: 6/8 stories linked to jira (PROJ)
+Current story: 1-3-add-auth [PROJ-101] (step: dev_green)
+Recent step events:
+  [142] 14:23:11 step_completed — 1-3-add-auth [PROJ-101] / dev_red (success)
+  [143] 14:23:12 step_started — 1-3-add-auth [PROJ-101] / dev_green
+```
+
+When no issue tracker is configured, the `Issue tracking:` line and `[<id>]` brackets are silently omitted — output is unchanged from before.
+
+Modes:
+- Default: human-readable single snapshot.
+- `--json`: machine-readable (for IDE extensions / dashboards). Adds `issue_tracker`, `current_issue_id`, `issue_tracking` (coverage stats), and an `issue_id` field on every `recent_events[]` entry.
+- `--story <key>`: narrow to one story's detail. Renders a labeled block including `Issue ID:` (or `(not set)` when null).
+
+```
+$ node _Sprintpilot/bin/autopilot.js progress --story 1-3-add-auth
+...
+Story detail:
+  Key:           1-3-add-auth
+  Epic:          1
+  Plan status:   pending
+  Bmad status:   in-progress
+  Priority:      3
+  Current step:  dev_green
+  Issue ID:      PROJ-101
+```
+
+Live tailing is not yet built-in; `watch -n 1 'autopilot progress'` works as a Unix-native alternative.
+
+### `/sprintpilot-sprint-progress` skill
+
+A read-only diagnostic that wraps `autopilot progress` with LLM judgment. Use it when you want a one-shot health check + a recommended next action, rather than scrolling through the raw JSON:
+
+```
+> /sprintpilot-sprint-progress
+
+Sprint progress
+  Plan:     abc-123 — 3/8 done (5 pending, 0 skipped, 0 excluded)
+  Bar:      [===========                   ] 37%
+  Tracker:  6/8 stories linked to jira (PROJ)
+  Current:  1-3-add-auth [PROJ-101] (step: dev_green)
+  Recent:   step_completed 1-3-add-auth [PROJ-101] / dev_red (12s ago)
+            step_started 1-3-add-auth [PROJ-101] / dev_green (10s ago)
+
+Health:   HEALTHY
+Reason:   Autopilot is actively progressing through dev_green.
+Suggest:  Continue running; nothing requires attention.
+```
+
+The skill classifies the sprint into one of `HEALTHY` / `STALLED` / `NEEDS-INPUT` / `EXHAUSTED` / `NO-PLAN` based on the last 40 ledger entries (halts, verify rejections, `consecutive >= 3` retry loops, plan_exhausted halts, etc.) and suggests exactly one next action. Add a story key as an argument (`/sprintpilot-sprint-progress 1-3-add-auth`) to drill into that story's plan entry.
+
+**When to use which:**
+
+| Use case | Tool |
+|---|---|
+| Live tail in a script / CI | `node _Sprintpilot/bin/autopilot.js progress --json` |
+| Quick terminal snapshot | `node _Sprintpilot/bin/autopilot.js progress` |
+| One-shot health check + LLM judgment + next-action suggestion | `/sprintpilot-sprint-progress` |
+| Visualize the dependency graph | `/sprintpilot-dependency-graph` |
+| Build / re-infer the dependency graph | `/sprintpilot-plan-sprint` |
+| Full sprint-status report (BMad-native) | `bmad-sprint-status` |
+
+### Visualizing the DAG
+
+Use the dedicated skill — no shell commands required:
+
+```
+/sprintpilot-dependency-graph mermaid
+```
+
+The skill renders the graph inline in chat as a mermaid block and writes `_bmad-output/implementation-artifacts/sprint-plan-dag.mmd` so you can preview elsewhere (GitHub, VS Code Mermaid Preview, etc.).
+
+Supported formats (pass as the first argument, or omit for an interactive prompt):
+
+| Format | Output | Use for |
+|---|---|---|
+| `mermaid` *(default)* | Inline diagram + `.mmd` file | Quick visual check, PR review, design discussion |
+| `graphviz` | `.dot` file (requires `dot` in PATH) | High-quality renderable graphs (PNG, SVG, PDF via `dot -Tpng …`) |
+| `text` | Topological-tree rendered in chat | Terminal-only contexts, scripts |
+| `layers` | JSON `[[layer1], [layer2], ...]` | Parallel-execution planning, automation |
+| `json` | Raw `{nodes, edges, epic}` | IDE extensions, dashboards, custom tooling |
+
+Additional invocation patterns:
+
+```
+/sprintpilot-dependency-graph                      # interactive prompt
+/sprintpilot-dependency-graph graphviz             # graphviz mode
+/sprintpilot-dependency-graph mermaid epic 1       # per-epic scope (no cross-epic edges)
+/sprintpilot-dependency-graph mermaid --output dag.mmd
+```
+
+When `dot` isn't installed, graphviz mode falls back to mermaid with a clear notice — install it (`brew install graphviz` / `apt install graphviz`) to get .dot output.
+
+The skill halts politely when `sprint-plan.yaml` doesn't exist yet — it points you at `/sprintpilot-plan-sprint` rather than trying to build the plan itself.
+
+**Issue ID prefixes:** when `plan.stories[*].issue_id` or `plan.epics[*].issue_id` is set, the rendered labels are prefixed with `<issue_id>: ` so the diagram cross-references your tracker (Jira / Linear / GitHub / GitLab) at a glance:
+
+```mermaid
+flowchart LR
+  subgraph epic_1 ["PROJ-100: Epic 1"]
+    1-1-bootstrap["PROJ-101: 1-1-bootstrap"]:::done
+    1-3-add-auth["1-3-add-auth"]:::pending   %% no issue_id set
+  end
+```
+
+Stories and epics without an `issue_id` render with the bare key — silence communicates "not tracked", same convention as `autopilot progress`.
+
+**Power-user / scripting note:** the skill wraps `node _Sprintpilot/scripts/resolve-dag.js render` (and `layers` / `graph` / `width` for the structured modes). Call those directly if you're scripting against the CLI; the skill exists so end users in chat don't need to.
+
+### `plan_exhausted` halt
+
+When every story in `sprint-plan.yaml` reaches a terminal `plan_status` (`done` / `skipped` / `excluded`), the autopilot emits a `user_prompt` halt:
+
+> Sprint plan complete. All 8 planned stories are done (6 done, 1 skipped, 1 excluded). Run `/sprintpilot-plan-sprint` to build a new plan from remaining sprint-status stories, or run `autopilot start --no-auto-plan` to continue in sprint-status order.
+
+The plan is archived to `.archive/sprint-plan-<plan_id>.yaml` so subsequent `autopilot start` calls see no live plan. Choose:
+
+1. **Re-plan** via `/sprintpilot-plan-sprint` to build a new plan from remaining sprint-status stories.
+2. **Drop planning** via `--no-auto-plan` to revert to sprint-status execution order.
+
+### When NOT to use sprint planning
+
+- BMad's `sprint-status.yaml` is your single source of truth and you don't have inter-story dependencies → stick with the default.
+- You're running `complexity_profile: nano` with single-story sessions and want the bmad-quick-dev one-shot flow → plan-aware queue works for nano too (composeRuntimeState is profile-agnostic), but the visible benefit is smaller.
+- You're upgrading from v2.2.x and want zero behavior change → leave `auto_plan_on_start: false` (the default).
+
+### Onboarding for new users
+
+The v2.3.0 installer prompts for one new question:
+
+```
+? Auto-build a sprint plan on first `autopilot start`? (Y/N)
+```
+
+Default `N` — net-new projects fall back to sprint-status execution order. You can always invoke `/sprintpilot-plan-sprint` manually regardless of this setting, so it's safe to say no.
+
+The closing banner shows a recipe for the first sprint:
+
+```
+First steps for a new sprint:
+  1. BMad sprint planning:        /bmad-sprint-planning
+  2. (optional) Sprint plan:      /sprintpilot-plan-sprint
+  3. Start autopilot:             /sprint-autopilot-on
+  4. Check live progress:         /sprintpilot-sprint-progress
+```
+
+**Upgrading from v2.2.x:** the installer detects the legacy `_Sprintpilot/sprints/dependencies.yaml` file and surfaces a notice that it will auto-migrate on first `autopilot start`. If your existing config has `autopilot.auto_infer_dependencies: true` (the v2.2.x default), the installer notes that the flag is now a no-op (superseded by `auto_plan_on_start`) and safe to remove. Neither behavior blocks the install.
+
+The installer also runs a post-install hygiene check: it cross-references `_Sprintpilot/manifest.yaml`'s `installed_skills` list against the on-disk `SKILL.md` files and warns on any mismatch. This catches the "added skill to manifest but forgot to ship the files" packaging bug at install time rather than at first invocation.
+
+### Concurrent execution + safety
+
+Sprintpilot v2.3.0 ships with cross-process mutual exclusion for `sprint-plan.yaml` writes — you don't need to think about it, but understanding it helps debug rare contention scenarios.
+
+**Single-writer guarantee.** Every mutation of `sprint-plan.yaml` (markDone, addStories, removeStories, reorder, setIssueId, setIssueTracker, refreshBmadStatus, archive) acquires `.sprintpilot/plan.lock` via the project's existing `lock.js` primitive — the same one used by `preflight-merge.js` and submodule cleanup. Two concurrent autopilot sessions, or an autopilot session running alongside `/sprintpilot-plan-sprint`, will serialize their writes. The first wins; the second waits up to 30 seconds and then errors with `lock_timeout`.
+
+**Lock file.** `.sprintpilot/plan.lock`. Stale-detection timeout is 5 minutes (a session that crashed mid-mutate releases the lock automatically on the next acquire attempt). You generally don't need to clean it up manually; if you do (e.g., killed a long-running operation hard), `rm .sprintpilot/plan.lock` is safe.
+
+**Failure surfacing for mid-flight commands.** When a `user_input` command (`reorder_queue`, `add_to_sprint`, `remove_from_sprint`) fails — DAG violation, missing keys, validation error, plan corruption — the autopilot emits a `user_prompt` halt with a structured diagnostic rather than silently logging the failure:
+
+```
+plan_reorder_rejected: reorder_queue violates the dependency DAG. Violations:
+  - 1-3-add-auth depends on 1-1-bootstrap (suggestion: insert 1-1-bootstrap before 1-3-add-auth)
+  - 2-1-foo depends on 1-3-add-auth (suggestion: insert 1-3-add-auth before 2-1-foo)
+
+Resubmit reorder_queue with a corrected order, or use add_to_sprint to bring missing upstreams into the plan first.
+```
+
+Same pattern for `add_to_sprint_failed`, `remove_from_sprint_failed`, `plan_reorder_failed` (corrupt plan, missing plan, write error). The LLM session sees the prompt and can either retry with corrected input or surface it to the user.
+
+### Issue ID validation rules
+
+The `issue_id` field on stories and epics is captured as free text during the planning skill's Step 7 (and via `setIssueId` from the script API). v2.3.0 enforces a small reject set:
+
+- **Forbidden characters**: `[ ] < > | ; & \n \r` + ASCII control characters (`\x00`–`\x1f`, `\x7f`) + Unicode RTL/LTR override marks
+- **Max length**: 200 characters
+
+Legitimate tracker IDs from Jira (`PROJ-101`), Linear (`LIN-42`), GitHub (`org/repo#123`), and GitLab don't contain any of these. The reject set defends against:
+- DAG render corruption (`]` and `|` are mermaid syntax; entity prefixes break in graphviz)
+- Visual reordering attacks (RTL marks)
+- Terminal control byte injection (`\x1b`, `\x07`)
+
+If the planning skill captures a bad value, `setIssueId` throws — the skill should re-prompt with the validation reason rather than retry the same input.
+
+### Verify-loop diagnostic
+
+When the autopilot's verify pass (`verify.js`) rejects the LLM's success signal repeatedly with the **same set of issues**, the budget-exhausted halt now includes a loop-detection hint:
+
+```
+verify.js rejected 3 consecutive success signals on story_done.
+Last issues: ["branch required","git_steps_completed must be true — skipping git push is the most common cause","sprint-status.yaml shows story X as 'ready-for-dev', expected 'done'"]
+
+⚠ Verify rejected the SAME 3 issues 3 times in a row — this is a loop, not random noise. The LLM is re-sending an identical broken signal each retry. Action: read each issue text below and fix the underlying cause (e.g., if "git_steps_completed must be true — skipping git push is the most common cause", verify your git_op action actually ran `git push` to exit 0); don't just retry the same signal.
+```
+
+The hint fires when 2+ consecutive rejections have identical issues (whitespace + ordering-insensitive). When rejections vary (different errors each time), only the generic budget-exceeded message appears. The trackers (`last_verify_issues_signature`, `consecutive_identical_rejections`) are part of CRITICAL_KEYS so the count survives crashes — a SIGKILL between rejections doesn't reset the loop counter to zero.

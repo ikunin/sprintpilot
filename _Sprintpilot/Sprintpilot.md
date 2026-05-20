@@ -33,7 +33,8 @@ Edit `_Sprintpilot/modules/autopilot/config.yaml`:
 |---------|---------|--------|---------|
 | `autopilot.session_story_limit` | `3` (nano: `5`) | integer ≥ 0 | Stories fully implemented per autopilot run before checkpoint. `0` = unlimited. Nano is cheaper per story and fits a higher cap. |
 | `autopilot.retrospective_mode` | `auto` | `auto` / `stop` / `skip` | How epic-end retrospectives are handled (see below). |
-| `autopilot.auto_infer_dependencies` | `true` (nano + legacy: `false`) | bool | Autopilot session infers an inter-story DAG once after `bmad-sprint-planning` and writes `_Sprintpilot/sprints/dependencies.yaml`. Hand-authored sidecars (no `# AUTO-INFERRED` marker) are detected and respected. See "Dependency Inference" below. |
+| `autopilot.auto_infer_dependencies` | `false` (was `true` pre-v2.3.0) | bool | **Legacy flag — superseded by `auto_plan_on_start` in v2.3.0.** See "Sprint Planning + DAG-Aware Execution" below. |
+| `autopilot.auto_plan_on_start` | `false` | bool | **v2.3.0.** When `true`, `autopilot start` emits `invoke_skill: sprintpilot-plan-sprint` on greenfield projects (no `sprint-plan.yaml`). Default `false`: missing plan → fall back to sprint-status order. Once a plan exists, staleness triggers auto-derive regardless of this knob. |
 | `git.lock.stale_timeout_minutes` | `30` | integer ≥ 0 | `.autopilot.lock` older than this is auto-taken-over by the next session. `0` disables auto-takeover (locks held until released manually). |
 | `git.worktree.health_check_on_boot` | `true` | bool | At session start, scan `.worktrees/` for orphans from crashed sessions and halt with a prune hint when any are found. |
 | `git.worktree.cleanup_on_merge` | `true` | bool | After an epic merges, prune worktree metadata and remove `.worktrees/<key>/` directories whose branches no longer exist locally or on origin. |
@@ -49,13 +50,55 @@ Edit `_Sprintpilot/modules/autopilot/config.yaml`:
 
 Both settings are prompted during `sprintpilot install` (interactive mode) with existing values as defaults, so reinstalls preserve your choices.
 
-### Dependency Inference
+### Sprint Planning + DAG-Aware Execution (v2.3.0)
 
-After `bmad-sprint-planning` completes, the autopilot session reads `epics.md`, `architecture.md`, and `sprint-status.yaml` and emits a JSON dependency envelope. `_Sprintpilot/scripts/infer-dependencies.js` validates it (schema, unknown keys, self-deps, cross-epic edges, missing rationales, cycles) and writes `_Sprintpilot/sprints/dependencies.yaml` with an `# AUTO-INFERRED` marker header. The script never calls an LLM — the autopilot session is the inference caller.
+`/sprintpilot-plan-sprint` builds the authoritative sprint plan at `_bmad-output/implementation-artifacts/sprint-plan.yaml`. The plan persists per-epic dependencies, cross-epic edges, per-story `plan_status`, priorities, and optional external issue-tracker links. BMad's `sprint-status.yaml` remains the source of truth for *what stories exist*; the plan is the source of truth for *what runs next, in what order, and with what dependencies*.
 
-The DAG underwrites the `dispatch-layer.js` infrastructure (`planBatch`, `resolve-dag.js`, `merge-shards.js`, `agent-adapter.js`). Hand-authored sidecars (no marker) are respected silently. Failure modes (invalid JSON, validation errors) log and continue — `resolve-dag.js` falls back to its safe linear `ordering` strategy on dispatch.
+The skill follows a 14-step workflow (`_Sprintpilot/skills/sprintpilot-plan-sprint/workflow.md`):
 
-`ma.parallel_stories: true` enables the dispatch-layer building blocks but the state machine still emits stories one at a time; intra-epic parallel emission lands in a future minor release. The autopilot logs a clear notice at session start when the flag is set so the behavior is unambiguous.
+1. Load inputs (sprint-status, epics.md, architecture.md, existing plan)
+2. One-shot legacy migration (`_Sprintpilot/sprints/dependencies.yaml` → archived)
+3. Staleness check
+4. Per-epic inference loop (max 3 validation retries per epic; partial saved on 3rd failure)
+5. Cross-epic detection (separate prompt; combined-graph cycle check)
+6. Optional issue-tracker block setup
+7. Optional per-entity issue_id capture (with bulk-skip + pattern options)
+8. Finalize dependencies in plan
+9. Build sprint-wide DAG via `resolve-dag.js graph`
+10. Present DAG (text-mode tree + mermaid render)
+11. Curate stories (which belong in the active plan)
+12. Validate selection against DAG (every upstream included OR terminal)
+13. Atomic write via `sprint-plan.js write`
+14. Report
+
+The skill is invoked three ways:
+
+- **User-direct:** `/sprintpilot-plan-sprint` with no arguments.
+- **Auto-derive:** autopilot emits `invoke_skill: sprintpilot-plan-sprint` when a plan is missing/stale (gated by `auto_plan_on_start` config + opt-in for greenfield).
+- **Replan:** user issues `user_input { kind: 'replan_sprint' }` mid-flight; autopilot halts and emits the skill on next start.
+
+**Mid-flight commands** translate natural-language directives into structured `user_input` signals:
+
+- `reorder_queue { order: [...] }` — DAG-validated reordering; violations surface with suggestions.
+- `add_to_sprint { story_keys, position?, issue_ids? }` — adds entries to the plan.
+- `remove_from_sprint { story_keys, mark_status? }` — marks `plan_status: skipped` (default) or `'deferred'`.
+- `replan_sprint { reason? }` — halts + re-invokes the planning skill.
+
+**`autopilot progress`** CLI provides a one-shot snapshot (or `--json` for machine-readable output) showing plan progress bar, current story + step, and recent step events. When `plan.issue_tracker` is configured, `[<issue_id>]` brackets enrich the current-story line + each recent event, and an `Issue tracking: N/M stories linked to <provider>` coverage line surfaces in the summary.
+
+**`/sprintpilot-sprint-progress`** is the LLM-layered diagnostic on top of the same data — produces a 1-block health report (HEALTHY / STALLED / NEEDS-INPUT / EXHAUSTED / NO-PLAN) with exactly one recommended next action. Read-only; suggests user commands rather than executing them. Pass a story key as argument (`/sprintpilot-sprint-progress 1-3-add-auth`) to drill into a single story's plan entry.
+
+**Plan exhaustion** (every story in `plan_status` terminal) archives the plan to `.archive/sprint-plan-<plan_id>.yaml` and emits a `user_prompt` halt — the user chooses re-plan vs. fall back to sprint-status order.
+
+**Pre-v2.3.0 migration:** the pre-existing `_Sprintpilot/sprints/dependencies.yaml` (from the legacy `auto_infer_dependencies` flow) auto-migrates on the first v2.3.0 `autopilot start`. Stories + overrides import into the new plan; the legacy `epics: {independent: ...}` block is dropped with a warning (parallel-execution config moves to v2.4.0 mechanisms).
+
+Default behavior for greenfield projects (`auto_plan_on_start: false`) is unchanged from v2.2.x: `autopilot start` executes stories in sprint-status order without invoking any LLM-driven planning.
+
+See `docs/USAGE.md#sprint-planning--dag-aware-execution-v230` for the full user-facing walkthrough and `docs/ARCHITECTURE.md#sprint-planning--dag-aware-execution-v230` for the implementation architecture.
+
+### Parallel Story Dispatch (DAG infrastructure)
+
+The DAG built by sprint planning also underwrites `dispatch-layer.js` infrastructure (`planBatch`, `resolve-dag.js`, `merge-shards.js`, `agent-adapter.js`). `ma.parallel_stories: true` enables the building blocks, but the state machine still emits stories one at a time today; intra-epic parallel emission lands in a future minor release. The autopilot logs a clear notice at session start when the flag is set so the behavior is unambiguous.
 
 ### Mandatory fresh-context finalize
 
@@ -103,6 +146,9 @@ When deferred entries can't be reclassified in time, the LLM can emit `user_inpu
 | `bmad-sprint-planning` | Generate `sprint-status.yaml` tracking file from epics list |
 | `bmad-sprint-status` | Check current sprint status and surface risks at any time |
 | `bmad-correct-course` | Manage significant scope or direction changes mid-sprint |
+| `sprintpilot-plan-sprint` *(v2.3.0)* | **Optional, opt-in.** After BMad sprint planning, build a dependency-aware sprint plan with per-epic + cross-epic edges, plan-aware queue ordering, and optional external issue-tracker links. Auto-triggered when a stale plan is detected; only runs on greenfield projects when `autopilot.auto_plan_on_start: true`. Replaces the legacy `_Sprintpilot/sprints/dependencies.yaml` workflow. See "Sprint Planning + DAG-Aware Execution (v2.3.0)" above. |
+| `sprintpilot-sprint-progress` *(v2.3.0)* | **Read-only diagnostic.** Wraps `autopilot progress --json` with LLM judgment: classifies sprint health (`HEALTHY` / `STALLED` / `NEEDS-INPUT` / `EXHAUSTED` / `NO-PLAN`) from the recent ledger tail and suggests one concrete next action. Surfaces `issue_id` brackets when an issue_tracker is configured. Pass a story key as argument to drill into a single story's plan entry. Never mutates state — points users at the appropriate `user_input` command when corrective action is needed. |
+| `sprintpilot-dependency-graph` *(v2.3.0)* | **Read-only renderer.** Generates the sprint dependency graph in a chosen format: `mermaid` (default; GitHub-renderable), `graphviz` (.dot), `text` (topological tree), `layers` (JSON parallel groups), or `json` (raw `{nodes, edges, epic}`). Asks interactively when no format is supplied; accepts `epic <id>` for per-epic scope. Inline-renders mermaid into chat. Halts politely when no plan exists — points the user at `/sprintpilot-plan-sprint` rather than building one. |
 
 ### Phase 2 — Story development (the mandatory per-story loop)
 

@@ -6,9 +6,11 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 // @ts-expect-error — CommonJS module
 import dagMod from '../../_Sprintpilot/scripts/resolve-dag.js';
+// @ts-expect-error — CommonJS module
+import sprintPlanMod from '../../_Sprintpilot/scripts/sprint-plan.js';
+import yaml from 'js-yaml';
 
 const {
-  parseDependenciesYaml,
   parseEpicFromKey,
   edgesFromExplicit,
   edgesFromOrdering,
@@ -16,14 +18,17 @@ const {
   buildEdges,
   topoLayers,
   buildDag,
-  scaffoldDependenciesYaml,
 } = dagMod as {
-  parseDependenciesYaml: (s: string) => Record<string, unknown>;
   parseEpicFromKey: (k: string) => string | null;
   edgesFromExplicit: (doc: unknown, nodes: string[]) => Array<[string, string]>;
   edgesFromOrdering: (nodes: string[]) => Array<[string, string]>;
   applyForceIndependent: (edges: Array<[string, string]>, doc: unknown) => Array<[string, string]>;
-  buildEdges: (strats: string[], nodes: string[], doc: unknown) => Array<[string, string]>;
+  buildEdges: (
+    strats: string[],
+    nodes: string[],
+    doc: unknown,
+    opts?: { includeCrossEpic?: boolean },
+  ) => Array<[string, string]>;
   topoLayers: (
     nodes: string[],
     edges: Array<[string, string]>,
@@ -35,11 +40,11 @@ const {
     width: number;
     cycle: string[];
   };
-  scaffoldDependenciesYaml: (
-    root: string,
-    epic: string,
-    opts?: { force?: boolean },
-  ) => { wrote: boolean; reason?: string; file: string };
+};
+
+const { emptyPlan, planPath } = sprintPlanMod as {
+  emptyPlan: (opts?: { source?: string }) => Record<string, unknown>;
+  planPath: (root: string) => string;
 };
 
 const REPO_ROOT = join(__dirname, '..', '..');
@@ -47,6 +52,10 @@ const SCRIPT = join(REPO_ROOT, '_Sprintpilot', 'scripts', 'resolve-dag.js');
 
 let tmpRoot = '';
 
+// Helper: write sprint-status + (optionally) a sprint-plan.yaml.
+// `deps` is a YAML string in the LEGACY shape (version + stories + overrides);
+// we parse it and lift the relevant blocks into a valid sprint-plan.yaml so
+// the new resolve-dag (which reads sprint-plan.yaml) sees the same data.
 function seed(projectRoot: string, status: string, deps?: string) {
   mkdirSync(join(projectRoot, '_bmad-output', 'implementation-artifacts'), { recursive: true });
   writeFileSync(
@@ -54,8 +63,12 @@ function seed(projectRoot: string, status: string, deps?: string) {
     status,
   );
   if (deps !== undefined) {
-    mkdirSync(join(projectRoot, '_Sprintpilot', 'sprints'), { recursive: true });
-    writeFileSync(join(projectRoot, '_Sprintpilot', 'sprints', 'dependencies.yaml'), deps);
+    const legacy = yaml.load(deps) as { stories?: Record<string, unknown>; overrides?: unknown[] };
+    const plan = emptyPlan({ source: 'auto' });
+    (plan.dependencies as { stories: Record<string, unknown> }).stories =
+      (legacy && typeof legacy === 'object' && legacy.stories) || {};
+    if (legacy && Array.isArray(legacy.overrides)) plan.overrides = legacy.overrides;
+    writeFileSync(planPath(projectRoot), yaml.dump(plan));
   }
 }
 
@@ -84,54 +97,9 @@ describe('parseEpicFromKey', () => {
   });
 });
 
-describe('parseDependenciesYaml', () => {
-  it('parses nested objects, block-form lists, and list-inline mappings', () => {
-    const doc = parseDependenciesYaml(`
-version: 1
-stories:
-  1-3-c:
-    depends_on:
-      - 1-1-a
-      - 1-2-b
-  1-4-d:
-    depends_on:
-      - 1-3-c
-overrides:
-  - epic: 1
-    force_independent:
-      - 1-2-b
-      - 1-3-c
-    force_sequential: []
-epics:
-  "2":
-    independent: true
-`);
-    expect(doc.version).toBe(1);
-    expect((doc.stories as Record<string, { depends_on: string[] }>)['1-3-c'].depends_on).toEqual([
-      '1-1-a',
-      '1-2-b',
-    ]);
-    const ov = (doc.overrides as Array<Record<string, unknown>>)[0];
-    expect(ov.epic).toBe(1);
-    expect(ov.force_independent).toEqual(['1-2-b', '1-3-c']);
-    expect(ov.force_sequential).toEqual([]);
-    expect((doc.epics as Record<string, { independent: boolean }>)['2'].independent).toBe(true);
-  });
-
-  it('handles flow-form arrays on the value side', () => {
-    const doc = parseDependenciesYaml(`stories:\n  a:\n    depends_on: ["x","y"]\n`);
-    expect((doc.stories as Record<string, { depends_on: string[] }>).a.depends_on).toEqual([
-      'x',
-      'y',
-    ]);
-  });
-
-  it('strips trailing comments', () => {
-    const doc = parseDependenciesYaml('version: 1 # stable\nname: foo # ignored\n');
-    expect(doc.version).toBe(1);
-    expect(doc.name).toBe('foo');
-  });
-});
+// parseDependenciesYaml describe block removed — the hand-rolled parser
+// was deleted in v2.3.0; sprint-plan.yaml is read via js-yaml in
+// sprint-plan.js (covered by tests/unit/sprint-plan.test.ts).
 
 describe('edgesFromExplicit', () => {
   it('emits edges dep → key for every declared depends_on', () => {
@@ -345,26 +313,9 @@ describe('buildDag — full pipeline', () => {
   });
 });
 
-describe('scaffoldDependenciesYaml', () => {
-  it('writes a new sidecar when none exists', () => {
-    seed(tmpRoot, 'development_status:\n  1-1-a: ready-for-dev\n  1-2-b: backlog\n');
-    const r = scaffoldDependenciesYaml(tmpRoot, '1');
-    expect(r.wrote).toBe(true);
-    expect(existsSync(r.file)).toBe(true);
-    const body = readFileSync(r.file, 'utf8');
-    expect(body).toContain('Sprintpilot dependency sidecar');
-  });
-
-  it('refuses to overwrite unless --force', () => {
-    seed(tmpRoot, 'development_status:\n  1-1-a: ready-for-dev\n');
-    scaffoldDependenciesYaml(tmpRoot, '1');
-    const r2 = scaffoldDependenciesYaml(tmpRoot, '1');
-    expect(r2.wrote).toBe(false);
-    expect(r2.reason).toBe('exists');
-    const r3 = scaffoldDependenciesYaml(tmpRoot, '1', { force: true });
-    expect(r3.wrote).toBe(true);
-  });
-});
+// scaffoldDependenciesYaml describe block removed — the `scaffold`
+// subcommand was deleted in v2.3.0. The sprint-plan.js `empty` subcommand
+// fills the same role (covered in tests/unit/sprint-plan.test.ts).
 
 describe('CLI integration', () => {
   it('layers for an epic prints JSON', () => {
@@ -397,8 +348,4 @@ describe('CLI integration', () => {
     expect(res.stderr).toMatch(/cycle detected/);
   });
 
-  it('scaffold refuses to run without --epic', () => {
-    const res = spawnSync(process.execPath, [SCRIPT, 'scaffold', '--project-root', tmpRoot]);
-    expect(res.status).toBe(1);
-  });
 });

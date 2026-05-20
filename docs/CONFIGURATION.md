@@ -38,7 +38,8 @@ Every layer can be disabled in isolation. `legacy` profile pins all of these to 
 | `autopilot.coalesce_state_writes` | `true` (legacy: `false`) | Buffer non-critical state in `.pending/<kind>/<story>.yaml`; flushed atomically at story boundary + session checkpoint + sprint complete. Crash-recovery keys (`current_story`, `current_bmad_step`, `in_worktree`, `patch_commits`) bypass the buffer. |
 | `autopilot.conditional_boot_work` | `true` (large/legacy: `false`) | Skip health-check + branch reconciliation on a clean repo (main worktree only, no in-progress stories). Saves 8–30s per session. |
 | `autopilot.cache_shared_reads` | `true` (legacy: `false`) | TTL + source-mtime aware file cache (`_Sprintpilot/scripts/cached-read.js`). Any writer's mtime advance forces a miss. |
-| `autopilot.auto_infer_dependencies` | `true` (nano + legacy: `false`) | Infer story DAG once after `bmad-sprint-planning` and write `_Sprintpilot/sprints/dependencies.yaml` with an `# AUTO-INFERRED` marker. Hand-authored files (no marker) are detected and respected silently. Failure logs and continues — `resolve-dag.js` falls back to linear ordering. |
+| `autopilot.auto_infer_dependencies` | `false` (was `true` pre-v2.3.0) | **Legacy flag — superseded by `auto_plan_on_start` in v2.3.0.** Pre-v2.3.0 this triggered automatic LLM dependency inference writing to `_Sprintpilot/sprints/dependencies.yaml`. Now defaulted off across all profiles; the v2.3.0 plan-aware workflow takes its place. Existing projects with `auto_infer_dependencies: true` in their local config can leave it alone — auto-migration on first v2.3.0 `autopilot start` converts the legacy sidecar to `sprint-plan.yaml` once and archives the original. |
+| `autopilot.auto_plan_on_start` | `false` (all profiles) | **v2.3.0** — when `true`, `autopilot start` emits `invoke_skill: sprintpilot-plan-sprint` on greenfield projects (no `sprint-plan.yaml`) so the LLM session builds a plan automatically. Default `false`: missing plan → fall back to sprint-status execution order (existing behavior). Once a plan exists, staleness is detected and re-derive runs automatically regardless of this knob — the opt-in only affects net-new projects. See `docs/USAGE.md#sprint-planning--dag-aware-execution-v230` for the full plan-aware workflow. |
 
 ### Profile Files
 
@@ -51,6 +52,51 @@ The profile system uses base + overlay (DRY). Files live in `_Sprintpilot/module
 - `legacy.yaml` — standalone (no inheritance), `version_pinned: "v1.0.5"`
 
 Re-run `sprintpilot install --profile <name>` to switch profiles non-destructively (your config values are preserved).
+
+### Sprint Planning Artifacts (v2.3.0)
+
+| Artifact | Path | Owner | Notes |
+|---|---|---|---|
+| Sprint plan | `_bmad-output/implementation-artifacts/sprint-plan.yaml` | Sprintpilot | Authoritative for queue order + dependencies + per-story plan_status. Atomic writes via `sprint-plan.js`. |
+| Rendered DAG | `_bmad-output/implementation-artifacts/sprint-plan-dag.mmd` | Sprintpilot | Mermaid by default. Refreshed on every plan write. Optional graphviz output via `resolve-dag.js render --format graphviz`. |
+| Plan lock | `.sprintpilot/plan.lock` | Sprintpilot | **Required for all sprint-plan.yaml writes.** Acquired by `mutate()`, `archive()`, and `refreshBmadStatus()` in `sprint-plan.js`. 5-min stale timeout (crashed sessions self-recover); 30-second acquire timeout (concurrent contention surfaces as `lock_timeout` error). Same `lock.js` primitive as `.merge-shards.lock` and submodule locks. Safe to `rm` manually if a session terminated abnormally. |
+| Plan archive | `.archive/sprint-plan-<plan_id>.yaml` | Sprintpilot | Written on plan exhaustion. Live file deleted; next session sees no plan. |
+| Legacy archive | `.archive/dependencies.yaml.migrated` | Sprintpilot | One-shot move of pre-v2.3.0 `_Sprintpilot/sprints/dependencies.yaml`. |
+
+### Concurrent execution semantics
+
+Sprintpilot v2.3.0 supports concurrent autopilot sessions on the same project — they serialize their sprint-plan.yaml writes via `.sprintpilot/plan.lock`.
+
+| Scenario | Behavior |
+|---|---|
+| Two `autopilot start` invocations on the same project | Both acquire `.autopilot.lock` first (one wins, other halts with `autopilot_lock_held`). Plan-aware steps inside the winner's cmdStart serialize via `.sprintpilot/plan.lock`. |
+| `autopilot record` while `/sprintpilot-plan-sprint` is running | The skill holds plan.lock for its duration; record's `markDone` waits up to 30s. If the skill takes longer, record errors with `lock_timeout` and the user retries. |
+| Manual edit of sprint-plan.yaml during an autopilot session | The session reads the current state on its next cmdStart; mid-flight edits aren't atomic against an in-flight `markDone` and may be partially overwritten. **Recommendation**: pause the session before hand-editing. |
+| Session killed (`kill -9`) mid-mutate | `.sprintpilot/plan.lock` becomes stale after 5 minutes; next session takes over via the `ACQUIRED_STALE` path in `lock.js`. Disk-layer atomicity (tmp+rename) means the file is never in a torn state. |
+| Concurrent `sprint-plan.js read` (read-only) | No lock acquired; readers see whatever the most recently completed atomic write produced. Stale reads possible during a write but never corrupt reads. |
+
+### Verify-loop state persistence
+
+The verify-loop detection (Phase 4.5 + Round 2 hardening) tracks two state fields:
+
+| Field | Type | Persistence |
+|---|---|---|
+| `last_verify_issues_signature` | string \| null | CRITICAL_KEYS — write-through, survives crashes |
+| `consecutive_identical_rejections` | integer | CRITICAL_KEYS — write-through, survives crashes |
+
+These persist in both `_Sprintpilot/lib/orchestrator/state-store.js` (in-memory write coalescer) and `_Sprintpilot/scripts/state-shard.js` (file-level shard writer). A SIGKILL between two identical verify rejections does NOT reset the loop counter — the next session's first verify rejection picks up where the prior one left off, and the loop-detection halt prompt fires as if the crash never happened.
+
+### CLI Flags (v2.3.0)
+
+| Flag | Subcommand | Effect |
+|---|---|---|
+| `--no-auto-plan` | `start` | Suppresses the auto-derive trigger for this one invocation. Useful when a plan is stale but you want to run sprint-status order this session and re-plan later. |
+| `--json` | `progress` | Machine-readable JSON output (for IDE extensions / dashboards). Carries `issue_tracker`, `current_issue_id`, `issue_tracking` (coverage stats: `{provider, project_key, base_url, total, linked, coverage}`), and per-`recent_events[].issue_id` when set. Null when no `sprint-plan.yaml` issue_tracker block is configured. |
+| `--once` | `progress` | Single snapshot to stdout (default mode — flag is for forward compatibility with a future `--watch` mode). |
+| `--story <key>` | `progress` | Narrow output to a single story's plan entry. Renders a labeled detail block including `Issue ID:` (or `(not set)`). Falls back to `plan.stories[<key>].current_step` when no autopilot session is currently running. |
+| `--format mermaid\|graphviz` | `resolve-dag render` | Render format. Mermaid (default) is GitHub-renderable with no system deps. Graphviz requires `dot` in PATH — falls back to mermaid with a stderr notice if missing. |
+| `--output <path>` | `resolve-dag render` | Custom output path. Default: `_bmad-output/implementation-artifacts/sprint-plan-dag.{mmd,dot}`. |
+| `--cross-epic` | `infer-dependencies scaffold-prompt`, `dry-run` | Switches to the cross-epic detection prompt (separate from per-epic inference). |
 
 ## Git Configuration (`modules/git/config.yaml`)
 

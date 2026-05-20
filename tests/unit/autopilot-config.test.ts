@@ -15,18 +15,30 @@ const { _internals } = installMod as {
     ) => Promise<{
       sessionStoryLimit: number | null;
       retrospectiveMode: string | null;
+      autoPlanOnStart: boolean | null;
+      autoInferDependencies: boolean | null;
     }>;
     patchAutopilotConfig: (
       root: string,
-      opts: { sessionStoryLimit: number; retrospectiveMode: string },
+      opts: {
+        sessionStoryLimit?: number;
+        retrospectiveMode?: string;
+        autoPlanOnStart?: boolean;
+      },
     ) => Promise<void>;
     applyScalar: (source: string, key: string, value: string | number) => string;
+    verifySkillManifest: (root: string) => Promise<{ missing: string[] }>;
     RETROSPECTIVE_MODES: readonly string[];
   };
 };
 
-const { readExistingAutopilotConfig, patchAutopilotConfig, applyScalar, RETROSPECTIVE_MODES } =
-  _internals;
+const {
+  readExistingAutopilotConfig,
+  patchAutopilotConfig,
+  applyScalar,
+  verifySkillManifest,
+  RETROSPECTIVE_MODES,
+} = _internals;
 
 let root: string;
 
@@ -50,13 +62,23 @@ afterEach(() => {
 describe('readExistingAutopilotConfig', () => {
   it('returns nulls when the config file is absent', async () => {
     const out = await readExistingAutopilotConfig(root);
-    expect(out).toEqual({ sessionStoryLimit: null, retrospectiveMode: null });
+    expect(out).toEqual({
+      sessionStoryLimit: null,
+      retrospectiveMode: null,
+      autoPlanOnStart: null,
+      autoInferDependencies: null,
+    });
   });
 
   it('parses the plain canonical shape', async () => {
     writeConfig(`autopilot:\n  session_story_limit: 5\n  retrospective_mode: stop\n`);
     const out = await readExistingAutopilotConfig(root);
-    expect(out).toEqual({ sessionStoryLimit: 5, retrospectiveMode: 'stop' });
+    expect(out).toEqual({
+      sessionStoryLimit: 5,
+      retrospectiveMode: 'stop',
+      autoPlanOnStart: null,
+      autoInferDependencies: null,
+    });
   });
 
   it('tolerates inline trailing comments (P1-A fix)', async () => {
@@ -64,7 +86,12 @@ describe('readExistingAutopilotConfig', () => {
       `autopilot:\n  session_story_limit: 7  # two sprints per session\n  retrospective_mode: skip  # inline or pause\n`,
     );
     const out = await readExistingAutopilotConfig(root);
-    expect(out).toEqual({ sessionStoryLimit: 7, retrospectiveMode: 'skip' });
+    expect(out).toEqual({
+      sessionStoryLimit: 7,
+      retrospectiveMode: 'skip',
+      autoPlanOnStart: null,
+      autoInferDependencies: null,
+    });
   });
 
   it('accepts quoted retrospective_mode values', async () => {
@@ -82,7 +109,12 @@ describe('readExistingAutopilotConfig', () => {
   it('skips commented-out key lines (no match)', async () => {
     writeConfig(`autopilot:\n  # session_story_limit: 99\n  # retrospective_mode: skip\n`);
     const out = await readExistingAutopilotConfig(root);
-    expect(out).toEqual({ sessionStoryLimit: null, retrospectiveMode: null });
+    expect(out).toEqual({
+      sessionStoryLimit: null,
+      retrospectiveMode: null,
+      autoPlanOnStart: null,
+      autoInferDependencies: null,
+    });
   });
 
   it('falls back to the v1 in-memory snapshot when no file on disk (v1-migration bug)', async () => {
@@ -193,5 +225,159 @@ describe('patchAutopilotConfig', () => {
     const raw = readConfig();
     expect(raw).toContain('session_story_limit: 5  # matches our sprint length');
     expect(raw).toContain('retrospective_mode: skip');
+  });
+});
+
+// ──────────────────────────────────────────────────────────────────
+// v2.3.0 — auto_plan_on_start + auto_infer_dependencies parsing
+// ──────────────────────────────────────────────────────────────────
+
+describe('readExistingAutopilotConfig — v2.3.0 fields', () => {
+  it("parses auto_plan_on_start: true", async () => {
+    writeConfig(`autopilot:\n  auto_plan_on_start: true\n`);
+    const out = await readExistingAutopilotConfig(root);
+    expect(out.autoPlanOnStart).toBe(true);
+  });
+
+  it("parses auto_plan_on_start: false", async () => {
+    writeConfig(`autopilot:\n  auto_plan_on_start: false\n`);
+    const out = await readExistingAutopilotConfig(root);
+    expect(out.autoPlanOnStart).toBe(false);
+  });
+
+  it("leaves auto_plan_on_start null when key is absent", async () => {
+    writeConfig(`autopilot:\n  session_story_limit: 3\n`);
+    const out = await readExistingAutopilotConfig(root);
+    expect(out.autoPlanOnStart).toBeNull();
+  });
+
+  it("tolerates a trailing comment on auto_plan_on_start", async () => {
+    writeConfig(`autopilot:\n  auto_plan_on_start: true  # opted in\n`);
+    const out = await readExistingAutopilotConfig(root);
+    expect(out.autoPlanOnStart).toBe(true);
+  });
+
+  it("parses legacy auto_infer_dependencies: true for the deprecation notice", async () => {
+    writeConfig(`autopilot:\n  auto_infer_dependencies: true\n`);
+    const out = await readExistingAutopilotConfig(root);
+    expect(out.autoInferDependencies).toBe(true);
+  });
+
+  it("recognizes auto_infer_dependencies: false as set (still surfaces in notice logic)", async () => {
+    writeConfig(`autopilot:\n  auto_infer_dependencies: false\n`);
+    const out = await readExistingAutopilotConfig(root);
+    expect(out.autoInferDependencies).toBe(false);
+  });
+
+  it("leaves auto_infer_dependencies null when absent", async () => {
+    writeConfig(`autopilot:\n  session_story_limit: 3\n`);
+    const out = await readExistingAutopilotConfig(root);
+    expect(out.autoInferDependencies).toBeNull();
+  });
+});
+
+describe('patchAutopilotConfig — v2.3.0 auto_plan_on_start persistence', () => {
+  it('writes auto_plan_on_start: true when set', async () => {
+    writeConfig(
+      `autopilot:\n  session_story_limit: 3\n  retrospective_mode: auto\n  auto_plan_on_start: false\n`,
+    );
+    await patchAutopilotConfig(root, {
+      sessionStoryLimit: 3,
+      retrospectiveMode: 'auto',
+      autoPlanOnStart: true,
+    });
+    const raw = readConfig();
+    expect(raw).toContain('auto_plan_on_start: true');
+    expect(raw).not.toContain('auto_plan_on_start: false');
+  });
+
+  it('writes auto_plan_on_start: false when explicitly disabled', async () => {
+    writeConfig(
+      `autopilot:\n  session_story_limit: 3\n  retrospective_mode: auto\n  auto_plan_on_start: true\n`,
+    );
+    await patchAutopilotConfig(root, {
+      sessionStoryLimit: 3,
+      retrospectiveMode: 'auto',
+      autoPlanOnStart: false,
+    });
+    const raw = readConfig();
+    expect(raw).toContain('auto_plan_on_start: false');
+  });
+
+  it('leaves auto_plan_on_start untouched when not provided in opts', async () => {
+    writeConfig(
+      `autopilot:\n  session_story_limit: 3\n  retrospective_mode: auto\n  auto_plan_on_start: true\n`,
+    );
+    await patchAutopilotConfig(root, {
+      sessionStoryLimit: 5,
+      retrospectiveMode: 'stop',
+      // autoPlanOnStart intentionally omitted
+    });
+    const raw = readConfig();
+    expect(raw).toContain('session_story_limit: 5');
+    expect(raw).toContain('retrospective_mode: stop');
+    expect(raw).toContain('auto_plan_on_start: true'); // preserved
+  });
+});
+
+// ──────────────────────────────────────────────────────────────────
+// v2.3.0 — skill manifest self-check
+// ──────────────────────────────────────────────────────────────────
+
+describe('verifySkillManifest', () => {
+  function writeManifest(skills: string[]): void {
+    const dir = join(root, '_Sprintpilot');
+    mkdirSync(dir, { recursive: true });
+    const body = [
+      'addon:',
+      '  name: sprintpilot',
+      '  installed_skills:',
+      ...skills.map((s) => `    - ${s}`),
+      '',
+    ].join('\n');
+    writeFileSync(join(dir, 'manifest.yaml'), body, 'utf8');
+  }
+
+  function writeSkillFile(skillName: string, body = '---\nname: x\n---\n'): void {
+    const dir = join(root, '_Sprintpilot', 'skills', skillName);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'SKILL.md'), body, 'utf8');
+  }
+
+  it("returns empty missing when manifest file is absent", async () => {
+    const r = await verifySkillManifest(root);
+    expect(r.missing).toEqual([]);
+  });
+
+  it("returns empty missing when all listed skills exist on disk", async () => {
+    writeManifest(['sprint-autopilot-on', 'sprintpilot-plan-sprint']);
+    writeSkillFile('sprint-autopilot-on');
+    writeSkillFile('sprintpilot-plan-sprint');
+    const r = await verifySkillManifest(root);
+    expect(r.missing).toEqual([]);
+  });
+
+  it("returns each skill that's in the manifest but missing on disk", async () => {
+    writeManifest(['sprint-autopilot-on', 'sprintpilot-plan-sprint', 'sprintpilot-sprint-progress']);
+    writeSkillFile('sprint-autopilot-on');
+    // sprintpilot-plan-sprint + sprintpilot-sprint-progress NOT written
+    const r = await verifySkillManifest(root);
+    expect(r.missing.sort()).toEqual(['sprintpilot-plan-sprint', 'sprintpilot-sprint-progress']);
+  });
+
+  it("returns empty missing on an empty installed_skills list", async () => {
+    const dir = join(root, '_Sprintpilot');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'manifest.yaml'), 'addon:\n  name: x\n  installed_skills: []\n', 'utf8');
+    const r = await verifySkillManifest(root);
+    expect(r.missing).toEqual([]);
+  });
+
+  it("tolerates a malformed manifest gracefully (returns empty)", async () => {
+    const dir = join(root, '_Sprintpilot');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'manifest.yaml'), 'not even close to yaml: : :\n', 'utf8');
+    const r = await verifySkillManifest(root);
+    expect(r.missing).toEqual([]);
   });
 });

@@ -14,7 +14,7 @@
 - **Runtime:** Node.js >= 18 (no Bash dependency at runtime)
 - **Entry Point:** `bin/sprintpilot.js install` (installation), `/sprint-autopilot-on` (execution)
 - **Architecture Pattern:** Skills-as-prompts + Node.js script infrastructure + complexity profiles
-- **Test Suite:** 535+ unit + integration tests (Vitest) + 5 e2e suites gated behind `RUN_LLM_E2E` / `RUN_LLM_E2E_FULL` env vars (so `npm test` doesn't accidentally spawn `claude`)
+- **Test Suite:** 1700+ unit + integration tests (Vitest) + 5 e2e suites gated behind `RUN_LLM_E2E` / `RUN_LLM_E2E_FULL` env vars (so `npm test` doesn't accidentally spawn `claude`)
 
 ## Generated Documentation
 

@@ -32,6 +32,13 @@ const CRITICAL_KEYS = new Set([
   // story_key; adapt.advanceState pops the head when a story completes.
   // When empty, the orchestrator falls back to resolveNextStoryKey.
   'story_queue',
+  // v2.3.0 — verify-loop trackers. These must write through immediately
+  // so a crash between verify rejections doesn't reset the
+  // consecutive-identical counter. Without write-through, the
+  // budget-exhaustion halt would emit the generic prompt instead of
+  // the loop-hint enriched prompt, defeating the loop-detection UX.
+  'last_verify_issues_signature',
+  'consecutive_identical_rejections',
 ]);
 
 // In-memory pending buffer. Process-scoped — flushed at story boundary or

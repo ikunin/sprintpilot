@@ -46,6 +46,16 @@ const CRITICAL_KEYS = new Set([
   'current_bmad_step',
   'in_worktree',
   'patch_commits',
+  // Pre-existing divergence with state-store.js — story_queue was added
+  // there for crash-resume of `--stories` / `--epic` queues but was
+  // never mirrored here. Added in v2.3.0 Round 4 for symmetry; without
+  // it, a process killed mid-queue would lose the queue head from the
+  // pending buffer that hadn't flushed yet.
+  'story_queue',
+  // v2.3.0 — verify-loop trackers must persist across crashes; see
+  // _Sprintpilot/lib/orchestrator/state-store.js for full rationale.
+  'last_verify_issues_signature',
+  'consecutive_identical_rejections',
 ]);
 
 const KIND_DIR = {

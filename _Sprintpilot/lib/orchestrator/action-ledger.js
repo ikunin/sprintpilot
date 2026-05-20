@@ -44,6 +44,40 @@ const VALID_KINDS = [
   // includes `summary` (counts) or `reason` ('disabled' / 'no_worktrees_dir'
   // / 'script_missing' / 'health_check_error' / 'worktrees_disabled').
   'worktree_health_check',
+  // v2.3.0 — sprint-plan.yaml lifecycle + queue events. Emitted from
+  // cmdStart (migration trigger, refresh, queue hydration, auto-derive
+  // gate, exhaustion) and cmdRecord (story-done sync to plan).
+  'plan_migrated',
+  'plan_migration_failed',
+  'plan_refreshed',
+  'plan_refresh_failed',
+  'plan_queue_loaded',
+  'plan_queue_failed',
+  'plan_exhausted',
+  'plan_archive_failed',
+  'auto_derive_emitted',
+  'plan_story_done',
+  'plan_story_done_failed',
+  'replan_requested_consumed',
+  // v2.3.0 — mid-flight plan mutations applied via applySideEffects.
+  'plan_reordered',
+  'plan_reorder_rejected',
+  'plan_reorder_failed',
+  'plan_stories_added',
+  'plan_add_stories_failed',
+  'plan_stories_removed',
+  'plan_remove_stories_failed',
+  // v2.3.0 — planning skill outcomes (emitted by /sprintpilot-plan-sprint
+  // via the orchestrator after the skill completes).
+  'plan_built',
+  'cross_epic_edge_rejected',
+  'issue_id_set',
+  'dag_rendered',
+  // v2.3.0 — streaming progress (Phase 4.5). Sub-step granularity within
+  // a single story so `autopilot progress` can render live status.
+  'story_step_started',
+  'story_step_progress',
+  'story_step_completed',
 ];
 
 function isPlainObject(v) {
@@ -147,11 +181,185 @@ function nextSeq(fs, filePath) {
   return 1;
 }
 
+// readSince — return entries with seq strictly greater than `afterSeq`.
+// Used by the tail iterator and one-shot consumers that want incremental
+// reads without re-parsing the whole file.
+function readSince(context, afterSeq) {
+  const entries = read(context);
+  if (typeof afterSeq !== 'number') return entries;
+  return entries.filter((e) => typeof e.seq === 'number' && e.seq > afterSeq);
+}
+
+// tail — async iterator yielding ledger entries as they're appended.
+// Polls every `pollIntervalMs` (default 250ms). Terminates when
+// `signal.aborted` is true OR when `maxIdleMs` elapses without new events
+// (default Infinity).
+//
+// Usage:
+//   const ctrl = new AbortController();
+//   for await (const event of tail({ projectRoot, signal: ctrl.signal })) {
+//     console.log(event.kind, event.seq);
+//     if (event.kind === 'halt') ctrl.abort();
+//   }
+//
+// CI-safe: no fs.watch (some filesystems don't support it; CI logs can
+// be replayed via the underlying file). Pure polling with offset tracking
+// for cheap incremental reads.
+async function* tail(context, options) {
+  if (!context || !context.projectRoot) throw new Error('tail: context.projectRoot required');
+  const opts = options || {};
+  const pollIntervalMs = typeof opts.pollIntervalMs === 'number' ? opts.pollIntervalMs : 250;
+  const maxIdleMs = typeof opts.maxIdleMs === 'number' ? opts.maxIdleMs : Number.POSITIVE_INFINITY;
+  const signal = opts.signal;
+  let lastSeq = typeof opts.afterSeq === 'number' ? opts.afterSeq : 0;
+
+  // v2.3.0 — track the ledger file's inode so we detect rotation /
+  // truncation. If `> ledger.jsonl` or `mv ledger.jsonl ledger.jsonl.1`
+  // happens, the inode changes (or stat throws) and we reset lastSeq
+  // to 0 so the next poll picks up entries from the start of the new
+  // file. Without this, tail() silently misses every event after a
+  // rotation.
+  const filePath = resolveLedgerPath(context.projectRoot);
+  let lastInode = null;
+  let lastSize = 0;
+  const captureFileIdentity = () => {
+    try {
+      const st = nodeFs.lstatSync(filePath);
+      lastInode = st.ino;
+      lastSize = st.size;
+    } catch {
+      // File doesn't exist yet — that's fine; on first poll we'll
+      // capture the identity when it appears.
+      lastInode = null;
+      lastSize = 0;
+    }
+  };
+  captureFileIdentity();
+
+  // If afterSeq isn't supplied, start from the current tail so we don't
+  // dump the whole history on every call. Pass afterSeq=0 explicitly to
+  // get everything.
+  if (typeof opts.afterSeq !== 'number') {
+    const existing = read(context);
+    if (existing.length > 0) {
+      const tailEntry = existing[existing.length - 1];
+      if (typeof tailEntry.seq === 'number') lastSeq = tailEntry.seq;
+    }
+  }
+
+  const sleep = (ms) => new Promise((resolve) => {
+    if (!signal) {
+      setTimeout(resolve, ms);
+      return;
+    }
+    const t = setTimeout(resolve, ms);
+    if (signal.aborted) {
+      clearTimeout(t);
+      resolve();
+      return;
+    }
+    signal.addEventListener('abort', () => {
+      clearTimeout(t);
+      resolve();
+    }, { once: true });
+  });
+
+  let idleAccumulatedMs = 0;
+  while (!(signal && signal.aborted)) {
+    // Rotation / truncation check before each poll. Three cases:
+    //   - File didn't exist before, now does → capture identity, treat
+    //     as fresh start; do NOT reset lastSeq (afterSeq semantics still
+    //     apply).
+    //   - File existed before, now doesn't → it was deleted; reset
+    //     identity tracking, on next iteration we'll re-capture.
+    //   - File exists with a different inode OR smaller size than last
+    //     time → rotated/truncated; reset lastSeq=0 so we yield from
+    //     the start of the new file.
+    let currentInode = null;
+    let currentSize = 0;
+    try {
+      const st = nodeFs.lstatSync(filePath);
+      currentInode = st.ino;
+      currentSize = st.size;
+    } catch {
+      // File missing — wait for it to appear.
+    }
+    if (lastInode !== null && currentInode !== null) {
+      const inodeChanged = currentInode !== lastInode;
+      const truncated = currentSize < lastSize;
+      if (inodeChanged || truncated) {
+        lastSeq = 0; // re-yield from the new file's start
+        lastInode = currentInode;
+        lastSize = currentSize;
+      }
+    } else if (currentInode !== null) {
+      // File appeared (was missing, now exists).
+      lastInode = currentInode;
+      lastSize = currentSize;
+    }
+
+    const fresh = readSince(context, lastSeq);
+    // v2.3.0 Round 2 — re-check inode AFTER readSince. The file could
+    // rotate during the read; without this we'd yield entries from the
+    // NEW file as if they were continuations of the old one (or skip
+    // them if their seq < lastSeq from the rotated file).
+    let postReadInode = null;
+    let postReadSize = 0;
+    try {
+      const st = nodeFs.lstatSync(filePath);
+      postReadInode = st.ino;
+      postReadSize = st.size;
+    } catch {
+      /* file gone — handled next iteration */
+    }
+    if (
+      lastInode !== null &&
+      postReadInode !== null &&
+      (postReadInode !== lastInode || postReadSize < lastSize)
+    ) {
+      // Rotation/truncation happened during the read. Discard the
+      // fresh batch (might be from the OLD inode), reset lastSeq to 0,
+      // and let the next iteration re-yield from the new file's start.
+      lastSeq = 0;
+      lastInode = postReadInode;
+      lastSize = postReadSize;
+      // Don't yield any of `fresh` since we can't trust which file
+      // they came from after the rotation; the next iteration's
+      // readSince(0) will pick up the new file's entries.
+      await sleep(pollIntervalMs);
+      continue;
+    }
+    if (fresh.length > 0) {
+      idleAccumulatedMs = 0;
+      for (const event of fresh) {
+        if (signal && signal.aborted) return;
+        if (typeof event.seq === 'number' && event.seq > lastSeq) {
+          lastSeq = event.seq;
+        }
+        yield event;
+      }
+      // Refresh size after yielding so the next iteration's truncation
+      // check uses the right baseline.
+      try {
+        lastSize = nodeFs.lstatSync(filePath).size;
+      } catch {
+        /* file disappeared between yield and stat — handle next loop */
+      }
+    } else {
+      idleAccumulatedMs += pollIntervalMs;
+      if (idleAccumulatedMs >= maxIdleMs) return;
+    }
+    await sleep(pollIntervalMs);
+  }
+}
+
 module.exports = {
   VALID_KINDS,
   LEDGER_FILENAME,
   append,
   read,
+  readSince,
   last,
+  tail,
   resolveLedgerPath,
 };

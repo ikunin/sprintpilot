@@ -9,18 +9,12 @@ import inferMod from '../../_Sprintpilot/scripts/infer-dependencies.js';
 // @ts-expect-error — CommonJS module
 import dagMod from '../../_Sprintpilot/scripts/resolve-dag.js';
 
-const {
-  AUTO_MARKER,
-  validateEnvelope,
-  readExisting,
-  mergeDoc,
-  contentHash,
-  renderYaml,
-  inlineScalar,
-  diffCounts,
-  scaffoldPrompt,
-} = inferMod as {
-  AUTO_MARKER: string;
+// Note: AUTO_MARKER / readExisting / mergeDoc / contentHash / renderYaml /
+// inlineScalar / diffCounts were removed in v2.3.0. Coverage for their
+// replacements (applyEnvelopeToPlan, readExistingPlan, diffEdges, and the
+// js-yaml-based read/write in sprint-plan.js) lives in
+// tests/unit/sprint-plan.test.ts + tests/unit/sprint-plan-integration.test.ts.
+const { validateEnvelope, scaffoldPrompt } = inferMod as {
   validateEnvelope: (
     env: unknown,
     ctx: { projectRoot: string; epic: string },
@@ -28,29 +22,12 @@ const {
     valid: boolean;
     errors: { code: string; [k: string]: unknown }[];
   };
-  readExisting: (root: string) => {
-    exists: boolean;
-    autoMarker: boolean;
-    doc: Record<string, unknown> | null;
-    raw: string | null;
-  };
-  mergeDoc: (
-    env: Record<string, unknown>,
-    existing: { doc: Record<string, unknown> | null },
-  ) => Record<string, unknown>;
-  contentHash: (doc: Record<string, unknown>) => string;
-  renderYaml: (doc: Record<string, unknown>, hash: string) => string;
-  inlineScalar: (v: unknown) => string;
-  diffCounts: (
-    prev: Record<string, unknown> | null,
-    next: Record<string, unknown>,
-  ) => { added: number; removed: number };
   scaffoldPrompt: (root: string, epic: string) => string;
 };
 
-const { parseDependenciesYaml } = dagMod as {
-  parseDependenciesYaml: (raw: string) => Record<string, unknown>;
-};
+// parseDependenciesYaml was removed — sprint-plan.yaml is read via js-yaml.
+// dagMod is still imported for type narrowing in CLI helper tests below if needed.
+void dagMod;
 
 const REPO_ROOT = join(__dirname, '..', '..');
 const SCRIPT = join(REPO_ROOT, '_Sprintpilot', 'scripts', 'infer-dependencies.js');
@@ -240,7 +217,7 @@ describe('validateEnvelope', () => {
 // renderYaml + contentHash + idempotency
 // ──────────────────────────────────────────────────────────────────
 
-describe('renderYaml', () => {
+describe.skip('renderYaml', () => {
   it('emits the auto-marker as the first line', () => {
     const merged = mergeDoc(loadValidEnvelope(), { doc: null });
     const body = renderYaml(merged, contentHash(merged));
@@ -270,7 +247,7 @@ describe('renderYaml', () => {
   });
 });
 
-describe('contentHash', () => {
+describe.skip('contentHash', () => {
   it('is stable for the same structure (sorted)', () => {
     const merged = mergeDoc(loadValidEnvelope(), { doc: null });
     const h1 = contentHash(merged);
@@ -303,7 +280,7 @@ describe('contentHash', () => {
 // readExisting + mergeDoc — preservation of user overrides
 // ──────────────────────────────────────────────────────────────────
 
-describe('readExisting + mergeDoc', () => {
+describe.skip('readExisting + mergeDoc', () => {
   it('returns exists:false when no sidecar', () => {
     const e = readExisting(tmpRoot);
     expect(e.exists).toBe(false);
@@ -367,7 +344,7 @@ describe('readExisting + mergeDoc', () => {
 // diffCounts
 // ──────────────────────────────────────────────────────────────────
 
-describe('diffCounts', () => {
+describe.skip('diffCounts', () => {
   it('counts edges added vs removed when re-running on same input', () => {
     const merged1 = mergeDoc(loadValidEnvelope(), { doc: null });
     const merged2 = mergeDoc(loadValidEnvelope(), { doc: null });
@@ -398,7 +375,8 @@ describe('scaffoldPrompt', () => {
     expect(p).toContain(`_bmad-output/implementation-artifacts/sprint-status.yaml`);
     expect(p).toContain(`_bmad-output/planning-artifacts/epics.md`);
     expect(p).toContain(`_bmad-output/planning-artifacts/architecture.md`);
-    expect(p).toContain(`_Sprintpilot/sprints/dependencies.yaml`);
+    // v2.3.0: prompt references sprint-plan.yaml (not legacy dependencies.yaml).
+    expect(p).toContain(`_bmad-output/implementation-artifacts/sprint-plan.yaml`);
     expect(p).toContain('epic 1');
   });
 });
@@ -414,12 +392,11 @@ describe('CLI integration', () => {
       input: JSON.stringify(env),
       encoding: 'utf8',
     });
-    // File was written with the marker.
-    const body = readFileSync(
-      join(tmpRoot, '_Sprintpilot', 'sprints', 'dependencies.yaml'),
-      'utf8',
-    );
-    expect(body.startsWith(AUTO_MARKER)).toBe(true);
+    // v2.3.0: file now written at sprint-plan.yaml location.
+    const planFile = join(tmpRoot, '_bmad-output', 'implementation-artifacts', 'sprint-plan.yaml');
+    const body = readFileSync(planFile, 'utf8');
+    expect(body).toMatch(/^schema_version: 1$/m);
+    expect(body).toMatch(/dependencies:/);
 
     // resolve-dag layers consumes it and produces a non-trivial DAG.
     const layersOut = execFileSync(process.execPath, [
@@ -445,42 +422,10 @@ describe('CLI integration', () => {
     ]);
   });
 
-  it('write exits 2 on hand-authored existing file (no --force)', () => {
-    mkdirSync(join(tmpRoot, '_Sprintpilot', 'sprints'), { recursive: true });
-    writeFileSync(
-      join(tmpRoot, '_Sprintpilot', 'sprints', 'dependencies.yaml'),
-      'version: 1\nstories: {}\n',
-    );
-    const res = spawnSync(
-      process.execPath,
-      [SCRIPT, 'write', '--epic', '1', '--project-root', tmpRoot],
-      { input: JSON.stringify(loadValidEnvelope()), encoding: 'utf8' },
-    );
-    expect(res.status).toBe(2);
-    expect(JSON.parse(res.stdout)).toMatchObject({
-      wrote: false,
-      reason: 'existing-hand-authored',
-    });
-  });
-
-  it('write --force overwrites a hand-authored file', () => {
-    mkdirSync(join(tmpRoot, '_Sprintpilot', 'sprints'), { recursive: true });
-    writeFileSync(
-      join(tmpRoot, '_Sprintpilot', 'sprints', 'dependencies.yaml'),
-      'version: 1\nstories: {}\n',
-    );
-    const out = execFileSync(
-      process.execPath,
-      [SCRIPT, 'write', '--epic', '1', '--project-root', tmpRoot, '--force'],
-      { input: JSON.stringify(loadValidEnvelope()), encoding: 'utf8' },
-    ).toString();
-    expect(JSON.parse(out)).toMatchObject({ wrote: true });
-    const body = readFileSync(
-      join(tmpRoot, '_Sprintpilot', 'sprints', 'dependencies.yaml'),
-      'utf8',
-    );
-    expect(body.startsWith(AUTO_MARKER)).toBe(true);
-  });
+  // Hand-authored detection and --force flag removed in v2.3.0 — the
+  // dependencies block is fully auto-managed; user customizations live in
+  // the `overrides:` block which the script never touches. The
+  // corresponding tests are gone.
 
   it('dry-run returns valid:true with diff for a clean envelope', () => {
     const out = execFileSync(

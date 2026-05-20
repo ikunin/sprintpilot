@@ -255,11 +255,89 @@ Three deterministic scripts auto-emit `once` events on success — timing accumu
 
 ### DAG Resolver + Dependency Inference
 
-`resolve-dag.js` builds a layered execution plan from `dependencies.yaml`. Strategies: `explicit` (sidecar) > `ordering` (linear chain). Overrides: `force_independent` strips edges; `force_sequential` adds edges. Kahn's-algorithm cycle detection with a clear diagnostic on failure. Purpose-built block-form YAML parser — no install-time YAML dep.
+`resolve-dag.js` builds a layered execution plan from `_bmad-output/implementation-artifacts/sprint-plan.yaml` (v2.3.0). Strategies: `explicit` (`plan.dependencies.stories[*].depends_on` intra-epic + `plan.cross_epic_deps` cross-boundary) > `ordering` (linear chain from sprint-status). Overrides: `force_independent` strips edges; `force_sequential` adds edges. Kahn's-algorithm cycle detection with a clear diagnostic on failure.
 
-`infer-dependencies.js` validates an LLM JSON envelope (`{version, epic, dependencies, rationale}`) and writes `dependencies.yaml` with an `# AUTO-INFERRED` marker. Validation accumulates errors (no short-circuit): schema, unknown keys, self-deps, cross-epic edges, missing rationales, cycles. Idempotency via 12-char sha256 over structural fields — rationale-only edits don't change the hash.
+`infer-dependencies.js` validates two distinct LLM envelopes:
 
-The script never calls an LLM. The autopilot session executes the inference inline (LLM reads four files, emits JSON) and pipes the result into `infer-dependencies.js write`. This preserves the "Sprintpilot scripts NEVER call LLMs" rule.
+- **Per-epic** (`scaffold-prompt --epic <id>` / `dry-run --epic <id>` / `write --epic <id>`): `{version, epic, dependencies, rationale}`. The prompt instructs the LLM to REJECT cross-epic edges; validator enforces. Each call updates `plan.dependencies.stories.*` for the named epic only, preserving entries for other epics.
+- **Cross-epic** (`scaffold-prompt --cross-epic` / `dry-run --cross-epic` / `write-cross-epic`): `{version, cross_epic_deps: [{from_story, to_story, rationale}]}`. Validator enforces from/to epics differ, rationale ≤200 chars, no duplicates with per-epic graph, no cycle in combined DAG. Writes to `plan.cross_epic_deps`.
+
+`infer-dependencies.js migrate` performs one-shot upgrade from pre-v2.3.0 `_Sprintpilot/sprints/dependencies.yaml` — imports `stories:` + `overrides:` into the plan, drops legacy `epics: {independent: ...}` block with a warning, archives original to `.archive/dependencies.yaml.migrated`. Idempotent.
+
+Scripts never call an LLM. The autopilot session or the `/sprintpilot-plan-sprint` skill executes inference inline (LLM reads four files, emits JSON) and pipes the result through `dry-run` → `write`. This preserves the "Sprintpilot scripts NEVER call LLMs" rule.
+
+### Sprint Planning + DAG-Aware Execution (v2.3.0)
+
+The plan file at `_bmad-output/implementation-artifacts/sprint-plan.yaml` is Sprintpilot's authoritative view of execution: per-epic dependencies + cross-epic edges + per-story `plan_status` + priority + cached BMad status + optional external issue-tracker links. BMad's `sprint-status.yaml` remains the source of truth for *what stories exist*; the plan is the source of truth for *what runs next and in what order*.
+
+**Layers:**
+
+- `_Sprintpilot/scripts/sprint-plan.js` (script primitive) — atomic read/write of `sprint-plan.yaml` via js-yaml, schema validation (`schema_version`, status/epics/stories/dependencies/cross_epic_deps/overrides required), mutator primitives (`markDone`, `markSkipped`, `markExcluded`, `markRunning`, `addStories`, `removeStories`, `reorder`, `setIssueId`, `setIssueTracker`, `refreshBmadStatus`, `archive`). All mutators go through a `mutate(projectRoot, fn)` helper that does read → validate → atomic tmp+rename.
+
+- `_Sprintpilot/lib/orchestrator/sprint-plan.js` (orchestrator-side helper) — opinionated logic the script doesn't know about: staleness detection (`planStaleness`), legacy migration trigger (`bootstrapMigrationIfNeeded`), plan-aware queue composition (`composePlanQueue`), refresh wrapper (`refreshIfPlanExists`), auto-derive gating (`shouldAutoDerive`), plan-exhaustion detection (`planExhausted`), DAG validation for reorder (`validateOrdering` + `collectUpstreams` + `isPlanTerminal` + `isTerminalInSprintStatus`).
+
+- `_Sprintpilot/skills/sprintpilot-plan-sprint/` — LLM-driving skill. 14-step workflow that loads inputs, migrates legacy, checks staleness, runs per-epic inference loop, runs cross-epic detection, optionally captures issue tracker + per-story issue IDs, builds the DAG, presents it (text + mermaid), curates stories, validates selection, writes the plan, reports. Shells out to all three layers above. Never improvises.
+
+**cmdStart integration:**
+
+After lock acquisition and worktree health check, `cmdStart`:
+
+1. Runs `bootstrapMigrationIfNeeded` — one-shot legacy import.
+2. Runs `refreshIfPlanExists` — syncs cached `bmad_status` from sprint-status; eagerly transitions terminal stories to `plan_status: done`.
+3. If no explicit `--stories`/`--epic` queue: hydrates `persisted.story_queue` from `composePlanQueue`.
+4. Checks `state.replan_requested` (set by `replan_sprint` user command) — emits `invoke_skill: sprintpilot-plan-sprint` and returns.
+5. Checks `planExhausted` — if every plan story is terminal, archives the plan and emits `plan_exhausted` halt.
+6. Checks `shouldAutoDerive` — if the user opted in via `auto_plan_on_start: true` or the plan went stale, emits `invoke_skill: sprintpilot-plan-sprint` and returns.
+
+`composeRuntimeState` then runs unchanged — it consumes `persisted.story_queue` and selects the head as `current_story`. The plan-aware logic is fully isolated in the orchestrator helper; only ~70 lines were added to `autopilot.js`.
+
+**cmdRecord integration:**
+
+On every `record` invocation, after `persistRuntimeState`:
+
+1. `emitPhaseTransitionEvents` — when the state transitions between story-bound phases, emit `story_step_completed` (old phase) + `story_step_started` (new phase) ledger events, and call `sprintPlan.markRunning(story_key, new_phase)` so `plan.stories[].current_step` reflects live state.
+2. When `result.newState.phase === STORY_DONE`, call `sprintPlan.markDone(story_key)` — sets `plan_status: done`, stamps `completed_at`, clears `current_step`. Best-effort + idempotent.
+
+**Mid-flight user commands** (Phase 5):
+
+Four new `user_input` kinds — `reorder_queue`, `add_to_sprint`, `remove_from_sprint`, `replan_sprint` — emit pure side-effect records from `user-command-applier.js`. `applySideEffects` in `autopilot.js` reads the plan, runs `validateOrdering` (for reorder), and applies the mutation via the corresponding `sprint-plan.js` primitive. Inline edits (reorder/add/remove) don't change the state-machine phase; `replan_sprint` halts and sets `state.replan_requested` so the next `cmdStart` emits the planning skill.
+
+`validateOrdering` is DAG-aware: for each story in the proposed order, every transitive upstream (intra-epic + cross-epic) must be positioned BEFORE the story OR plan-terminal (done/skipped/excluded) OR terminal in sprint-status. Violations include a `suggestion` string ("insert <upstream> before <story>") so user_prompts can guide remediation.
+
+**Streaming progress** (Phase 4.5):
+
+`action-ledger.js` exposes `tail(ctx, opts)` — an async iterator that yields events at a 250ms poll interval. AbortSignal support, `maxIdleMs` auto-terminate, optional `afterSeq` for incremental reads. CI-safe (no fs.watch). `autopilot progress` is a one-shot snapshot CLI built on top of `tail`; live tailing via `watch -n 1 'autopilot progress'` works as a Unix-native alternative.
+
+Phase-bound events (`story_step_*`) emit from `emitPhaseTransitionEvents` in `cmdRecord`. Step-level granularity exposes the live BMad-cycle phase (`check_readiness` / `dev_red` / `dev_green` / `code_review` / `patch_apply` / `patch_retest` / `story_land` / `story_done` for full profile; `nano_quick_dev` for nano).
+
+**Issue-id enrichment:** `cmdProgress` builds a `story_key → issue_id` map from `plan.stories[]` once per call and joins it into the JSON `recent_events[]`, the top-level `current_issue_id`, and the human-readable output ("Current story: 1-3-add-auth [PROJ-101]"). A separate `computeIssueTracking` helper produces an `{provider, project_key, total, linked, coverage}` summary surfaced as "Issue tracking: N/M stories linked to <provider>" when the plan has a configured `issue_tracker` block — silenced entirely otherwise (no `[no issue]` noise). The same data feeds the `/sprintpilot-sprint-progress` skill template.
+
+**Skill layer:** `/sprintpilot-sprint-progress` is a read-only diagnostic skill that wraps `autopilot progress --json` with LLM judgment. Classifies the sprint into `HEALTHY` / `STALLED` / `NEEDS-INPUT` / `EXHAUSTED` / `NO-PLAN` based on the recent ledger tail (halts, verify rejections with `consecutive >= 3`, plan_exhausted halts) and produces exactly one recommended next action. Never mutates state — points users at the appropriate `user_input` command when corrective action is needed.
+
+### Concurrency + Hardening Patterns (v2.3.0)
+
+Four hardening patterns emerged from adversarial review and are worth understanding when working on this codebase:
+
+**1. Single-writer guarantee via `.sprintpilot/plan.lock`.** Every function in `sprint-plan.js` that mutates the on-disk plan — `mutate()` (used by all named mutators except refresh), `archive()`, and `refreshBmadStatus()` — acquires the lock via `acquirePlanLock(projectRoot)` and releases in a `finally` block. The lock primitive is the shared `lock.js` (same as `.merge-shards.lock`), with a 5-minute stale timeout and 30-second acquire timeout. Crash-resume: a SIGKILL'd holder's lock becomes stale and is taken over by the next acquirer via the `ACQUIRED_STALE` path. The disk-layer atomic-write (tmp + rename) means the file is never in a torn state even when the holder dies mid-write — only complete-or-not is possible.
+
+The lock is intentionally process-level (`lock.js` uses an exclusive-create file lock), not in-process — concurrent threads in a single Node process aren't serialized, but Sprintpilot is single-threaded by design. The real risk is two separate `node autopilot.js` invocations, and that's what the lock prevents.
+
+**2. CRITICAL_KEYS write-through for crash-resume state.** Fields that must survive an unclean process exit are listed in `CRITICAL_KEYS` (in both `_Sprintpilot/lib/orchestrator/state-store.js` and `_Sprintpilot/scripts/state-shard.js`). v2.3.0 added two fields:
+
+- `last_verify_issues_signature` — hash of the most recent verify rejection's issues
+- `consecutive_identical_rejections` — counter for loop detection
+
+Without write-through, these would accumulate in the in-memory pending buffer (coalesced state writes) and only flush at story boundary. A SIGKILL between identical verify rejections would reset the counter, defeating the loop-detection halt. With CRITICAL_KEYS, each rejection writes the new signature + counter directly through to disk.
+
+**3. Plan mutation failure surfacing.** The `applySideEffects` helper in `autopilot.js` returns a `surfaceFailure` envelope when any `plan_*` side effect (reorder / add_stories / remove_stories) fails. `cmdRecord` checks the return value and, if set, overrides the emitted `nextAction` with a `user_prompt` halt whose prompt names the violations + suggested remediation. Without this, mid-flight commands would fail silently — the user would issue `reorder_queue` and see no feedback when DAG validation rejected it. The pattern: pure side-effect handlers don't have stdout access; they return data; the orchestrator's CLI edge converts that data into a halt action.
+
+**4. Single-pass entity escape for DAG labels.** `mermaidEscapeLabel` in `resolve-dag.js` uses a single regex + replacement function (`MERMAID_ESCAPE_MAP[c]`) instead of a chain of `.replace()` calls. The chain approach has a subtle bug: if `&` is escaped first (`&` → `&amp;`), and a later step escapes `;` (`;` → `&#59;`), the `;` in `&amp;` from a user-provided `&amp;` literal gets re-escaped, producing `&amp&#59;`. The single-pass approach matches each input character exactly once; the replacement output (entities) is never re-processed by the same regex. The character class `[\\"&;\]\[()<>|\n]` covers every char with mermaid-syntax meaning; control chars and Unicode bidi marks are stripped in separate passes. `dotEscapeLabel` is simpler because graphviz double-quoted labels don't interpret HTML entities — only `\` and `"` need escaping, plus newline conversion.
+
+**5. Tail iterator rotation detection.** `action-ledger.js#tail` tracks the ledger file's inode + size before and after each `readSince` call. If the inode changes (file moved/replaced) or size shrinks (truncated), the iterator resets `lastSeq=0` and discards the just-read batch — those events might have come from the OLD inode and the seq numbers won't compose with the new file's. The next iteration re-reads from the new file's start. Without this, `tail()` silently misses every event after a rotation (the `seq > lastSeq` filter rejects all new entries because the new file's seq starts at 1 while lastSeq is the old file's tail).
+
+**DAG render pipeline:**
+
+`resolve-dag.js render --format mermaid|graphviz` produces a visual DAG of the plan. Mermaid default (GitHub-renderable, no system deps); graphviz optional with `dot` PATH probe + mermaid fallback on missing toolchain. Node coloring by `plan_status` (pending=green, done=gray, skipped=yellow, excluded=dim). Cross-epic edges rendered dashed with `cross-epic` label. Plan-id + generated-at stamped as header comment for staleness detection.
 
 ### Parallel Story Dispatch
 

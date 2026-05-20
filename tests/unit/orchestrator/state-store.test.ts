@@ -121,6 +121,11 @@ describe('write (coalesce path)', () => {
         'in_worktree',
         'patch_commits',
         'story_queue',
+        // v2.3.0 — verify-loop tracker fields write through immediately
+        // so crash recovery preserves the consecutive-identical count
+        // across rejections.
+        'last_verify_issues_signature',
+        'consecutive_identical_rejections',
       ].sort(),
     );
   });

@@ -40,6 +40,8 @@ const divergence = require('../lib/orchestrator/divergence');
 const reportRenderer = require('../lib/orchestrator/report');
 const gitPlan = require('../lib/orchestrator/git-plan');
 const land = require('../lib/orchestrator/land');
+const orchSprintPlan = require('../lib/orchestrator/sprint-plan');
+const sprintPlanScript = require('../scripts/sprint-plan');
 const {
   parseStatuses: parseSprintStatuses,
   remainingFrom: remainingStoriesFrom,
@@ -47,7 +49,7 @@ const {
 
 const { STATES } = stateMachine;
 
-const SUBCOMMANDS = ['start', 'next', 'record', 'state', 'report', 'validate-config', 'status'];
+const SUBCOMMANDS = ['start', 'next', 'record', 'state', 'report', 'validate-config', 'status', 'progress'];
 
 function help() {
   log.out(
@@ -193,7 +195,85 @@ function persistedStoryRejectionReason(key, projectRoot) {
   if (status === 'done') {
     return `sprint-status shows status='done'; story already complete`;
   }
+  // v2.3.0 — also reject when the user manually marked plan_status terminal
+  // in sprint-plan.yaml but sprint-status hasn't caught up. Returns null
+  // when no plan exists (greenfield projects keep existing semantics).
+  const planRejection = orchSprintPlan.planRejectionReason(key, { projectRoot });
+  if (planRejection) return planRejection;
   return null;
+}
+
+// v2.3.0 Phase 4.5 — story-bound phases. When a transition involves any
+// of these, emit story_step_started / story_step_completed ledger events
+// so `autopilot progress` can render live sub-step status. NANO_QUICK_DEV
+// is treated as a single sub-step (the inner Implement/Review/Classify/Commit
+// loop happens inside bmad-quick-dev's own machinery).
+function isStoryBoundPhase(phase) {
+  if (!phase || typeof phase !== 'string') return false;
+  return (
+    phase === STATES.CHECK_READINESS ||
+    phase === STATES.DEV_RED ||
+    phase === STATES.DEV_GREEN ||
+    phase === STATES.CODE_REVIEW ||
+    phase === STATES.PATCH_APPLY ||
+    phase === STATES.PATCH_RETEST ||
+    phase === STATES.STORY_DONE ||
+    phase === STATES.STORY_LAND ||
+    phase === STATES.NANO_QUICK_DEV
+  );
+}
+
+// Emit story_step_started + story_step_completed ledger events when the
+// phase changes between two story-bound phases. Also writes the transient
+// `current_step` field on the plan story entry so `autopilot progress` can
+// render without re-reading the ledger. Best-effort + silent on failure;
+// plan-layer issues never block the autopilot cycle.
+function emitPhaseTransitionEvents(prevRuntime, newState, projectRoot) {
+  const prevPhase = prevRuntime && prevRuntime.phase;
+  const nextPhase = newState && newState.phase;
+  const story_key = newState && newState.story_key;
+  if (!nextPhase) return;
+  if (prevPhase === nextPhase) return;
+
+  const prevIsStoryBound = isStoryBoundPhase(prevPhase);
+  const nextIsStoryBound = isStoryBoundPhase(nextPhase);
+  if (!prevIsStoryBound && !nextIsStoryBound) return;
+
+  try {
+    if (prevIsStoryBound && story_key) {
+      ledger.append(
+        {
+          kind: 'story_step_completed',
+          detail: { story_key, step_name: prevPhase, outcome: 'success' },
+        },
+        { projectRoot },
+      );
+    }
+    if (nextIsStoryBound && story_key) {
+      ledger.append(
+        {
+          kind: 'story_step_started',
+          detail: { story_key, step_name: nextPhase, started_at: new Date().toISOString() },
+        },
+        { projectRoot },
+      );
+    }
+  } catch (e) {
+    // Ledger failures shouldn't ever wedge — skip silently.
+    log.warn(`phase transition ledger emission failed: ${e.message}`);
+  }
+
+  // Mirror the phase into plan.stories[].current_step so the renderer
+  // doesn't need to re-tail the ledger to know what's running.
+  try {
+    const planRead = sprintPlanScript.read({ projectRoot });
+    if (planRead && !(typeof planRead === 'object' && 'error' in planRead) && story_key) {
+      const stepLabel = nextIsStoryBound ? nextPhase : null;
+      sprintPlanScript.markRunning(story_key, stepLabel, { projectRoot });
+    }
+  } catch (_e) {
+    // No plan or plan corrupt — fine; renderer will fall back to ledger.
+  }
 }
 
 // Catch documented poisoned shapes that may appear in persisted.current_story
@@ -1055,7 +1135,19 @@ function probeBranchExists(projectRoot, branch) {
 
 // ------------------------------------------------------------ side effects
 
+// v2.3.0 — applySideEffects MAY return a `surfaceFailure` envelope when
+// a plan_* side-effect cannot complete (DAG violation, missing keys,
+// disk error). cmdRecord uses this to override the emitted nextAction
+// with a user_prompt halt so the LLM session sees the failure rather
+// than silently moving on. Returns null when no failure needs surfacing.
 function applySideEffects(sideEffects, runtime, profile, projectRoot) {
+  let surfaceFailure = null;
+  // Helper: record a plan-side-effect failure for the caller to surface.
+  // First failure wins; subsequent failures are ledgered but not raised
+  // (the user can only act on one prompt at a time).
+  const recordFailure = (kind, prompt, details) => {
+    if (!surfaceFailure) surfaceFailure = { kind, prompt, details };
+  };
   for (const eff of sideEffects || []) {
     switch (eff.kind) {
       case 'append_decisions': {
@@ -1120,11 +1212,130 @@ function applySideEffects(sideEffects, runtime, profile, projectRoot) {
         ledger.append({ ...eff, kind }, { projectRoot });
         break;
       }
+      case 'plan_reorder': {
+        // v2.3.0 — DAG-validated reorder of plan.stories[]. Failures
+        // emit a structured ledger entry AND surface a user_prompt halt
+        // (via the surfaceFailure return) so the LLM session sees the
+        // violation rather than silently moving on. Without this, the
+        // user issues `reorder_queue` and gets no feedback when it fails.
+        try {
+          const planRead = sprintPlanScript.read({ projectRoot });
+          if (!planRead || (typeof planRead === 'object' && 'error' in planRead)) {
+            ledger.append(
+              { kind: 'plan_reorder_failed', reason: 'no_plan_or_corrupt' },
+              { projectRoot },
+            );
+            recordFailure(
+              'plan_reorder_failed',
+              `reorder_queue rejected: no sprint-plan.yaml exists yet or the file is corrupt. ` +
+                `Run /sprintpilot-plan-sprint to build a plan first.`,
+              { reason: 'no_plan_or_corrupt' },
+            );
+            break;
+          }
+          const validation = orchSprintPlan.validateOrdering(eff.order, planRead, { projectRoot });
+          if (!validation.valid) {
+            ledger.append(
+              { kind: 'plan_reorder_rejected', violations: validation.violations },
+              { projectRoot },
+            );
+            const violationLines = validation.violations
+              .slice(0, 5)
+              .map((v) => `  - ${v.story} depends on ${v.upstream} (suggestion: ${v.suggestion})`)
+              .join('\n');
+            recordFailure(
+              'plan_reorder_rejected',
+              `reorder_queue violates the dependency DAG. Violations:\n${violationLines}` +
+                (validation.violations.length > 5 ? `\n  ...and ${validation.violations.length - 5} more` : '') +
+                `\n\nResubmit reorder_queue with a corrected order, or use add_to_sprint to bring missing upstreams into the plan first.`,
+              { violations: validation.violations },
+            );
+            break;
+          }
+          sprintPlanScript.reorder(eff.order, { projectRoot });
+          ledger.append(
+            { kind: 'plan_reordered', order: eff.order, reason: eff.reason },
+            { projectRoot },
+          );
+        } catch (e) {
+          ledger.append(
+            { kind: 'plan_reorder_failed', message: e.message },
+            { projectRoot },
+          );
+          recordFailure(
+            'plan_reorder_failed',
+            `reorder_queue failed: ${e.message}`,
+            { message: e.message },
+          );
+        }
+        break;
+      }
+      case 'plan_add_stories': {
+        try {
+          // Build entries from story_keys; populate issue_id from optional map.
+          const issueMap = eff.issue_ids && typeof eff.issue_ids === 'object' ? eff.issue_ids : {};
+          const entries = eff.story_keys.map((key) => ({
+            key,
+            issue_id: typeof issueMap[key] === 'string' ? issueMap[key] : null,
+            added_by: 'user',
+          }));
+          sprintPlanScript.addStories(entries, { projectRoot, position: eff.position || 'end' });
+          ledger.append(
+            {
+              kind: 'plan_stories_added',
+              story_keys: eff.story_keys,
+              position: eff.position || 'end',
+              reason: eff.reason,
+            },
+            { projectRoot },
+          );
+        } catch (e) {
+          ledger.append(
+            { kind: 'plan_add_stories_failed', message: e.message },
+            { projectRoot },
+          );
+          recordFailure(
+            'plan_add_stories_failed',
+            `add_to_sprint failed: ${e.message}`,
+            { message: e.message, story_keys: eff.story_keys },
+          );
+        }
+        break;
+      }
+      case 'plan_remove_stories': {
+        try {
+          sprintPlanScript.removeStories(eff.story_keys, {
+            projectRoot,
+            status: eff.mark_status || 'skipped',
+          });
+          ledger.append(
+            {
+              kind: 'plan_stories_removed',
+              story_keys: eff.story_keys,
+              mark_status: eff.mark_status || 'skipped',
+              reason: eff.reason,
+            },
+            { projectRoot },
+          );
+        } catch (e) {
+          ledger.append(
+            { kind: 'plan_remove_stories_failed', message: e.message },
+            { projectRoot },
+          );
+          recordFailure(
+            'plan_remove_stories_failed',
+            `remove_from_sprint failed: ${e.message}`,
+            { message: e.message, story_keys: eff.story_keys },
+          );
+        }
+        break;
+      }
       default:
         // Unknown side-effect kinds are recorded but otherwise ignored.
         ledger.append({ kind: 'state_transition', detail: eff }, { projectRoot });
     }
   }
+  return surfaceFailure;
 }
 
 // ------------------------------------------------------------ subcommands
@@ -1560,6 +1771,175 @@ function cmdStart(opts) {
     return 0;
   }
 
+  // v2.3.0 — plan-aware integration. Three independent steps, ordered for
+  // simplicity:
+  //   1. One-shot legacy import: if a pre-v2.3.0 `_Sprintpilot/sprints/dependencies.yaml`
+  //      exists, archive + import its content into sprint-plan.yaml.
+  //   2. Refresh the plan's bmad_status cache from sprint-status.yaml.
+  //      Eagerly transitions terminal stories to plan_status=done so the
+  //      queue resolver doesn't pick them. No-op on a fresh plan or when
+  //      the diff is empty (Risk #23 disk-thrash mitigation).
+  //   3. If no explicit --stories/--epic flags AND a plan with pending
+  //      stories exists, hydrate persisted.story_queue from the plan.
+  //      composeRuntimeState (below) consumes the queue head as usual —
+  //      no changes needed in composeRuntimeState itself.
+  //
+  // All three are best-effort. Failures emit a ledger event and fall
+  // through to the legacy resolveNextStoryKey path; cmdStart never
+  // wedges on plan-layer issues.
+  try {
+    const migration = orchSprintPlan.bootstrapMigrationIfNeeded({ projectRoot });
+    if (migration && migration.migrated) {
+      ledger.append({ kind: 'plan_migrated', detail: migration }, { projectRoot });
+    } else if (migration && migration.reason === 'migrate_failed') {
+      ledger.append({ kind: 'plan_migration_failed', detail: migration }, { projectRoot });
+    }
+  } catch (e) {
+    ledger.append({ kind: 'plan_migration_failed', detail: { message: e.message } }, { projectRoot });
+  }
+
+  try {
+    const refresh = orchSprintPlan.refreshIfPlanExists({ projectRoot });
+    if (refresh && refresh.wrote) {
+      ledger.append({ kind: 'plan_refreshed', detail: refresh.changed }, { projectRoot });
+    }
+  } catch (e) {
+    ledger.append({ kind: 'plan_refresh_failed', detail: { message: e.message } }, { projectRoot });
+  }
+
+  if (explicitQueue.length === 0) {
+    try {
+      const planQueue = orchSprintPlan.composePlanQueue({ projectRoot });
+      if (Array.isArray(planQueue) && planQueue.length > 0) {
+        persisted.story_queue = planQueue;
+        ledger.append(
+          { kind: 'plan_queue_loaded', queue: planQueue.slice(0, 20) },
+          { projectRoot },
+        );
+      }
+    } catch (e) {
+      ledger.append(
+        { kind: 'plan_queue_failed', detail: { message: e.message } },
+        { projectRoot },
+      );
+    }
+  }
+
+  // Replan gate (v2.3.0) — user issued `replan_sprint` mid-flight; the
+  // previous cmdRecord set state.replan_requested and halted. On the next
+  // start, emit the invoke_skill action so the LLM session re-runs
+  // /sprintpilot-plan-sprint. Clear the flag once emitted so the request
+  // is one-shot.
+  if (persisted.replan_requested) {
+    const requested = persisted.replan_requested;
+    const inviteAction = {
+      type: 'invoke_skill',
+      skill: 'sprintpilot-plan-sprint',
+      template_slots: {
+        replan: true,
+        reason: requested.reason || 'user_requested',
+        requested_at: requested.requested_at || null,
+      },
+    };
+    persisted.replan_requested = null;
+    persistState({ replan_requested: null }, profile, projectRoot, 'sprint');
+    if (profile.coalesce_state_writes) stateStore.flush(profile, { projectRoot, story: 'sprint' });
+    ledger.append(
+      { kind: 'replan_requested_consumed', detail: requested },
+      { projectRoot },
+    );
+    ledger.append(
+      { kind: 'action_emitted', phase: persisted.current_bmad_step || null, action: inviteAction },
+      { projectRoot },
+    );
+    process.stdout.write(
+      `${JSON.stringify({ action: inviteAction, phase: persisted.current_bmad_step || null }, null, 2)}\n`,
+    );
+    return 0;
+  }
+
+  // Plan-exhaustion gate: every plan.stories[] entry is terminal AND the
+  // plan was actually curated (stories list is non-empty). Archive the
+  // plan and emit a halt asking the user to either re-plan or fall back
+  // to sprint-status order. This is distinct from auto-derive: a fresh
+  // plan that was just exhausted shouldn't silently slip into picking
+  // up other sprint-status stories.
+  if (explicitQueue.length === 0) {
+    const exhausted = orchSprintPlan.planExhausted({ projectRoot });
+    if (exhausted.exhausted) {
+      let archived = null;
+      try {
+        const archiveResult = sprintPlanScript.archive(exhausted.plan_id, { projectRoot });
+        archived = archiveResult.archived ? archiveResult.file : null;
+      } catch (e) {
+        ledger.append(
+          { kind: 'plan_archive_failed', detail: { message: e.message } },
+          { projectRoot },
+        );
+      }
+      const haltAction = {
+        type: 'user_prompt',
+        reason: 'plan_exhausted',
+        prompt:
+          `Sprint plan complete. All ${exhausted.total} planned stories are done ` +
+          `(${exhausted.terminal_counts.done} done, ${exhausted.terminal_counts.skipped} skipped, ` +
+          `${exhausted.terminal_counts.excluded} excluded). ` +
+          'Run /sprintpilot-plan-sprint to build a new plan from remaining sprint-status stories, ' +
+          'or run `autopilot start --no-auto-plan` to continue in sprint-status order.',
+        plan_id: exhausted.plan_id,
+        terminal_counts: exhausted.terminal_counts,
+        archived,
+      };
+      ledger.append(
+        { kind: 'plan_exhausted', detail: { ...exhausted, archived } },
+        { projectRoot },
+      );
+      ledger.append(
+        { kind: 'action_emitted', phase: persisted.current_bmad_step || null, action: haltAction },
+        { projectRoot },
+      );
+      process.stdout.write(
+        `${JSON.stringify({ action: haltAction, phase: persisted.current_bmad_step || null }, null, 2)}\n`,
+      );
+      return 0;
+    }
+  }
+
+  // Auto-derive gate: emit an `invoke_skill` action that asks the LLM
+  // session to run /sprintpilot-plan-sprint. Only fires when:
+  //   - the user opted in via `autopilot.auto_plan_on_start: true` (config), OR
+  //   - an existing plan went stale (added_stories / removed_stories).
+  // Per user direction the default is OFF for greenfield projects —
+  // missing plan falls back to sprint-status execution order.
+  const autoDerive = orchSprintPlan.shouldAutoDerive({ projectRoot, profile, opts });
+  if (autoDerive.auto_derive) {
+    const inviteAction = {
+      type: 'invoke_skill',
+      skill: 'sprintpilot-plan-sprint',
+      template_slots: {
+        auto: true,
+        reason: autoDerive.reason,
+        ...(autoDerive.missing_keys ? { missing_keys: autoDerive.missing_keys } : {}),
+        ...(autoDerive.removed_keys ? { removed_keys: autoDerive.removed_keys } : {}),
+      },
+    };
+    ledger.append(
+      {
+        kind: 'auto_derive_emitted',
+        detail: { reason: autoDerive.reason, ...autoDerive },
+      },
+      { projectRoot },
+    );
+    ledger.append(
+      { kind: 'action_emitted', phase: persisted.current_bmad_step || null, action: inviteAction },
+      { projectRoot },
+    );
+    process.stdout.write(
+      `${JSON.stringify({ action: inviteAction, phase: persisted.current_bmad_step || null }, null, 2)}\n`,
+    );
+    return 0;
+  }
+
   // Persist the new queue BEFORE composing runtime state so the queue
   // head is visible to composeRuntimeState's resolver.
   if (explicitQueue.length > 0) {
@@ -1713,7 +2093,34 @@ function cmdRecord(opts) {
   }
 
   const result = adapt.interpretSignal(runtime, signal, profile, verifyResult);
-  applySideEffects(result.sideEffects, result.newState, result.newProfile, projectRoot);
+  const planFailure = applySideEffects(
+    result.sideEffects,
+    result.newState,
+    result.newProfile,
+    projectRoot,
+  );
+  // v2.3.0 — if a plan_* side-effect failed (DAG violation, validation
+  // error, write failure), override the emitted nextAction with a
+  // user_prompt halt so the LLM session sees the failure and can
+  // remediate. Without this the autopilot silently moves on and the
+  // user wonders why their reorder/add/remove "did nothing".
+  if (planFailure) {
+    const haltAction = {
+      type: 'user_prompt',
+      phase: result.newState.phase,
+      reason: planFailure.kind,
+      prompt: planFailure.prompt,
+      details: planFailure.details || null,
+    };
+    ledger.append(
+      { kind: 'action_emitted', phase: result.newState.phase, action: haltAction },
+      { projectRoot },
+    );
+    process.stdout.write(
+      `${JSON.stringify({ action: haltAction, phase: result.newState.phase }, null, 2)}\n`,
+    );
+    return 0;
+  }
 
   // Skill timing: emit `skill.<name>` end event when an invoke_skill phase
   // advances to a new phase (success path) OR when it pauses with a
@@ -1741,6 +2148,46 @@ function cmdRecord(opts) {
 
   // Persist new runtime state.
   persistRuntimeState(result.newState, result.newProfile, projectRoot);
+
+  // v2.3.0 Phase 4.5 — streaming progress. Emit step-level ledger events
+  // on every phase transition so `autopilot progress` can render live
+  // status. Mirrors the change to plan.stories[].current_step via
+  // markRunning. Both are best-effort — plan-layer failures never wedge
+  // cmdRecord. Only fires when the transition involves a story-bound
+  // phase (skips sprint-level boundaries like SPRINT_FINALIZE_PENDING).
+  emitPhaseTransitionEvents(runtime, result.newState, projectRoot);
+
+  // v2.3.0 — when a story transitions into STORY_DONE, sync the plan's
+  // `plan_status` so the queue resolver drops the entry next cmdStart.
+  // Best-effort + idempotent: markDone on an already-done story is a
+  // no-op, and any plan-layer failure is recorded to the ledger but
+  // never blocks the autopilot cycle.
+  if (
+    result.newState.phase === STATES.STORY_DONE &&
+    result.newState.story_key &&
+    typeof result.newState.story_key === 'string'
+  ) {
+    try {
+      const planRead = sprintPlanScript.read({ projectRoot });
+      // Only update when a plan actually exists; greenfield projects
+      // running in sprint-status order don't need plan upkeep.
+      if (planRead && !(typeof planRead === 'object' && 'error' in planRead)) {
+        sprintPlanScript.markDone(result.newState.story_key, { projectRoot });
+        ledger.append(
+          { kind: 'plan_story_done', detail: { story_key: result.newState.story_key } },
+          { projectRoot },
+        );
+      }
+    } catch (e) {
+      ledger.append(
+        {
+          kind: 'plan_story_done_failed',
+          detail: { story_key: result.newState.story_key, message: e.message },
+        },
+        { projectRoot },
+      );
+    }
+  }
 
   // Story-boundary or halt → flush coalesce buffer if enabled.
   const isStoryBoundary =
@@ -1813,10 +2260,247 @@ function cmdStatus(opts) {
   return 0;
 }
 
+// v2.3.0 Phase 4.5 — `autopilot progress` CLI subcommand. Reads
+// sprint-plan.yaml + the recent ledger tail to produce a snapshot of
+// "what's running right now and what's done". Modes:
+//   (default --once)  Human-readable one-shot snapshot.
+//   --json            Machine-readable JSON for IDE extensions.
+//   --story <key>     Narrow to a single story.
+// Full --watch (ANSI cursor control / live redraw) is intentionally
+// deferred — terminals vary too widely to do right in this scope;
+// `watch -n 1 'autopilot progress'` covers the use case adequately.
+function cmdProgress(opts) {
+  const projectRoot = resolveProjectRoot(opts);
+  const persisted = loadState(projectRoot);
+  const planResult = sprintPlanScript.read({ projectRoot });
+  const plan =
+    planResult && !(typeof planResult === 'object' && 'error' in planResult) ? planResult : null;
+
+  // Recent ledger events (last 50) for context. Includes step events
+  // when Phase 4.5 emission is active.
+  const recentEvents = ledger.read({ projectRoot }, { limit: 50 });
+  const stepEvents = recentEvents.filter(
+    (e) =>
+      e.kind === 'story_step_started' ||
+      e.kind === 'story_step_progress' ||
+      e.kind === 'story_step_completed',
+  );
+
+  // Build a story_key → issue_id lookup once so we can enrich every
+  // reference (current story, recent events, etc.) without re-scanning
+  // plan.stories each time.
+  const issueIdByKey = new Map();
+  if (plan && Array.isArray(plan.stories)) {
+    for (const s of plan.stories) {
+      if (s && typeof s.key === 'string' && typeof s.issue_id === 'string' && s.issue_id) {
+        issueIdByKey.set(s.key, s.issue_id);
+      }
+    }
+  }
+
+  // Compute progress stats from plan when available, fall back to
+  // sprint-status if not.
+  const stats = computeProgressStats(plan, persisted);
+  // Issue-tracking coverage: how many stories in the plan have an
+  // issue_id linked. Surfaced only when an issue_tracker is configured —
+  // otherwise the field is meaningless noise.
+  const issueTracking = computeIssueTracking(plan);
+  const filterStory = opts.story || persisted.current_story || null;
+  const currentIssueId = filterStory ? issueIdByKey.get(filterStory) || null : null;
+
+  // current_step falls back to the plan's per-story `current_step` field
+  // (set by markRunning during cmdRecord) when no autopilot session is
+  // running. Lets `autopilot progress --story X` show the last-known
+  // phase even between sessions.
+  let currentStep = persisted.current_bmad_step || null;
+  if (!currentStep && filterStory && plan && Array.isArray(plan.stories)) {
+    const entry = plan.stories.find((s) => s && s.key === filterStory);
+    if (entry && typeof entry.current_step === 'string' && entry.current_step) {
+      currentStep = entry.current_step;
+    }
+  }
+
+  const out = {
+    project_root: projectRoot,
+    plan_present: plan !== null,
+    plan_id: plan ? plan.plan_id : null,
+    issue_tracker: plan ? plan.issue_tracker || null : null,
+    current_story: filterStory,
+    current_step: currentStep,
+    current_issue_id: currentIssueId,
+    sprint_progress: stats,
+    issue_tracking: issueTracking,
+    recent_events: stepEvents.slice(-3).map((e) => {
+      const storyKey = e.detail?.story_key || null;
+      return {
+        seq: e.seq,
+        ts: e.ts,
+        kind: e.kind,
+        story_key: storyKey,
+        step_name: e.detail?.step_name || null,
+        outcome: e.detail?.outcome || null,
+        // v2.3.0 — enrich with issue_id when the plan tracks one for
+        // this story. Null when no plan or no issue_id set.
+        issue_id: storyKey ? issueIdByKey.get(storyKey) || null : null,
+      };
+    }),
+  };
+
+  // If --story is set, also surface that story's plan entry.
+  if (filterStory && plan && Array.isArray(plan.stories)) {
+    const entry = plan.stories.find((s) => s && s.key === filterStory);
+    if (entry) {
+      out.story = {
+        key: entry.key,
+        epic: entry.epic,
+        plan_status: entry.plan_status,
+        current_step: entry.current_step || null,
+        priority: entry.priority,
+        bmad_status: entry.bmad_status,
+        issue_id: entry.issue_id || null,
+        completed_at: entry.completed_at || null,
+      };
+    }
+  }
+
+  if (opts.json) {
+    process.stdout.write(`${JSON.stringify(out, null, 2)}\n`);
+    return 0;
+  }
+
+  // Human-readable rendering (line-append, CI-safe — no ANSI codes).
+  const lines = [];
+  if (!out.plan_present) {
+    lines.push('Sprint plan: (none) — running in sprint-status order');
+  } else {
+    lines.push(`Sprint plan: plan_id=${out.plan_id}`);
+    lines.push(
+      `Progress: ${stats.done}/${stats.total} done` +
+        (stats.skipped > 0 ? ` (${stats.skipped} skipped)` : '') +
+        (stats.excluded > 0 ? `, ${stats.excluded} excluded` : '') +
+        `, ${stats.pending} pending`,
+    );
+    lines.push(`Bar: ${renderProgressBar(stats.done, stats.total)}`);
+    if (issueTracking && issueTracking.provider) {
+      lines.push(
+        `Issue tracking: ${issueTracking.linked}/${issueTracking.total} stories linked to ${issueTracking.provider}` +
+          (issueTracking.project_key ? ` (${issueTracking.project_key})` : ''),
+      );
+    }
+  }
+  if (out.current_story) {
+    const issueBracket = out.current_issue_id ? ` [${out.current_issue_id}]` : '';
+    lines.push(
+      `Current story: ${out.current_story}${issueBracket}` +
+        (out.current_step ? ` (step: ${out.current_step})` : ''),
+    );
+  } else {
+    lines.push('Current story: (none — between stories or idle)');
+  }
+  if (out.recent_events.length > 0) {
+    lines.push('Recent step events:');
+    for (const e of out.recent_events) {
+      const storyLabel = e.story_key
+        ? e.issue_id
+          ? `${e.story_key} [${e.issue_id}]`
+          : e.story_key
+        : '-';
+      lines.push(
+        `  [${e.seq}] ${e.ts.slice(11, 19)} ${e.kind.replace(/^story_/, '')} — ${storyLabel} / ${e.step_name || '-'}` +
+          (e.outcome ? ` (${e.outcome})` : ''),
+      );
+    }
+  }
+  if (out.story) {
+    lines.push('Story detail:');
+    lines.push(`  Key:           ${out.story.key}`);
+    lines.push(`  Epic:          ${out.story.epic ?? '-'}`);
+    lines.push(`  Plan status:   ${out.story.plan_status ?? '-'}`);
+    lines.push(`  Bmad status:   ${out.story.bmad_status ?? '-'}`);
+    lines.push(`  Priority:      ${out.story.priority ?? '-'}`);
+    if (out.story.current_step) {
+      lines.push(`  Current step:  ${out.story.current_step}`);
+    }
+    lines.push(`  Issue ID:      ${out.story.issue_id || '(not set)'}`);
+    if (out.story.completed_at) {
+      lines.push(`  Completed at:  ${out.story.completed_at}`);
+    }
+  }
+  process.stdout.write(`${lines.join('\n')}\n`);
+  return 0;
+}
+
+// Compute issue-tracking coverage: how many of plan.stories[] have a
+// non-empty issue_id field. Returns null when no plan or no
+// issue_tracker is configured (irrelevant signal — skip the line entirely
+// in human output rather than spam zeros).
+function computeIssueTracking(plan) {
+  if (!plan || !Array.isArray(plan.stories) || plan.stories.length === 0) return null;
+  const tracker = plan.issue_tracker;
+  if (!tracker || typeof tracker !== 'object' || !tracker.provider) return null;
+  let linked = 0;
+  for (const s of plan.stories) {
+    if (s && typeof s.issue_id === 'string' && s.issue_id) linked += 1;
+  }
+  return {
+    provider: tracker.provider,
+    project_key: tracker.project_key || null,
+    base_url: tracker.base_url || null,
+    total: plan.stories.length,
+    linked,
+    coverage: plan.stories.length > 0 ? Math.round((linked / plan.stories.length) * 100) : 0,
+  };
+}
+
+// Compute aggregate sprint progress from the plan (preferred) or fall
+// back to sprint-status counts. Returns counts keyed by plan_status.
+function computeProgressStats(plan, persisted) {
+  if (plan && Array.isArray(plan.stories) && plan.stories.length > 0) {
+    let done = 0;
+    let pending = 0;
+    let skipped = 0;
+    let excluded = 0;
+    for (const s of plan.stories) {
+      if (!s) continue;
+      if (s.plan_status === 'done') done += 1;
+      else if (s.plan_status === 'skipped') skipped += 1;
+      else if (s.plan_status === 'excluded') excluded += 1;
+      else pending += 1;
+    }
+    return {
+      total: plan.stories.length,
+      done,
+      pending,
+      skipped,
+      excluded,
+      source: 'plan',
+    };
+  }
+  // Fallback: sprint-status. We already have persisted.story_queue length
+  // as a soft proxy for pending; sprint-status itself drives the count.
+  return {
+    total: null,
+    done: null,
+    pending: Array.isArray(persisted.story_queue) ? persisted.story_queue.length : null,
+    skipped: null,
+    excluded: null,
+    source: 'sprint-status',
+  };
+}
+
+function renderProgressBar(done, total) {
+  if (!total || total <= 0) return '(no plan stories)';
+  const width = 30;
+  const filled = Math.min(width, Math.max(0, Math.round((done / total) * width)));
+  return `[${'='.repeat(filled)}${' '.repeat(width - filled)}] ${Math.round((done / total) * 100)}%`;
+}
+
 // ------------------------------------------------------------ main
 
 function main(argv) {
-  const { opts, positional } = parseArgs(argv, { booleanFlags: ['help', 'force'] });
+  const { opts, positional } = parseArgs(argv, {
+    booleanFlags: ['help', 'force', 'accept-divergence', 'no-auto-plan', 'json', 'once'],
+  });
   if (opts.help) {
     help();
     return 0;
@@ -1848,6 +2532,8 @@ function main(argv) {
         return cmdValidateConfig(opts);
       case 'status':
         return cmdStatus(opts);
+      case 'progress':
+        return cmdProgress(opts);
       default:
         return 2;
     }

@@ -18,10 +18,24 @@ autopilot:
   coalesce_state_writes: true      # M3, PR 6 — batch non-critical writes, flush at story boundary
   conditional_boot_work: true      # M4, PR 7 — skip health-check + branch reconciliation on a clean repo
   cache_shared_reads: true         # M5, PR 8 — memoize sprint-status / git-status / decision-log reads per loop iteration
-  # 2.0.2 — autopilot session infers inter-story DAG once after bmad-sprint-planning
-  # and writes _Sprintpilot/sprints/dependencies.yaml. Hand-authored sidecars
-  # (no AUTO-INFERRED marker) are detected and respected.
-  auto_infer_dependencies: true
+  # 2.0.2 — original dependency-inference knob. Pre-v2.3.0 this triggered
+  # an LLM-driven inference pass once after bmad-sprint-planning and wrote
+  # `_Sprintpilot/sprints/dependencies.yaml`. v2.3.0 replaces that flow:
+  #   - The plan now lives at `_bmad-output/implementation-artifacts/sprint-plan.yaml`.
+  #   - Inference is opt-in via /sprintpilot-plan-sprint, NOT automatic.
+  #   - Greenfield runs (no plan, no --stories/--epic) execute stories in
+  #     sprint-status order — same as today's resolveNextStoryKey path.
+  # Default flipped to false; users who relied on the old behavior should
+  # set `autopilot.auto_plan_on_start: true` (see below).
+  auto_infer_dependencies: false
+
+  # v2.3.0 — when true, cmdStart emits an `invoke_skill` action for
+  # /sprintpilot-plan-sprint on first run if no sprint-plan.yaml exists.
+  # Default `false`: missing plan → fall back to sprint-status order
+  # (existing behavior). Once a plan exists, staleness is detected and
+  # re-derive runs automatically regardless of this knob — flipping back
+  # to false is a one-shot opt-out for net-new projects only.
+  auto_plan_on_start: false
 
 git:
   granularity: story               # story | epic

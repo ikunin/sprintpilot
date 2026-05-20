@@ -18,6 +18,34 @@ const userCommandApplier = require('./user-command-applier');
 // Threshold for `consecutive_test_failures` — workflow.md:81 says 3.
 const CONSECUTIVE_TEST_FAILURE_THRESHOLD = 3;
 
+// Threshold for the verify-loop diagnostic: when the SAME verify issues
+// repeat this many times in a row, the budget-exhausted halt prompt
+// enriches itself with a loop-detection hint (vs. a generic "rejected N
+// times" message). 3 matches verify_reject_budget for medium/large/legacy
+// profiles, so by the time the budget halts, the diagnostic is guaranteed
+// to fire if and only if the rejections were genuinely identical.
+const VERIFY_LOOP_THRESHOLD = 3;
+
+// Stable, order-independent signature of a verify issues array.
+// We compare via sorted JSON so two arrays with the same strings in
+// different order hash to the same signature (the verifier may reorder
+// internally across runs). Returns null for empty or non-array input.
+function verifyIssuesSignature(issues) {
+  if (!Array.isArray(issues) || issues.length === 0) return null;
+  // Coerce to strings, trim whitespace, then sort. The trim guards
+  // against the verifier accidentally producing trailing whitespace
+  // on one run but not another — without it, "branch required" and
+  // "branch required " would hash differently and silently break the
+  // loop detection. Trim is safe: leading/trailing whitespace in a
+  // verify-issue string is never load-bearing.
+  const strs = issues
+    .map((i) => (typeof i === 'string' ? i : JSON.stringify(i)))
+    .map((s) => s.trim())
+    .slice()
+    .sort();
+  return JSON.stringify(strs);
+}
+
 // Valid signal statuses.
 const SIGNAL_STATUSES = [
   'success',
@@ -73,28 +101,69 @@ function handleSuccess(state, signal, profile, verifyResult, sideEffects) {
   // Trust boundary: verify.js may reject what the LLM claims as success.
   if (verifyResult && verifyResult.ok === false) {
     const rejectCount = (state.verify_reject_count || 0) + 1;
+
+    // Loop detection: compare the current issues signature against the
+    // last one. Identical sets in a row → the LLM is retrying with the
+    // same broken signal. This drives the enriched halt prompt below.
+    const currentSig = verifyIssuesSignature(verifyResult.issues || []);
+    const lastSig = state.last_verify_issues_signature || null;
+    const identicalCount =
+      currentSig !== null && currentSig === lastSig
+        ? (state.consecutive_identical_rejections || 0) + 1
+        : 1;
+
     sideEffects.push({
       kind: 'log_verify_rejection',
       phase: state.phase,
       issues: verifyResult.issues || [],
       consecutive: rejectCount,
+      consecutive_identical: identicalCount,
     });
+
+    const stateWithLoopTrackers = {
+      ...state,
+      last_verify_issues_signature: currentSig,
+      consecutive_identical_rejections: identicalCount,
+    };
+
     if (rejectCount >= profile.verify_reject_budget) {
+      // Enriched diagnostic when the same issues recurred. Picks 2 as
+      // the threshold for the hint (vs. 3 for a "strong loop") because
+      // at budget exhaustion the minimum interesting case is 2 identical
+      // rejections in a row; we want the hint to fire whenever the LLM
+      // demonstrably wasn't iterating its signal between attempts.
+      const issueCount = verifyResult.issues?.length || 0;
+      const issuePlural = issueCount === 1 ? 'issue' : 'issues';
+      const timePlural = identicalCount === 1 ? 'time' : 'times';
+      const loopHint =
+        identicalCount >= 2
+          ? `\n\n⚠ Verify rejected the SAME ${issueCount} ${issuePlural} ${identicalCount} ${timePlural} in a row — this is a loop, not random noise. ` +
+            `The LLM is re-sending an identical broken signal each retry. ` +
+            `Action: read each issue text below and fix the underlying cause (e.g., if "git_steps_completed must be true — skipping git push is the most common cause", verify your git_op action actually ran \`git push\` to exit 0); don't just retry the same signal.`
+          : '';
       return {
-        newState: { ...state, verify_reject_count: 0 },
+        newState: {
+          ...stateWithLoopTrackers,
+          verify_reject_count: 0,
+          last_verify_issues_signature: null,
+          consecutive_identical_rejections: 0,
+        },
         newProfile: profile,
         nextAction: {
           type: 'user_prompt',
           phase: state.phase,
           reason: 'verify_reject_budget_exceeded',
-          prompt: `verify.js rejected ${rejectCount} consecutive success signals on ${state.phase}. Last issues: ${JSON.stringify(verifyResult.issues || [])}`,
+          prompt:
+            `verify.js rejected ${rejectCount} consecutive success signals on ${state.phase}. ` +
+            `Last issues: ${JSON.stringify(verifyResult.issues || [])}${loopHint}`,
+          consecutive_identical: identicalCount,
         },
         sideEffects,
         verdict: 'prompted',
       };
     }
     return {
-      newState: { ...state, verify_reject_count: rejectCount },
+      newState: { ...stateWithLoopTrackers, verify_reject_count: rejectCount },
       newProfile: profile,
       // Retry the same phase. adapt's caller will re-run nextAction(state, profile).
       nextAction: nextAction(state, profile),
@@ -496,7 +565,17 @@ function handleVerifyOverride(state, signal, profile, verifyResult, sideEffects)
 // clears patch_findings when leaving step 6; resets per-story counters when
 // starting a new story.
 function advanceState(state, profile, newPhase, signal) {
-  const next = { ...state, phase: newPhase, retry_count_this_phase: 0, verify_reject_count: 0 };
+  const next = {
+    ...state,
+    phase: newPhase,
+    retry_count_this_phase: 0,
+    verify_reject_count: 0,
+    // v2.3.0 — phase transition clears verify-loop trackers so the next
+    // phase starts fresh. Without this a stale signature from the prior
+    // phase could artificially inflate identicalCount on the next reject.
+    last_verify_issues_signature: null,
+    consecutive_identical_rejections: 0,
+  };
   // Advancing forward clears the prior diagnosis (the LLM resolved it).
   next.prior_diagnosis = null;
 
@@ -623,5 +702,7 @@ module.exports = {
   interpretSignal,
   advanceState,
   CONSECUTIVE_TEST_FAILURE_THRESHOLD,
+  VERIFY_LOOP_THRESHOLD,
   SIGNAL_STATUSES,
+  verifyIssuesSignature,
 };

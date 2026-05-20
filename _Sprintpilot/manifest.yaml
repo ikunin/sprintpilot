@@ -24,3 +24,6 @@ addon:
     - sprintpilot-migrate
     - sprintpilot-research
     - sprintpilot-party-mode
+    - sprintpilot-plan-sprint
+    - sprintpilot-sprint-progress
+    - sprintpilot-dependency-graph

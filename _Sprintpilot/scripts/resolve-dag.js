@@ -2,19 +2,27 @@
 
 // resolve-dag.js — build the story execution DAG for a sprint.
 //
+// As of v2.3.0 the authoritative dependency source is sprint-plan.yaml
+// (managed by sprint-plan.js). The legacy `_Sprintpilot/sprints/dependencies.yaml`
+// file is no longer read — users with that file must run
+// `infer-dependencies.js migrate` to copy its content into the new plan.
+//
 // Usage:
 //   resolve-dag.js graph   [--epic <id>] [--project-root <path>] [--strategy <list>]
 //   resolve-dag.js layers  [--epic <id>] [--project-root <path>] [--strategy <list>]
 //   resolve-dag.js width   [--epic <id>] [--project-root <path>] [--strategy <list>]
-//   resolve-dag.js scaffold --epic <id> [--project-root <path>] [--force]
 //
 // Strategies (default order: explicit,ordering):
-//   explicit  — read _Sprintpilot/sprints/dependencies.yaml
+//   explicit  — read sprint-plan.yaml (dependencies, cross_epic_deps, overrides)
 //   ordering  — linear chain from sprint-status.yaml order (safe default)
-//   files     — (TODO in PR 9.1) infer edges from shared file-path touches
+//   files     — (TODO) infer edges from shared file-path touches
 //
 // Conflict resolution when multiple strategies contribute: explicit > files > ordering.
-// Missing dependencies.yaml is fine; we fall back to the next strategy.
+// Missing sprint-plan.yaml is fine; we fall back to the next strategy.
+//
+// Cross-epic edges from `plan.cross_epic_deps` are included only when the
+// command runs sprint-wide (no `--epic`). With `--epic <id>` we filter out
+// any edge whose `from_story` or `to_story` does not belong to <id>.
 //
 // Output:
 //   graph   { "nodes": [...], "edges": [ ["a","b"], ... ], "epic": "1" }
@@ -26,16 +34,28 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const { spawnSync } = require('node:child_process');
 
 const { parseArgs } = require('../lib/runtime/args');
 const log = require('../lib/runtime/log');
-const shardMod = require('./state-shard.js');
-
-const { yamlLoad, yamlDump } = shardMod;
+const sprintPlanMod = require('./sprint-plan.js');
 
 const DEFAULT_STRATEGIES = ['explicit', 'ordering'];
 const VALID_STRATEGIES = ['explicit', 'ordering', 'files'];
-const VALID_COMMANDS = ['graph', 'layers', 'width', 'scaffold'];
+const VALID_COMMANDS = ['graph', 'layers', 'width', 'render'];
+const VALID_RENDER_FORMATS = ['mermaid', 'graphviz'];
+
+const { read: readPlan } = sprintPlanMod;
+
+// Mermaid + graphviz color palette per plan_status. Greens/grays/yellows
+// chosen for grayscale legibility and adequate color-blind contrast; tests
+// also assert the hex values so changes here are intentional.
+const STATUS_COLORS = {
+  pending: { fill: '#7dd87d', text: '#000' },
+  done: { fill: '#888888', text: '#ffffff' },
+  skipped: { fill: '#e8e864', text: '#000' },
+  excluded: { fill: '#444444', text: '#aaa' },
+};
 
 function help() {
   log.out(
@@ -44,9 +64,14 @@ function help() {
       '  resolve-dag.js graph   [--epic <id>] [--strategy explicit,ordering]',
       '  resolve-dag.js layers  [--epic <id>] [--strategy explicit,ordering]',
       '  resolve-dag.js width   [--epic <id>] [--strategy explicit,ordering]',
-      '  resolve-dag.js scaffold --epic <id> [--force]',
+      '  resolve-dag.js render  [--format mermaid|graphviz] [--output <path>] [--epic <id>]',
       '',
-      'Strategies: explicit | ordering | files (opt-in)',
+      'Strategies: explicit | ordering | files (opt-in, TODO)',
+      'Render formats: mermaid (default, GitHub-renderable) | graphviz (requires `dot`)',
+      'Default output: _bmad-output/implementation-artifacts/sprint-plan-dag.{mmd,dot}',
+      '',
+      'Reads sprint-plan.yaml for explicit dependencies. Use',
+      '`infer-dependencies.js migrate` if you have a legacy dependencies.yaml.',
     ].join('\n'),
   );
 }
@@ -59,6 +84,8 @@ function sprintStatusPath(projectRoot) {
   return path.join(projectRoot, '_bmad-output', 'implementation-artifacts', 'sprint-status.yaml');
 }
 
+// Legacy path — retained for the one-shot `infer-dependencies.js migrate`
+// flow. Reads MUST NOT route here; resolve-dag goes through sprint-plan.yaml.
 function dependenciesPath(projectRoot) {
   return path.join(projectRoot, '_Sprintpilot', 'sprints', 'dependencies.yaml');
 }
@@ -68,11 +95,6 @@ function parseEpicFromKey(storyKey) {
   // canonical convention is `<epic-num>-<story-num>-<slug>` (e.g.
   // `1-2-user-auth` → epic "1"), but nothing prevents a project from
   // using non-numeric epic identifiers (`auth-1-login`, `infra-bootstrap`).
-  // Pre-2.0.8 this function rejected any non-numeric prefix and returned
-  // null, which silently dropped stories from `--epic` filtering AND let
-  // `infer-dependencies.js` cross-epic edge guards bypass for keys with
-  // no numeric prefix. We now accept any non-empty alphanumeric leading
-  // segment.
   const s = String(storyKey);
   if (!s) return null;
   const m = s.match(/^([A-Za-z0-9]+)(?:-|$)/);
@@ -87,12 +109,6 @@ function readStoriesFromStatus(projectRoot, epicFilter) {
   // `development_status:` (BMad's canonical shape) and under `stories:`
   // (alternate shape some projects use). We intentionally don't parse the
   // whole YAML — sprint-status is BMad-owned and its schema varies.
-  //
-  // Pre-2.0.8 this hardcoded a 2-space indent. A 4-space or tab-indented
-  // file silently produced zero stories → empty layer → dispatch never
-  // engaged, no warning. Now we detect the FIRST key's indent inside
-  // each stories block and accept only that level (so nested per-story
-  // fields at deeper indents are still correctly excluded).
   const ordered = [];
   const byKey = {};
   const lines = raw.split(/\r?\n/);
@@ -128,195 +144,26 @@ function readStoriesFromStatus(projectRoot, epicFilter) {
   return { ordered, byKey };
 }
 
+// Read the dependencies section of sprint-plan.yaml. Returns a "depsDoc"
+// shape compatible with edgesFromExplicit / applyForceIndependent:
+//   { stories: { <key>: { depends_on, rationale } }, overrides, cross_epic_deps }
+// Returns null if no plan exists OR the plan is corrupt. The strategy
+// layer treats null as "no explicit edges" and falls through to ordering.
 function readDependencies(projectRoot) {
-  const file = dependenciesPath(projectRoot);
-  if (!fs.existsSync(file)) return null;
-  const raw = fs.readFileSync(file, 'utf8');
-  try {
-    return parseDependenciesYaml(raw);
-  } catch (e) {
-    log.warn(`failed to parse ${file}: ${e.message}`);
+  const result = readPlan({ projectRoot });
+  if (result === null) return null;
+  if (result && typeof result === 'object' && 'error' in result) {
+    log.warn(`sprint-plan.yaml unreadable (${result.error}): ${result.message}`);
     return null;
   }
-}
-
-// Purpose-built YAML parser for dependencies.yaml. Supports the hand-
-// authored shape from the PR 9 plan: nested objects, block-form lists
-// (`- item` and `- key: value`), and flow-form arrays (`["a","b"]`) on
-// the value side of a key. Deliberately narrower than a full YAML impl
-// to keep the script dep-free in user projects.
-//
-// Design:
-//   One stack frame per "open container" (root + any parent whose
-//   pendingKey value is an in-progress object or list). pendingKey names
-//   the last key assigned in this container.
-//
-//   On a deeper-indent line, if top.pendingKey is set AND points at an
-//   object/list that hasn't been "closed" yet, we descend into it by
-//   pushing a new frame whose container is top.container[pendingKey].
-//
-//   List items attach to the current frame's pendingKey: promote the
-//   container[pendingKey] from {} to [] on first list item.
-function parseDependenciesYaml(text) {
-  const lines = text.split(/\r?\n/);
-  const root = {};
-  const stack = [{ indent: -1, container: root, pendingKey: null, pendingKeyIndent: -1 }];
-
-  const parseScalar = (raw) => {
-    if (raw === '' || raw === 'null' || raw === '~') return null;
-    if (raw === 'true') return true;
-    if (raw === 'false') return false;
-    if (raw === '[]') return [];
-    if (raw === '{}') return {};
-    if (raw.startsWith('[') || raw.startsWith('{')) {
-      try {
-        return JSON.parse(raw);
-      } catch {
-        return raw;
-      }
-    }
-    if ((raw.startsWith('"') && raw.endsWith('"')) || (raw.startsWith("'") && raw.endsWith("'"))) {
-      try {
-        return raw.startsWith('"') ? JSON.parse(raw) : raw.slice(1, -1);
-      } catch {
-        return raw.slice(1, -1);
-      }
-    }
-    if (/^-?\d+$/.test(raw)) return Number.parseInt(raw, 10);
-    if (/^-?\d+\.\d+$/.test(raw)) return Number.parseFloat(raw);
-    return raw;
+  return {
+    stories:
+      result.dependencies && typeof result.dependencies.stories === 'object'
+        ? result.dependencies.stories
+        : {},
+    overrides: Array.isArray(result.overrides) ? result.overrides : [],
+    cross_epic_deps: Array.isArray(result.cross_epic_deps) ? result.cross_epic_deps : [],
   };
-
-  const descendIfDeeper = (indent) => {
-    // Descend into top.pendingKey's value iff this line is strictly deeper
-    // than the line that assigned the pendingKey. Using top.indent here is
-    // wrong — a freshly-popped sibling at the same logical depth would be
-    // incorrectly absorbed as a child. pendingKeyIndent tracks where the
-    // pendingKey was assigned; only indents past that are true descendants.
-    const top = stack[stack.length - 1];
-    if (top.pendingKey === null) return;
-    if (indent <= top.pendingKeyIndent) return;
-    const child = top.container[top.pendingKey];
-    if (!child || typeof child !== 'object') return;
-    stack.push({ indent, container: child, pendingKey: null, pendingKeyIndent: -1 });
-  };
-
-  for (const rawLine of lines) {
-    const hashIdx = rawLine.indexOf('#');
-    let line = rawLine;
-    if (hashIdx !== -1) {
-      if (hashIdx === 0 || /\s/.test(rawLine[hashIdx - 1])) line = rawLine.slice(0, hashIdx);
-    }
-    const trimRight = line.replace(/\s+$/, '');
-    if (!trimRight.trim()) continue;
-    const indent = (trimRight.match(/^( *)/) || ['', ''])[1].length;
-    const rest = trimRight.slice(indent);
-
-    // Pop frames we've outdented past. List-item frames (fromListItem) are
-    // kept while `indent == top.indent` — the list-item's inline key and
-    // any sibling keys share the same indent and all belong to that entry.
-    while (stack.length > 1) {
-      const t = stack[stack.length - 1];
-      const strict = t.fromListItem ? t.indent > indent : t.indent >= indent;
-      if (!strict) break;
-      stack.pop();
-    }
-
-    if (rest.startsWith('- ') || rest === '-') {
-      // List item attaches to current frame's pendingKey.
-      const owner = stack[stack.length - 1];
-      const key = owner.pendingKey;
-      if (!key) continue; // malformed — list item with no owner key
-      if (!Array.isArray(owner.container[key])) owner.container[key] = [];
-      const arr = owner.container[key];
-      const content = rest === '-' ? '' : rest.slice(2).trim();
-      const colon = findTopLevelColon(content);
-      if (content === '') {
-        arr.push(null);
-      } else if (colon === -1) {
-        arr.push(parseScalar(content));
-      } else {
-        // Inline mapping: "- k: v" or "- k:" starts a new object item.
-        const k = unquoteKey(content.slice(0, colon).trim());
-        const v = content.slice(colon + 1).trim();
-        const item = {};
-        arr.push(item);
-        if (v === '' || v === '~') {
-          item[k] = {};
-        } else {
-          item[k] = parseScalar(v);
-        }
-        // Subsequent deeper-indent lines that describe this item start at
-        // indent + 2 (after "- "). Push a frame at indent + 2 whose
-        // container is the new item, with pendingKey = k.
-        // `fromListItem` tells the pop rule that sibling keys at the same
-        // indent are continuations of this list entry, not outdent siblings.
-        stack.push({
-          indent: indent + 2,
-          container: item,
-          pendingKey: k,
-          pendingKeyIndent: indent + 2,
-          fromListItem: true,
-        });
-      }
-      continue;
-    }
-
-    // Plain `key: value` line. First descend if we're in a deeper block
-    // than the top frame and top has a pendingKey container.
-    descendIfDeeper(indent);
-    const top = stack[stack.length - 1];
-    const colon = findTopLevelColon(rest);
-    if (colon === -1) continue;
-    const key = unquoteKey(rest.slice(0, colon).trim());
-    const value = rest.slice(colon + 1).trim();
-    if (value === '' || value === '~') {
-      top.container[key] = {};
-      top.pendingKey = key;
-      top.pendingKeyIndent = indent;
-    } else if (value === '[]') {
-      top.container[key] = [];
-      top.pendingKey = key;
-      top.pendingKeyIndent = indent;
-    } else {
-      top.container[key] = parseScalar(value);
-      top.pendingKey = key;
-      top.pendingKeyIndent = indent;
-    }
-  }
-  return root;
-}
-
-function unquoteKey(k) {
-  if ((k.startsWith('"') && k.endsWith('"')) || (k.startsWith("'") && k.endsWith("'"))) {
-    try {
-      return k.startsWith('"') ? JSON.parse(k) : k.slice(1, -1);
-    } catch {
-      return k.slice(1, -1);
-    }
-  }
-  return k;
-}
-
-function findTopLevelColon(s) {
-  let quote = null;
-  for (let i = 0; i < s.length; i++) {
-    const c = s[i];
-    if (quote) {
-      if (c === '\\') {
-        i++;
-        continue;
-      }
-      if (c === quote) quote = null;
-      continue;
-    }
-    if (c === '"' || c === "'") {
-      quote = c;
-      continue;
-    }
-    if (c === ':') return i;
-  }
-  return -1;
 }
 
 // ------------------------------------------------------------------
@@ -343,10 +190,6 @@ function edgesFromExplicit(depsDoc, nodes) {
     for (const ov of depsDoc.overrides) {
       if (!ov) continue;
       if (Array.isArray(ov.force_sequential)) {
-        // Filter to known nodes AND dedupe — a duplicate listing like
-        // `[a, b, a]` would otherwise produce edges `a→b, b→a` (instant
-        // self-cycle) that Kahn's would later reject with an opaque
-        // "cycle detected" error. Reject the typo at the source instead.
         const seen = new Set();
         const seq = [];
         for (const k of ov.force_sequential) {
@@ -361,6 +204,25 @@ function edgesFromExplicit(depsDoc, nodes) {
         for (let i = 1; i < seq.length; i++) out.push([seq[i - 1], seq[i]]);
       }
     }
+  }
+  return out;
+}
+
+// Cross-epic edges live in plan.cross_epic_deps as { from_story, to_story,
+// rationale, ... }. Convention: from_story → to_story means "from depends
+// on to" (same direction as per-epic depends_on). Edge tuple emitted is
+// `[to, from]` so it flows as "to runs before from" in topo order.
+function edgesFromCrossEpic(depsDoc, nodes) {
+  if (!depsDoc || !Array.isArray(depsDoc.cross_epic_deps)) return [];
+  const out = [];
+  const nodeSet = new Set(nodes);
+  for (const edge of depsDoc.cross_epic_deps) {
+    if (!edge) continue;
+    const from = edge.from_story;
+    const to = edge.to_story;
+    if (typeof from !== 'string' || typeof to !== 'string') continue;
+    if (!nodeSet.has(from) || !nodeSet.has(to)) continue;
+    out.push([to, from]);
   }
   return out;
 }
@@ -382,32 +244,31 @@ function applyForceIndependent(edges, depsDoc) {
   if (indep.size === 0) return edges;
   // Drop INBOUND edges only — `force_independent: [b]` means "let b run
   // any time, regardless of its declared deps", not "let everything that
-  // depends on b also run any time". Pre-2.0.8 this stripped both
-  // directions, so a story c with `depends_on: [b]` would lose its edge
-  // and become a free root, then dispatch in the same layer as b — the
-  // exact merge-conflict scenario the override was supposed to control.
+  // depends on b also run any time".
   return edges.filter(([_a, b]) => !indep.has(b));
 }
 
-function buildEdges(strategies, nodes, depsDoc) {
+function buildEdges(strategies, nodes, depsDoc, { includeCrossEpic = false } = {}) {
   // explicit > ordering. Dedupe while preserving priority insertion order.
   const seen = new Set();
   const out = [];
   const pushEdges = (edges) => {
     for (const [a, b] of edges) {
-      const key = `${a} ${b}`;
+      const key = `${a} ${b}`;
       if (seen.has(key)) continue;
       seen.add(key);
       out.push([a, b]);
     }
   };
   for (const strat of strategies) {
-    if (strat === 'explicit') pushEdges(edgesFromExplicit(depsDoc, nodes));
-    else if (strat === 'ordering') pushEdges(edgesFromOrdering(nodes));
-    else if (strat === 'files') {
-      // files strategy is opt-in and not implemented in the PR 9 scope.
-      // A future sprintpilot-infer-dependencies skill can populate the
-      // explicit sidecar instead.
+    if (strat === 'explicit') {
+      pushEdges(edgesFromExplicit(depsDoc, nodes));
+      if (includeCrossEpic) pushEdges(edgesFromCrossEpic(depsDoc, nodes));
+    } else if (strat === 'ordering') {
+      pushEdges(edgesFromOrdering(nodes));
+    } else if (strat === 'files') {
+      // files strategy opt-in, not implemented yet — a future
+      // sprintpilot-infer-dependencies skill populates the explicit sidecar.
     }
   }
   // Respect force_independent last so it removes matches from both strategies.
@@ -473,62 +334,358 @@ function buildDag({ projectRoot, epic, strategies }) {
     return { nodes: [], edges: [], layers: [], width: 0, cycle: [], epic };
   }
   const depsDoc = readDependencies(projectRoot);
-  const edges = buildEdges(strategies, ordered, depsDoc);
+  // Cross-epic edges flow into the graph only when the caller is looking at
+  // the whole sprint. Per-epic queries see only intra-epic edges.
+  const includeCrossEpic = epic === null;
+  const edges = buildEdges(strategies, ordered, depsDoc, { includeCrossEpic });
   const { layers, cycle } = topoLayers(ordered, edges);
   const width = layers.reduce((m, l) => Math.max(m, l.length), 0);
   return { nodes: ordered, edges, layers, width, cycle, epic };
 }
 
-function scaffoldDependenciesYaml(projectRoot, epic, { force = false } = {}) {
-  const file = dependenciesPath(projectRoot);
-  if (fs.existsSync(file) && !force) {
-    return { wrote: false, reason: 'exists', file };
-  }
-  const { ordered } = readStoriesFromStatus(projectRoot, epic);
-  if (ordered.length === 0) {
-    return { wrote: false, reason: 'no-stories', file };
-  }
-  const doc = {
-    version: 1,
-    stories: {},
-    overrides: [
-      {
-        epic: epic || 'unknown',
-        force_independent: [],
-        force_sequential: [],
-      },
-    ],
-    epics: {},
-  };
-  // Linear chain by default.
-  for (let i = 0; i < ordered.length; i++) {
-    doc.stories[ordered[i]] = { depends_on: i === 0 ? [] : [ordered[i - 1]] };
-  }
-  doc.epics[epic || 'unknown'] = { independent: false };
+// ------------------------------------------------------------------
+// Render
+// ------------------------------------------------------------------
 
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  const header = [
-    '# Sprintpilot dependency sidecar.',
-    '# Authoritative input to resolve-dag.js for parallel execution (PR 11+).',
-    '# BMad never reads this file — it is Sprintpilot-owned.',
-    '#',
-    '# Schema:',
-    '#   stories.<key>.depends_on: [<key>, ...]   — edges: dep → key',
-    '#   overrides[*].force_sequential: [...]     — serialize listed keys',
-    '#   overrides[*].force_independent: [...]    — drop inbound edges on listed keys',
-    '#   epics.<id>.independent: true             — enable cross-epic parallelism (PR 12)',
-    '#',
-    '# Safe starting point: a linear chain (below). Uncomment force_independent',
-    '# entries to unlock parallel layers.',
-    '',
-  ].join('\n');
-  const body = header + yamlDump(doc) + '\n';
-  fs.writeFileSync(file, body);
-  return { wrote: true, file };
+// Build a node → plan_status map from plan.stories[]. Stories absent from
+// the plan default to 'pending' so rendering works even on plans the skill
+// hasn't fully populated (Phase 0 — plan.stories is typically []).
+function planStatusByKey(plan) {
+  const map = new Map();
+  if (plan && Array.isArray(plan.stories)) {
+    for (const s of plan.stories) {
+      if (s && typeof s.key === 'string') {
+        const status = ['pending', 'done', 'skipped', 'excluded'].includes(s.plan_status)
+          ? s.plan_status
+          : 'pending';
+        map.set(s.key, status);
+      }
+    }
+  }
+  return map;
+}
+
+// Build a story_key → issue_id map. Returns only entries with non-empty
+// issue_id strings; absent or null values are silently skipped (the
+// renderer uses the story key as-is when no entry exists). Lets the
+// renderer prefix labels with the tracker ID for at-a-glance
+// cross-reference back to Jira / Linear / GitHub / GitLab tickets.
+function issueIdByStoryKey(plan) {
+  const map = new Map();
+  if (plan && Array.isArray(plan.stories)) {
+    for (const s of plan.stories) {
+      if (s && typeof s.key === 'string' && typeof s.issue_id === 'string' && s.issue_id) {
+        map.set(s.key, s.issue_id);
+      }
+    }
+  }
+  return map;
+}
+
+// Build an epic_id → issue_id map for the epic subgraph labels.
+// Epic ids are stored as strings in plan.epics[].id — accept both
+// strings and numbers for robustness against hand-edited plans.
+function issueIdByEpicId(plan) {
+  const map = new Map();
+  if (plan && Array.isArray(plan.epics)) {
+    for (const e of plan.epics) {
+      if (e && (typeof e.id === 'string' || typeof e.id === 'number') &&
+          typeof e.issue_id === 'string' && e.issue_id) {
+        map.set(String(e.id), e.issue_id);
+      }
+    }
+  }
+  return map;
+}
+
+// Compose the visual label for a story node. Returns "<issue_id>: <key>"
+// when an issue is tracked, otherwise just the key. Pure formatter so
+// mermaid + graphviz can share the same convention.
+function composeStoryLabel(storyKey, issueIdMap) {
+  const issueId = issueIdMap.get(storyKey);
+  return issueId ? `${issueId}: ${storyKey}` : storyKey;
+}
+
+function composeEpicLabel(epicId, issueIdMap) {
+  const issueId = issueIdMap.get(String(epicId));
+  return issueId ? `${issueId}: Epic ${epicId}` : `Epic ${epicId}`;
+}
+
+// Bucket the resolved edges into intra-epic vs cross-epic. We re-derive
+// "is cross-epic" by inspecting node prefixes — the buildEdges output
+// loses provenance, so we restitch from epic membership at render time.
+function bucketEdges(edges) {
+  const intra = [];
+  const cross = [];
+  for (const [a, b] of edges) {
+    const epicA = parseEpicFromKey(a);
+    const epicB = parseEpicFromKey(b);
+    if (epicA !== null && epicB !== null && epicA !== epicB) cross.push([a, b]);
+    else intra.push([a, b]);
+  }
+  return { intra, cross };
+}
+
+// Mermaid escaping: replace characters that would break flowchart syntax.
+// We use the [Label] form for node labels which tolerates most characters
+// once double-quoted — BUT several characters still break parsing:
+//   - `]` `[` `(` `)` `<` `>` — mermaid scans for matching brackets
+//   - `|` — link label syntax (A -->|label| B)
+//   - `;` — sometimes used as statement separator
+//   - `&` — start of HTML entity (avoid raw `&` to keep entities atomic)
+//   - newlines — must use `<br>` tag for explicit line break
+//   - ASCII control chars (\x00–\x1f) — undefined rendering behavior
+//   - Unicode RTL/LRM marks (U+202A–U+202E, U+2066–U+2069, U+061C) —
+//     can visually reorder labels in confusing ways
+//
+// Story keys are pre-validated via STORY_KEY_RE (/^[A-Za-z0-9._-]{1,64}$/)
+// so they're already safe; the attack surface is issue_id (free-text
+// captured during the planning skill's Step 7) which composeStoryLabel
+// concatenates into the label. Escape defensively here so any future
+// label source is also safe, AND hand-edited plans don't corrupt
+// rendering (defense in depth — setIssueId also validates).
+// Single-pass escape map. Each input character is matched ONCE by the
+// regex below and replaced with the entity-encoded form. Output
+// characters (the entity strings themselves) are never re-processed,
+// which avoids the double-encoding trap a multi-pass .replace() chain
+// would hit (e.g., `&amp;` → `&amp;amp;` if `&` is escaped twice).
+const MERMAID_ESCAPE_MAP = {
+  '\\': '&#92;',
+  '"': '&quot;',
+  '&': '&amp;',
+  ';': '&#59;',
+  ']': '&#93;',
+  '[': '&#91;',
+  '(': '&#40;',
+  ')': '&#41;',
+  '<': '&lt;',
+  '>': '&gt;',
+  '|': '&#124;',
+  '\n': '<br>',
+};
+const MERMAID_ESCAPE_CHARS = /[\\"&;\]\[()<>|\n]/g;
+// ASCII control chars (except \n which we map to <br> above) + DEL.
+const STRIP_CONTROL = /[\x00-\x09\x0b-\x1f\x7f]/g;
+// Unicode bidi-override / isolate / embedding marks. These can reorder
+// the visual presentation of a label in confusing ways even when the
+// underlying codepoints are benign — strip them entirely.
+const STRIP_BIDI = /[‪-‮⁦-⁩؜]/g;
+
+function mermaidEscapeLabel(s) {
+  return (
+    String(s)
+      // Strip carriage returns first so the \n → <br> mapping below
+      // doesn't double-emit <br> on \r\n inputs.
+      .replace(/\r/g, '')
+      // Single-pass entity-encode of all chars that have mermaid-syntax
+      // meaning. The replacement function runs ONCE per matched char;
+      // the entity output is opaque to the regex.
+      .replace(MERMAID_ESCAPE_CHARS, (c) => MERMAID_ESCAPE_MAP[c])
+      .replace(STRIP_CONTROL, '')
+      .replace(STRIP_BIDI, '')
+  );
+}
+
+function renderMermaid(dag, plan) {
+  const statusByKey = planStatusByKey(plan);
+  const storyIssueIds = issueIdByStoryKey(plan);
+  const epicIssueIds = issueIdByEpicId(plan);
+  const { intra, cross } = bucketEdges(dag.edges);
+  const lines = [];
+  lines.push(`%% plan-id: ${plan?.plan_id ?? 'unknown'}`);
+  lines.push(`%% generated: ${plan?.generated ?? new Date().toISOString()}`);
+  lines.push('%% Sprint plan DAG — node fill encodes plan_status; cross-epic edges are dashed.');
+  lines.push('%% Story labels are prefixed with their issue_id when set in plan.stories.');
+  lines.push('flowchart LR');
+
+  // Group nodes by epic (if any). When sprint-wide, emit subgraphs.
+  const epicGroups = new Map();
+  for (const node of dag.nodes) {
+    const epic = parseEpicFromKey(node) ?? 'unknown';
+    if (!epicGroups.has(epic)) epicGroups.set(epic, []);
+    epicGroups.get(epic).push(node);
+  }
+
+  const epicsSorted = [...epicGroups.keys()].sort();
+  for (const epic of epicsSorted) {
+    const epicLabel = composeEpicLabel(epic, epicIssueIds);
+    lines.push(`  subgraph epic_${epic} ["${mermaidEscapeLabel(epicLabel)}"]`);
+    for (const node of epicGroups.get(epic).sort()) {
+      const status = statusByKey.get(node) ?? 'pending';
+      const storyLabel = composeStoryLabel(node, storyIssueIds);
+      lines.push(`    ${node}["${mermaidEscapeLabel(storyLabel)}"]:::${status}`);
+    }
+    lines.push('  end');
+  }
+
+  // Intra-epic edges first (solid), then cross-epic (dashed with label).
+  for (const [a, b] of intra) {
+    lines.push(`  ${a} --> ${b}`);
+  }
+  for (const [a, b] of cross) {
+    lines.push(`  ${a} -. cross-epic .-> ${b}`);
+  }
+
+  // classDef definitions for plan_status colors. Order matches STATUS_COLORS.
+  for (const status of Object.keys(STATUS_COLORS)) {
+    const { fill, text } = STATUS_COLORS[status];
+    lines.push(`  classDef ${status} fill:${fill},color:${text}`);
+  }
+
+  return lines.join('\n') + '\n';
+}
+
+// Graphviz (dot) label escaping. Double-quoted labels in dot use
+// backslash as the escape character (NOT HTML entities — those only
+// apply to `<...>` HTML-like labels, which we don't use). So most
+// special chars pass through as literals; we only need to escape `\`
+// and `"` plus convert newlines and strip dangerous control chars.
+//
+// `<` and `>` in a double-quoted label render as literal `<` and `>`
+// (no HTML interpretation), so they don't need entity encoding.
+function dotEscapeLabel(s) {
+  return (
+    String(s)
+      .replace(/\r/g, '')
+      .replace(/[\\"]/g, '\\$&')
+      .replace(/\n/g, '\\n')
+      .replace(/[\x00-\x08\x0b-\x1f\x7f]/g, '')
+      .replace(/[‪-‮⁦-⁩؜]/g, '')
+  );
+}
+
+function renderGraphviz(dag, plan) {
+  const statusByKey = planStatusByKey(plan);
+  const storyIssueIds = issueIdByStoryKey(plan);
+  const epicIssueIds = issueIdByEpicId(plan);
+  const { intra, cross } = bucketEdges(dag.edges);
+  const lines = [];
+  lines.push('digraph SprintPlan {');
+  lines.push(`  // plan-id: ${plan?.plan_id ?? 'unknown'}`);
+  lines.push(`  // generated: ${plan?.generated ?? new Date().toISOString()}`);
+  lines.push('  // Story labels are prefixed with their issue_id when set in plan.stories.');
+  lines.push('  rankdir=LR;');
+  lines.push('  node [style=filled, fontname="Helvetica"];');
+
+  const epicGroups = new Map();
+  for (const node of dag.nodes) {
+    const epic = parseEpicFromKey(node) ?? 'unknown';
+    if (!epicGroups.has(epic)) epicGroups.set(epic, []);
+    epicGroups.get(epic).push(node);
+  }
+
+  const epicsSorted = [...epicGroups.keys()].sort();
+  for (const epic of epicsSorted) {
+    const epicLabel = composeEpicLabel(epic, epicIssueIds);
+    lines.push(`  subgraph cluster_${epic} {`);
+    lines.push(`    label="${dotEscapeLabel(epicLabel)}";`);
+    for (const node of epicGroups.get(epic).sort()) {
+      const status = statusByKey.get(node) ?? 'pending';
+      const { fill, text } = STATUS_COLORS[status];
+      const storyLabel = composeStoryLabel(node, storyIssueIds);
+      // When the visual label differs from the node id (issue_id is set),
+      // emit an explicit `label=` attribute. Otherwise dot uses the node id.
+      const labelAttr =
+        storyLabel === node ? '' : `, label="${dotEscapeLabel(storyLabel)}"`;
+      lines.push(
+        `    "${dotEscapeLabel(node)}" [fillcolor="${fill}", fontcolor="${text}"${labelAttr}];`,
+      );
+    }
+    lines.push('  }');
+  }
+
+  for (const [a, b] of intra) {
+    lines.push(`  "${dotEscapeLabel(a)}" -> "${dotEscapeLabel(b)}";`);
+  }
+  for (const [a, b] of cross) {
+    lines.push(
+      `  "${dotEscapeLabel(a)}" -> "${dotEscapeLabel(b)}" [style=dashed, label="cross-epic"];`,
+    );
+  }
+
+  lines.push('}');
+  return lines.join('\n') + '\n';
+}
+
+// Detect `dot` binary in PATH. Used by graphviz format to decide whether
+// to fall back to mermaid (with stderr notice) when the toolchain is
+// missing on the user's machine.
+function hasGraphvizBinary() {
+  try {
+    const r = spawnSync('dot', ['-V'], { stdio: 'ignore' });
+    return r.status === 0;
+  } catch {
+    return false;
+  }
+}
+
+function defaultRenderOutputPath(projectRoot, format) {
+  const ext = format === 'graphviz' ? 'dot' : 'mmd';
+  return path.join(projectRoot, '_bmad-output', 'implementation-artifacts', `sprint-plan-dag.${ext}`);
+}
+
+// Top-level render orchestrator. Returns { wrote, file, format, fallback?, message }.
+// Failure modes (missing graphviz, write error) emit warnings to stderr but
+// fall back gracefully — render NEVER throws under normal use; the caller
+// gets a structured result instead.
+function runRender({ projectRoot, epic, format, output }) {
+  const requestedFormat = format;
+  let effectiveFormat = format;
+  let fallbackReason = null;
+  if (effectiveFormat === 'graphviz' && !hasGraphvizBinary()) {
+    log.warn("graphviz toolchain ('dot') not found in PATH — falling back to mermaid");
+    effectiveFormat = 'mermaid';
+    fallbackReason = 'graphviz-missing';
+  }
+
+  const dag = buildDag({ projectRoot, epic, strategies: DEFAULT_STRATEGIES });
+  // Refuse to render on a corrupt or cycle-bearing graph; surface clearly.
+  if (dag.cycle.length > 0) {
+    return {
+      wrote: false,
+      reason: 'cycle',
+      cycle: dag.cycle,
+      message: `cycle detected: ${dag.cycle.join(', ')}`,
+    };
+  }
+
+  const planResult = readPlan({ projectRoot });
+  // readPlan returns null on missing, error obj on parse failure, plan on success.
+  let plan = null;
+  if (planResult && typeof planResult === 'object' && !('error' in planResult)) {
+    plan = planResult;
+  }
+
+  const body =
+    effectiveFormat === 'graphviz' ? renderGraphviz(dag, plan) : renderMermaid(dag, plan);
+  const outputPath = output || defaultRenderOutputPath(projectRoot, effectiveFormat);
+
+  try {
+    fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+    fs.writeFileSync(outputPath, body);
+  } catch (e) {
+    log.warn(`render write failed: ${e.message}`);
+    return {
+      wrote: false,
+      reason: 'write_failed',
+      message: e.message,
+      file: outputPath,
+    };
+  }
+
+  return {
+    wrote: true,
+    file: outputPath,
+    format: effectiveFormat,
+    requested_format: requestedFormat,
+    ...(fallbackReason ? { fallback: fallbackReason } : {}),
+    nodes: dag.nodes.length,
+    edges: dag.edges.length,
+  };
 }
 
 function main() {
-  const { opts, positional } = parseArgs(process.argv.slice(2), { booleanFlags: ['force'] });
+  const { opts, positional } = parseArgs(process.argv.slice(2));
   if (opts.help || positional.length === 0) {
     help();
     process.exit(opts.help ? 0 : 1);
@@ -541,18 +698,21 @@ function main() {
   const projectRoot = opts['project-root'] || process.cwd();
   const epic = opts.epic !== undefined ? String(opts.epic) : null;
 
-  if (command === 'scaffold') {
-    if (!epic) {
-      log.error('scaffold requires --epic');
+  // The `render` subcommand has its own flag set and result handling.
+  if (command === 'render') {
+    const format = opts.format || 'mermaid';
+    if (!VALID_RENDER_FORMATS.includes(format)) {
+      log.error(`unknown format '${format}'. Valid: ${VALID_RENDER_FORMATS.join(', ')}`);
       process.exit(1);
     }
-    const res = scaffoldDependenciesYaml(projectRoot, epic, { force: opts.force === true });
-    if (!res.wrote) {
-      log.error(`scaffold: ${res.reason}; use --force to overwrite`);
-      process.exit(res.reason === 'exists' ? 2 : 1);
-    }
-    process.stdout.write(`${JSON.stringify(res)}\n`);
-    return;
+    const result = runRender({
+      projectRoot,
+      epic,
+      format,
+      output: opts.output || null,
+    });
+    process.stdout.write(`${JSON.stringify(result)}\n`);
+    process.exit(result.wrote ? 0 : 1);
   }
 
   const strat = parseStrategies(opts.strategy);
@@ -586,20 +746,32 @@ module.exports = {
   DEFAULT_STRATEGIES,
   VALID_STRATEGIES,
   VALID_COMMANDS,
+  VALID_RENDER_FORMATS,
+  STATUS_COLORS,
   parseEpicFromKey,
   parseStrategies,
   readStoriesFromStatus,
   readDependencies,
-  parseDependenciesYaml,
   edgesFromExplicit,
+  edgesFromCrossEpic,
   edgesFromOrdering,
   applyForceIndependent,
   buildEdges,
   topoLayers,
   buildDag,
-  scaffoldDependenciesYaml,
   sprintStatusPath,
   dependenciesPath,
+  planStatusByKey,
+  issueIdByStoryKey,
+  issueIdByEpicId,
+  composeStoryLabel,
+  composeEpicLabel,
+  bucketEdges,
+  renderMermaid,
+  renderGraphviz,
+  hasGraphvizBinary,
+  defaultRenderOutputPath,
+  runRender,
 };
 
 if (require.main === module) {

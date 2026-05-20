@@ -17,7 +17,7 @@ type Result = {
   verdict: 'advanced' | 'retry' | 'prompted' | 'halt';
 };
 
-const { interpretSignal, CONSECUTIVE_TEST_FAILURE_THRESHOLD } = adapt as {
+const { interpretSignal, CONSECUTIVE_TEST_FAILURE_THRESHOLD, verifyIssuesSignature } = adapt as {
   interpretSignal: (
     state: Record<string, unknown>,
     signal: Record<string, unknown>,
@@ -25,6 +25,7 @@ const { interpretSignal, CONSECUTIVE_TEST_FAILURE_THRESHOLD } = adapt as {
     verifyResult?: { ok: boolean; issues?: string[] },
   ) => Result;
   CONSECUTIVE_TEST_FAILURE_THRESHOLD: number;
+  verifyIssuesSignature: (issues: unknown) => string | null;
 };
 
 const { STATES } = sm as { STATES: Record<string, string> };
@@ -196,6 +197,150 @@ describe('success — verify.js trust boundary', () => {
     });
     expect(r.verdict).toBe('prompted');
     expect((r.nextAction as Record<string, unknown>).reason).toBe('verify_reject_budget_exceeded');
+  });
+
+  // v2.3.0 — verify-loop detection: when identical issues recur, the
+  // budget-exhausted halt prompt is enriched with a loop-hint.
+  describe('verify-loop detection', () => {
+    it('tracks consecutive_identical_rejections across identical rejections', () => {
+      // First rejection — count starts at 1.
+      const r1 = interpretSignal(st(STATES.DEV_GREEN), { status: 'success' }, medium(), {
+        ok: false,
+        issues: ['branch required', 'git_steps_completed must be true'],
+      });
+      expect(r1.newState.consecutive_identical_rejections).toBe(1);
+      expect(typeof r1.newState.last_verify_issues_signature).toBe('string');
+
+      // Second rejection with same issues — count increments.
+      const r2 = interpretSignal(r1.newState, { status: 'success' }, medium(), {
+        ok: false,
+        issues: ['branch required', 'git_steps_completed must be true'],
+      });
+      expect(r2.newState.consecutive_identical_rejections).toBe(2);
+    });
+
+    it('resets consecutive_identical_rejections when issues differ', () => {
+      const r1 = interpretSignal(st(STATES.DEV_GREEN), { status: 'success' }, medium(), {
+        ok: false,
+        issues: ['branch required'],
+      });
+      expect(r1.newState.consecutive_identical_rejections).toBe(1);
+
+      const r2 = interpretSignal(r1.newState, { status: 'success' }, medium(), {
+        ok: false,
+        issues: ['commit_sha required'], // different issue
+      });
+      expect(r2.newState.consecutive_identical_rejections).toBe(1);
+    });
+
+    it('treats reordered issues as identical (signature is order-independent)', () => {
+      const r1 = interpretSignal(st(STATES.DEV_GREEN), { status: 'success' }, medium(), {
+        ok: false,
+        issues: ['a', 'b', 'c'],
+      });
+      const r2 = interpretSignal(r1.newState, { status: 'success' }, medium(), {
+        ok: false,
+        issues: ['c', 'a', 'b'], // same set, different order
+      });
+      expect(r2.newState.consecutive_identical_rejections).toBe(2);
+    });
+
+    it('enriches halt prompt with loop hint when identicalCount >= 2 at budget exhaustion', () => {
+      // Prime state at budget-1 with one prior identical rejection.
+      const state = st(STATES.DEV_GREEN, {
+        verify_reject_count: 2, // medium budget = 3, this is the last allowed retry
+        last_verify_issues_signature: verifyIssuesSignature([
+          'branch required',
+          'git_steps_completed must be true',
+        ]),
+        consecutive_identical_rejections: 2,
+      });
+      const r = interpretSignal(state, { status: 'success' }, medium(), {
+        ok: false,
+        issues: ['branch required', 'git_steps_completed must be true'],
+      });
+      expect(r.verdict).toBe('prompted');
+      const prompt = String((r.nextAction as Record<string, unknown>).prompt);
+      expect(prompt).toMatch(/SAME 2 issues 3 times in a row/);
+      expect(prompt).toMatch(/this is a loop, not random noise/);
+      expect(prompt).toMatch(/don't just retry the same signal/);
+      expect((r.nextAction as Record<string, unknown>).consecutive_identical).toBe(3);
+    });
+
+    it('omits loop hint when issues vary across rejections', () => {
+      const state = st(STATES.DEV_GREEN, {
+        verify_reject_count: 2,
+        last_verify_issues_signature: verifyIssuesSignature(['some other issue']),
+        consecutive_identical_rejections: 1,
+      });
+      const r = interpretSignal(state, { status: 'success' }, medium(), {
+        ok: false,
+        issues: ['a different issue this time'],
+      });
+      expect(r.verdict).toBe('prompted');
+      const prompt = String((r.nextAction as Record<string, unknown>).prompt);
+      expect(prompt).not.toMatch(/this is a loop/);
+      expect((r.nextAction as Record<string, unknown>).consecutive_identical).toBe(1);
+    });
+
+    it('resets loop trackers on the halt path so the next phase starts fresh', () => {
+      const state = st(STATES.DEV_GREEN, {
+        verify_reject_count: 2,
+        last_verify_issues_signature: verifyIssuesSignature(['x']),
+        consecutive_identical_rejections: 2,
+      });
+      const r = interpretSignal(state, { status: 'success' }, medium(), {
+        ok: false,
+        issues: ['x'],
+      });
+      expect(r.newState.last_verify_issues_signature).toBeNull();
+      expect(r.newState.consecutive_identical_rejections).toBe(0);
+      expect(r.newState.verify_reject_count).toBe(0);
+    });
+
+    it('the log_verify_rejection side-effect carries consecutive_identical', () => {
+      const r1 = interpretSignal(st(STATES.DEV_GREEN), { status: 'success' }, medium(), {
+        ok: false,
+        issues: ['x'],
+      });
+      const r2 = interpretSignal(r1.newState, { status: 'success' }, medium(), {
+        ok: false,
+        issues: ['x'],
+      });
+      const eff = r2.sideEffects.find((e) => e.kind === 'log_verify_rejection');
+      expect(eff).toBeDefined();
+      expect(eff?.consecutive_identical).toBe(2);
+    });
+
+    it('resets loop trackers when verify succeeds', () => {
+      const state = st(STATES.DEV_GREEN, {
+        last_verify_issues_signature: verifyIssuesSignature(['x']),
+        consecutive_identical_rejections: 2,
+      });
+      const r = interpretSignal(state, { status: 'success' }, medium(), { ok: true });
+      // The state advances to the next phase; advanceState clears trackers.
+      expect(r.newState.last_verify_issues_signature).toBeNull();
+      expect(r.newState.consecutive_identical_rejections).toBe(0);
+    });
+  });
+
+  describe('verifyIssuesSignature', () => {
+    it('returns null for empty/missing input', () => {
+      expect(verifyIssuesSignature([])).toBeNull();
+      expect(verifyIssuesSignature(null)).toBeNull();
+      expect(verifyIssuesSignature(undefined)).toBeNull();
+      expect(verifyIssuesSignature('not an array')).toBeNull();
+    });
+
+    it('produces stable, order-independent signatures', () => {
+      expect(verifyIssuesSignature(['a', 'b', 'c'])).toBe(verifyIssuesSignature(['c', 'b', 'a']));
+      expect(verifyIssuesSignature(['a'])).toBe(verifyIssuesSignature(['a']));
+    });
+
+    it('differs for different issue sets', () => {
+      expect(verifyIssuesSignature(['a'])).not.toBe(verifyIssuesSignature(['b']));
+      expect(verifyIssuesSignature(['a', 'b'])).not.toBe(verifyIssuesSignature(['a']));
+    });
   });
 
   it('accepts success when verify.js returns ok', () => {

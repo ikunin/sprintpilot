@@ -36,6 +36,8 @@ function applyOne(state, profile, cmd) {
         retry_count_this_phase: 0,
         verify_reject_count: 0,
         consecutive_test_failures: 0,
+        last_verify_issues_signature: null,
+        consecutive_identical_rejections: 0,
       };
       effects.push({
         kind: 'state_transition',
@@ -64,11 +66,16 @@ function applyOne(state, profile, cmd) {
       // looping on a stuck transition. Phase is unchanged. Also clears
       // any pending_alternative — `force_continue` is the explicit "no,
       // keep the planned action" answer to a propose_alternative prompt.
+      // v2.3.0: also reset verify-loop trackers so the next reject starts
+      // fresh — user explicitly accepted that the prior issues are
+      // resolved out of band.
       newState = {
         ...state,
         retry_count_this_phase: 0,
         verify_reject_count: 0,
         consecutive_test_failures: 0,
+        last_verify_issues_signature: null,
+        consecutive_identical_rejections: 0,
         pending_alternative: undefined,
       };
       effects.push({
@@ -94,6 +101,14 @@ function applyOne(state, profile, cmd) {
         verify_reject_budget: defaultVerifyBudgetFor(cmd.profile),
         // Mark the change so audit can detect it.
         changed_via_user_command: true,
+      };
+      // v2.3.0 — also clear verify-loop trackers. The profile change
+      // shifts retry/verify budgets, so prior consecutive-identical
+      // counts shouldn't influence the new profile's halt threshold.
+      newState = {
+        ...state,
+        last_verify_issues_signature: null,
+        consecutive_identical_rejections: 0,
       };
       effects.push({
         kind: 'profile_escalated', // reuse the ledger kind
@@ -145,6 +160,12 @@ function applyOne(state, profile, cmd) {
         pending_alternative: undefined,
         retry_count_this_phase: 0,
         verify_reject_count: 0,
+        // v2.3.0 — accepting an alternative supersedes the prior planned
+        // action, so prior verify-loop accumulator should reset too.
+        // The next reject under the new action is treated as a fresh
+        // signal-identity baseline.
+        last_verify_issues_signature: null,
+        consecutive_identical_rejections: 0,
       };
       effects.push({
         kind: 'dispatch_action',
@@ -186,6 +207,8 @@ function applyOne(state, profile, cmd) {
         retry_count_this_phase: 0,
         verify_reject_count: 0,
         consecutive_test_failures: 0,
+        last_verify_issues_signature: null,
+        consecutive_identical_rejections: 0,
         // current_epic intentionally preserved — retro skill needs it.
       };
       effects.push({
@@ -194,6 +217,61 @@ function applyOne(state, profile, cmd) {
         to: STATES.RETROSPECTIVE,
         reason: 'user_trigger_retrospective',
         epic: state.current_epic || null,
+        details: cmd.reason || null,
+      });
+      break;
+
+    // v2.3.0 — plan-aware mid-flight commands. Each emits a side-effect
+    // record that the CLI dispatcher handles by calling sprint-plan.js
+    // primitives. DAG-aware validation lives in the dispatcher (it needs
+    // the live plan file). State mutations are minimal here; only the
+    // replan_sprint flow touches state to schedule the halt.
+    case 'reorder_queue':
+      effects.push({
+        kind: 'plan_reorder',
+        order: cmd.order,
+        reason: cmd.reason || null,
+      });
+      break;
+
+    case 'add_to_sprint':
+      effects.push({
+        kind: 'plan_add_stories',
+        story_keys: cmd.story_keys,
+        position: cmd.position !== undefined ? cmd.position : 'end',
+        issue_ids: cmd.issue_ids || null,
+        reason: cmd.reason || null,
+      });
+      break;
+
+    case 'remove_from_sprint':
+      effects.push({
+        kind: 'plan_remove_stories',
+        story_keys: cmd.story_keys,
+        mark_status: cmd.mark_status || 'skipped',
+        reason: cmd.reason || null,
+      });
+      break;
+
+    case 'replan_sprint':
+      // Set replan_requested in state so the next cmdStart picks it up
+      // and emits the invoke_skill action. Halt now so the autopilot
+      // stops at the current story boundary; the user (or the LLM
+      // session) restarts to drive the skill.
+      newState = {
+        ...state,
+        replan_requested: {
+          reason: cmd.reason || null,
+          requested_at: new Date().toISOString(),
+        },
+        halt_requested: {
+          reason: cmd.reason || 'user_replan_sprint',
+          requested_at: new Date().toISOString(),
+        },
+      };
+      effects.push({
+        kind: 'halt',
+        reason: 'user_replan_sprint',
         details: cmd.reason || null,
       });
       break;
