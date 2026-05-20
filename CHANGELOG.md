@@ -1,5 +1,49 @@
 # Changelog
 
+## [2.3.0] - 2026-05-20
+
+**Dependency-aware sprint planning + plan-aware execution.** Until v2.3.0 the autopilot ran stories in sprint-status.yaml order with no awareness of inter-story dependencies. Teams with non-trivial story relationships (story B depends on A's schema; cross-epic edges; stories that should be deferred but not removed from the sprint) had no first-class way to encode this — they either hand-edited `_Sprintpilot/sprints/dependencies.yaml` (manual, easy to drift) or accepted alphabetical execution and the resulting merge conflicts. v2.3.0 introduces a curated sprint plan at `_bmad-output/implementation-artifacts/sprint-plan.yaml` that captures dependencies, priorities, per-story `plan_status` (pending / done / skipped / excluded), optional external issue-tracker links, and per-story timing. The plan is built by a new `/sprintpilot-plan-sprint` skill or kept fresh automatically when sprint-status changes; the autopilot reads it to compose the execution queue and tracks live progress through it. Default behavior for greenfield projects is unchanged — `autopilot start` still falls back to sprint-status order until you opt in.
+
+### Added
+
+- **`/sprintpilot-plan-sprint`** — 14-step LLM-driving skill that infers per-epic + cross-epic dependencies from `epics.md` + `architecture.md` + `sprint-status.yaml`, presents the DAG, lets the user curate which stories go into the active sprint, optionally captures issue-tracker links + per-entity issue IDs, and atomically writes the plan. Three invocation modes: user-direct, auto-derive (when stale), replan (mid-flight).
+- **`/sprintpilot-sprint-progress`** — read-only diagnostic skill that wraps `autopilot progress --json` with LLM judgment. Classifies sprint health (HEALTHY / STALLED / NEEDS-INPUT / EXHAUSTED / NO-PLAN) from the recent ledger tail and suggests exactly one recommended next action.
+- **`/sprintpilot-dependency-graph`** — render the DAG in chosen format (mermaid default, graphviz, text, layers, json). Interactive format prompt when no argument; accepts per-epic scope.
+- **`autopilot progress`** CLI subcommand with `--once` / `--json` / `--story <key>` modes. Live story progress, issue-tracking coverage (when configured), recent step events with `issue_id` brackets, labeled story-detail block.
+- **4 new mid-flight `user_input` commands** — `reorder_queue` (DAG-validated), `add_to_sprint`, `remove_from_sprint`, `replan_sprint`. Failures surface as `user_prompt` halt with structured diagnostic (DAG violations list, missing keys, suggested remediation) rather than silent ledger entries.
+- **Verify-loop detection** — when verify rejects the LLM's success signal with the SAME issues 2+ times in a row, the budget-exhausted halt prompt is enriched with a loop-detection hint (sample: `⚠ Verify rejected the SAME 3 issues 3 times in a row — this is a loop, not random noise. ...don't just retry the same signal.`). Tracker state lives in CRITICAL_KEYS so the counter survives crashes.
+- **Streaming progress events** — `story_step_started` / `story_step_progress` / `story_step_completed` ledger entries emitted on every BMad-cycle phase transition. `markRunning` mirrors the live phase into `plan.stories[].current_step` so `autopilot progress` reflects the running step even between sessions.
+- **`action-ledger.js#tail(opts)`** — async iterator that yields appended ledger entries at a 250ms poll interval. AbortSignal support, `maxIdleMs` auto-terminate, file-rotation detection via inode tracking.
+- **Issue-tracker integration foundation** — `plan.issue_tracker` captures `{provider, base_url, project_key}` for Jira / Linear / GitHub / GitLab; `plan.stories[].issue_id` + `plan.epics[].issue_id` link individual entities. Rendered into DAG labels as `PROJ-101: 1-3-add-auth` prefix; surfaced in `autopilot progress` as `Issue tracking: N/M stories linked to <provider>` coverage line. Bidirectional sync to the tracker API is deferred to a future release.
+- **Installer onboarding** — new opt-in prompt `Auto-build a sprint plan on first autopilot start? (Y/N)` defaulting `N`; closing-banner first-steps recipe with the new skills; legacy `_Sprintpilot/sprints/dependencies.yaml` auto-migration notice on upgrade; deprecation notice for `autopilot.auto_infer_dependencies: true`; post-install skill manifest self-check.
+- **`autopilot.auto_plan_on_start`** config knob in `_Sprintpilot/modules/autopilot/profiles/_base.yaml` (default `false`) that gates the auto-derive trigger on greenfield projects.
+- **`--no-auto-plan` CLI flag** for `autopilot start` — suppresses auto-derive for a single invocation.
+
+### Changed
+
+- **`autopilot.auto_infer_dependencies` default flipped from `true` to `false`** across all profiles. Superseded by `auto_plan_on_start`; the old flag is now a no-op. Existing users with `true` in their local config see a deprecation notice on next install but no behavior change for their plan file (auto-migrated to sprint-plan.yaml on first `autopilot start`).
+- **Retargeted `_Sprintpilot/scripts/infer-dependencies.js`** to write into `sprint-plan.yaml`'s `dependencies.stories` block instead of the standalone `_Sprintpilot/sprints/dependencies.yaml`. New subcommands: `migrate` (one-shot import), `write-cross-epic`, `scaffold-prompt --cross-epic`, `dry-run --cross-epic`.
+- **Retargeted `_Sprintpilot/scripts/resolve-dag.js`** to read from `sprint-plan.yaml`. New subcommand: `render --format mermaid|graphviz [--output] [--epic]` producing visual DAG with `plan_status` coloring + cross-epic dashed edges + issue_id label prefixes.
+- **`.sprintpilot/plan.lock`** new lock file serializing all sprint-plan.yaml mutators (`markDone`, `addStories`, `removeStories`, `reorder`, `setIssueId`, `setIssueTracker`, `refreshBmadStatus`, `archive`). Same primitive as `.merge-shards.lock`. Concurrent autopilot sessions or skill-vs-autopilot contention is bounded by 30-second acquire timeout; stale locks (5+ min) are auto-released.
+
+### Fixed
+
+- **Mid-flight command failures no longer silent.** Prior to v2.3.0, a DAG-violating reorder, an `add_to_sprint` with missing upstream, or a plan-write failure would be logged to the ledger but the autopilot would continue emitting actions as if the mutation succeeded. v2.3.0 surfaces these as `user_prompt` halts so the LLM session can remediate.
+- **Verify-loop visibility.** A pattern observed across many BMad projects: the LLM sends the same broken success signal repeatedly, verify rejects each one identically, and the user has no early signal that anything's stuck until the retry budget exhausts with a generic error. The new loop-hint diagnostic explicitly names the pattern when 2+ consecutive rejections match.
+- **DAG label injection.** Free-text `issue_id` values previously could break mermaid/graphviz rendering if they contained `]`, `<`, newlines, etc. `setIssueId` now rejects a defined character set, and the renderer uses a single-pass entity escape regex that can't be defeated by double-encoding tricks.
+- **CRITICAL_KEYS sync.** `story_queue` was historically in `state-store.js`'s CRITICAL_KEYS but missing from `state-shard.js` — a process killed mid-`--stories` queue could lose the queue from the pending buffer. v2.3.0 syncs the two files.
+
+### Added tests
+
+1807 unit + integration tests, up from 1727 pre-v2.3.0. New coverage includes 40 sprint-plan primitive tests, 52 mutator tests, 70 integration tests, 41 orchestrator helper tests, 28 user-command tests, 48 streaming/ledger tests, 26 hardening regression tests, and 14 full-lifecycle e2e tests via subprocess.
+
+### Documentation
+
+- `docs/USAGE.md` — full sprint-planning walkthrough; `/sprintpilot-plan-sprint` curation UX; mid-flight commands table; `autopilot progress` sample output; issue_id validation rules; verify-loop diagnostic example; concurrent-execution + safety section.
+- `docs/CONFIGURATION.md` — `autopilot.auto_plan_on_start` row; sprint-planning artifacts table including plan.lock; CLI flags table; concurrent execution semantics scenarios; verify-loop state persistence.
+- `docs/ARCHITECTURE.md` — Sprint Planning + DAG-Aware Execution section; Concurrency + Hardening Patterns subsection covering all 5 patterns (single-writer lock, CRITICAL_KEYS write-through, failure surfacing, single-pass escape regex, tail rotation detection).
+- `_Sprintpilot/Sprintpilot.md` — catalog entries for all 3 new skills; updated v2.3.0 description block.
+
 ## [2.2.31] - 2026-05-17
 
 **Two paths to close out an epic when non-`done` stories remain.** Reported from a live session: the user explicitly asked to run the Epic 4 retrospective, but the state machine routed to next-story-start because deferred stories in Epic 4 (e.g. 4-7-deferred, 10-X-moved-to-future-epic) showed `backlog`/`in-progress` in sprint-status. The orchestrator counted them as remaining → `remaining_stories_in_epic > 0` → EPIC_BOUNDARY_CHECK → CREATE_STORY instead of RETROSPECTIVE. Workaround was running `bmad-retrospective` directly, bypassing the orchestrator.
