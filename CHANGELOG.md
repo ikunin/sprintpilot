@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.3.1] - 2026-05-20
+
+### Changed
+
+- Drop redundant `sprintpilot-code-review` and `sprintpilot-party-mode` skills. `bmad-code-review` already runs the same 3 parallel layers (Blind Hunter, Edge Case Hunter, Acceptance Auditor) with deeper triage and tighter story-file integration; `bmad-party-mode` is the canonical multi-agent discussion skill.
+- Rewrite `sprintpilot-codebase-map` agent prompts to eliminate verbatim phrasing shared with [GSD's map-codebase](https://github.com/gsd-build/get-shit-done) (`Patterns matter more than lists`, `Be prescriptive, not descriptive`, `Forbidden Files` block). Functional intent preserved.
+- Add `NOTICES.md` at repo root with the GSD MIT license text and Copyright (c) 2025 Lex Christopherson; restore GSD inspiration credit in `README.md`.
+
 ## [2.3.0] - 2026-05-20
 
 **Dependency-aware sprint planning + plan-aware execution.** Until v2.3.0 the autopilot ran stories in sprint-status.yaml order with no awareness of inter-story dependencies. Teams with non-trivial story relationships (story B depends on A's schema; cross-epic edges; stories that should be deferred but not removed from the sprint) had no first-class way to encode this — they either hand-edited `_Sprintpilot/sprints/dependencies.yaml` (manual, easy to drift) or accepted alphabetical execution and the resulting merge conflicts. v2.3.0 introduces a curated sprint plan at `_bmad-output/implementation-artifacts/sprint-plan.yaml` that captures dependencies, priorities, per-story `plan_status` (pending / done / skipped / excluded), optional external issue-tracker links, and per-story timing. The plan is built by a new `/sprintpilot-plan-sprint` skill or kept fresh automatically when sprint-status changes; the autopilot reads it to compose the execution queue and tracks live progress through it. Default behavior for greenfield projects is unchanged — `autopilot start` still falls back to sprint-status order until you opt in.
