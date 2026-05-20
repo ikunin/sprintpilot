@@ -1,6 +1,6 @@
 # Multi-Agent Codebase Map
 
-> Inspired by [GSD's map-codebase](https://github.com/gsd-build/get-shit-done). Adapted with distinct output format and enriched agent prompts.
+> Inspired by [GSD's map-codebase](https://github.com/gsd-build/get-shit-done) (MIT, Copyright (c) 2025 Lex Christopherson). Adapted with distinct output format and rewritten agent prompts. Full attribution: [NOTICES.md](../../../NOTICES.md).
 
 ## Purpose
 

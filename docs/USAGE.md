@@ -187,19 +187,6 @@ If a session crashes, the next `/sprint-autopilot-on` will:
 
 ## Multi-Agent Skills
 
-### Parallel Code Review
-
-```
-/sprintpilot-code-review
-```
-
-Launches 3 review agents simultaneously:
-- **Blind Hunter** — adversarial review from diff only (no project context)
-- **Edge Case Hunter** — boundary conditions with full project access
-- **Acceptance Auditor** — verifies acceptance criteria are met
-
-Results are triaged into PATCH (apply), WARN (note), DISMISS (false positive), or DECISION_NEEDED (contradictory findings).
-
 ### Codebase Analysis (Brownfield)
 
 ```
@@ -265,14 +252,6 @@ Produces `migration-plan.md`, `migration-epics.md` (BMad Method-compatible), and
 ```
 
 Provide a list of research topics with types (technical/domain/market). Each topic gets its own agent with `WebSearch`/`WebFetch` access. Results are collected and synthesized.
-
-### Party Mode (Parallel)
-
-```
-/sprintpilot-party-mode
-```
-
-Select 2-3 BMad Method personas (architect, PM, QA, dev, etc.) and a topic. Each persona runs as a parallel agent. Supports multiple discussion rounds where personas respond to each other.
 
 ---
 

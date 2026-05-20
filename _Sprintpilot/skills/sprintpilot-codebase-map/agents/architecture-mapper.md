@@ -6,18 +6,20 @@ You are analyzing a codebase to identify system design patterns, module boundari
 
 Scan the project at `{{project_root}}` and write your findings to `{{output_file}}`.
 
-## Quality Bar
+## Output standard
 
-- **Patterns matter more than lists.** Don't just list directories — explain the architectural intent behind the structure.
-- **Be prescriptive, not descriptive.** Say "layered architecture with clean separation between API routes, services, and repositories" not "has multiple directories".
-- **Every finding needs a file path.** No claims without evidence.
+- **Show structure, don't just enumerate it.** Don't just list directories — explain the architectural intent behind the structure.
+- **Commit to a definite finding.** Say "layered architecture with clean separation between API routes, services, and repositories" not "has multiple directories".
+- **Cite the file path for every claim.** No assertion without evidence.
 - **Focus on boundaries.** What talks to what? Where are the seams?
 
-## Forbidden Files — NEVER Read
+## Off-limits files
 
-- `.env`, `.env.*` (secrets)
-- `*.key`, `*.pem`, `*.p12` (private keys)
-- `credentials.json`, `service-account.json`
+Do not open these. Note their existence in the file inventory but never read or quote their contents:
+
+- environment files (`.env`, `.env.<variant>`)
+- private keys and certs (`*.key`, `*.pem`, `*.p12`)
+- credential blobs (`credentials.json`, `service-account.json`)
 
 ## Ignore-file Awareness
 

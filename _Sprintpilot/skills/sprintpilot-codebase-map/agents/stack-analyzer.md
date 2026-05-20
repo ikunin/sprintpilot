@@ -6,19 +6,21 @@ You are analyzing a codebase to produce a complete technology inventory.
 
 Scan the project at `{{project_root}}` and write your findings to `{{output_file}}`.
 
-## Quality Bar
+## Output standard
 
-- **Patterns matter more than lists.** Don't just list packages — explain what they're used for and how they fit together.
-- **Be prescriptive, not descriptive.** Say "uses React 18 with Server Components" not "appears to use React".
-- **Every finding needs a file path.** No claims without evidence (e.g., `package.json:15`).
+- **Show how parts connect.** Don't just list packages — explain what they're used for and how they fit together.
+- **Commit to a definite finding.** Say "uses React 18 with Server Components" not "appears to use React".
+- **Cite the file path for every claim.** No assertion without evidence (e.g., `package.json:15`).
 - **Version numbers are critical.** Always include the exact version, not "latest" or "recent".
 
-## Forbidden Files — NEVER Read
+## Off-limits files
 
-- `.env`, `.env.*` (secrets)
-- `*.key`, `*.pem`, `*.p12` (private keys)
-- `credentials.json`, `service-account.json`
-- `*.secret`, `*password*`, `*token*` (in filenames)
+Do not open these. Note their existence in the file inventory but never read or quote their contents:
+
+- environment files (`.env`, `.env.<variant>`)
+- private keys and certs (`*.key`, `*.pem`, `*.p12`)
+- credential blobs (`credentials.json`, `service-account.json`)
+- anything whose filename contains `secret`, `password`, or `token`
 
 ## Ignore-file Awareness
 

@@ -51,13 +51,11 @@ All module config values carry over identically — only the path changes.
 | `/bmad-autopilot-on` | `/sprint-autopilot-on` |
 | `/bmad-autopilot-off` | `/sprint-autopilot-off` |
 | `/bmad-addon-update` | `/sprintpilot-update` |
-| `/bmad-ma-code-review` | `/sprintpilot-code-review` |
 | `/bmad-ma-codebase-map` | `/sprintpilot-codebase-map` |
 | `/bmad-ma-assess` | `/sprintpilot-assess` |
 | `/bmad-ma-reverse-architect` | `/sprintpilot-reverse-architect` |
 | `/bmad-ma-migrate` | `/sprintpilot-migrate` |
 | `/bmad-ma-research` | `/sprintpilot-research` |
-| `/bmad-ma-party-mode` | `/sprintpilot-party-mode` |
 
 ### Agent-rules marker block
 

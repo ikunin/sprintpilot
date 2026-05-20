@@ -121,17 +121,15 @@ sprintpilot/
 │   │   ├── text.js                     # String utilities
 │   │   └── yaml-lite.js                # Zero-dep YAML read/write for story blocks
 │   │
-│   ├── skills/                         # 10 addon-owned skills (markdown-based prompts)
+│   ├── skills/                         # Addon-owned skills (markdown-based prompts)
 │   │   ├── sprint-autopilot-on/        # Profile-aware autopilot driver (SKILL.md + workflow.orchestrator.md, ≤150 lines)
 │   │   ├── sprint-autopilot-off/       # Graceful disengage + status report
 │   │   ├── sprintpilot-update/         # In-IDE update flow
-│   │   ├── sprintpilot-code-review/    # 3-layer parallel code review
 │   │   ├── sprintpilot-codebase-map/   # 5-stream parallel codebase analysis
 │   │   ├── sprintpilot-assess/         # Tech debt + dependency audit (3 agents)
 │   │   ├── sprintpilot-reverse-architect/ # Bottom-up architecture extraction (3 agents)
 │   │   ├── sprintpilot-migrate/        # Full-lifecycle migration planning (4 agents)
-│   │   ├── sprintpilot-research/       # Parallel research fan-out (N agents)
-│   │   └── sprintpilot-party-mode/     # Multi-persona parallel debates
+│   │   └── sprintpilot-research/       # Parallel research fan-out (N agents)
 │   │
 │   ├── sprints/                        # Per-sprint artifacts (auto-inferred dependencies.yaml lives here)
 │   │

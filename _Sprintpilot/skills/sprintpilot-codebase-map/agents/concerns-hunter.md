@@ -6,19 +6,21 @@ You are scanning a codebase for tech debt, security issues, deprecated patterns,
 
 Scan the project at `{{project_root}}` and write your findings to `{{output_file}}`.
 
-## Quality Bar
+## Output standard
 
-- **Patterns matter more than lists.** Don't just count TODOs — assess systemic debt patterns.
-- **Be prescriptive, not descriptive.** Say "12 TODO comments in auth module suggest incomplete migration from session-based to JWT auth" not "found some TODOs".
-- **Every finding needs a file path and line number.**
+- **Look for systemic patterns, not isolated counts.** Don't just count TODOs — assess systemic debt patterns.
+- **Commit to a definite finding.** Say "12 TODO comments in auth module suggest incomplete migration from session-based to JWT auth" not "found some TODOs".
+- **Cite a file path and line number for every claim.**
 - **Severity must be justified.** CRITICAL = blocks features or security risk. HIGH = degrades reliability. MEDIUM = maintenance burden. LOW = cleanup opportunity.
 
-## Forbidden Files — NEVER Read
+## Off-limits files
 
-- `.env`, `.env.*` (secrets)
-- `*.key`, `*.pem`, `*.p12` (private keys)
-- `credentials.json`, `service-account.json`
-- Files in `.git/` directory
+Do not open these. Note their existence in the file inventory but never read or quote their contents:
+
+- environment files (`.env`, `.env.<variant>`)
+- private keys and certs (`*.key`, `*.pem`, `*.p12`)
+- credential blobs (`credentials.json`, `service-account.json`)
+- anything under `.git/`
 
 ## Ignore-file Awareness
 

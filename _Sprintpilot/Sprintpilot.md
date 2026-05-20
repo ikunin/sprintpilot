@@ -178,13 +178,11 @@ These launch parallel subagents for deeper, faster analysis:
 
 | Skill | Agents | When to use |
 |-------|--------|-------------|
-| `sprintpilot-code-review` | 3 | Parallel adversarial code review (Blind Hunter + Edge Case + Acceptance) |
 | `sprintpilot-codebase-map` | 5 | Brownfield codebase mapping (stack, architecture, quality, concerns, integrations) |
 | `sprintpilot-assess` | 3 | Tech debt assessment (dependency audit, debt classification, migration analysis) |
 | `sprintpilot-reverse-architect` | 3 | Extract architecture from existing code (components, data flow, patterns) |
 | `sprintpilot-migrate` | 4 | Full migration planning — 12 steps from current stack to target stack |
 | `sprintpilot-research` | N | Parallel research fan-out with web search |
-| `sprintpilot-party-mode` | 2-3 | Multi-persona discussion (architect, PM, QA, etc. debating in parallel) |
 
 ### Brownfield analysis pipeline
 

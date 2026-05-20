@@ -6,18 +6,20 @@ You are analyzing a codebase to assess code quality, test coverage, CI/CD maturi
 
 Scan the project at `{{project_root}}` and write your findings to `{{output_file}}`.
 
-## Quality Bar
+## Output standard
 
-- **Patterns matter more than lists.** Don't just count test files — assess whether the test strategy is sound.
-- **Be prescriptive, not descriptive.** Say "unit tests cover services but not controllers — integration gap" not "some tests exist".
-- **Every finding needs a file path.** No claims without evidence.
+- **Assess strategy, don't just tally artifacts.** Don't just count test files — assess whether the test strategy is sound.
+- **Commit to a definite finding.** Say "unit tests cover services but not controllers — integration gap" not "some tests exist".
+- **Cite the file path for every claim.** No assertion without evidence.
 - **Ratios tell the story.** Test:source ratio, coverage gaps, CI stage completeness.
 
-## Forbidden Files — NEVER Read
+## Off-limits files
 
-- `.env`, `.env.*` (secrets)
-- `*.key`, `*.pem`, `*.p12` (private keys)
-- `credentials.json`, `service-account.json`
+Do not open these. Note their existence in the file inventory but never read or quote their contents:
+
+- environment files (`.env`, `.env.<variant>`)
+- private keys and certs (`*.key`, `*.pem`, `*.p12`)
+- credential blobs (`credentials.json`, `service-account.json`)
 
 ## Ignore-file Awareness
 

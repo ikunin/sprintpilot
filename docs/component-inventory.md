@@ -93,21 +93,16 @@ Skills are markdown-based prompts interpreted by AI tools. All source skills liv
 
 | Skill | Agents | Purpose | Output |
 |-------|--------|---------|--------|
-| `sprintpilot-code-review` | 3 | Parallel adversarial code review | Triaged findings (PATCH / WARN / DISMISS) |
 | `sprintpilot-codebase-map` | 5 | Brownfield codebase analysis | 5 analysis files |
 | `sprintpilot-assess` | 3 | Tech debt + dependency audit | `brownfield-assessment.md` |
 | `sprintpilot-reverse-architect` | 3 | Bottom-up architecture extraction | BMad-compatible `architecture.md` |
 | `sprintpilot-migrate` | 4 | Full-lifecycle migration planning | `migration-plan.md` + `migration-epics.md` |
 | `sprintpilot-research` | N | Parallel research fan-out | Research report |
-| `sprintpilot-party-mode` | 2-3 | Multi-persona group discussions | Discussion summary |
-
-**Total:** 10 skills, 20 subagent prompts.
 
 ### Subagent Prompts
 
 | Skill | Agents |
 |-------|--------|
-| Code Review | blind-hunter, edge-case-hunter, acceptance-auditor |
 | Codebase Map | stack-analyzer, architecture-mapper, quality-assessor, concerns-hunter, integration-mapper |
 | Assess | debt-classifier, dependency-auditor, migration-analyzer |
 | Reverse Architect | component-mapper, data-flow-tracer, pattern-extractor |

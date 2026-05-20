@@ -1249,13 +1249,11 @@ Sprintpilot succeeds the `bmad-autopilot-addon` npm package (versions 1.0.0 – 
 | `sprint-autopilot-on` | Engage autonomous story execution with git integration |
 | `sprint-autopilot-off` | Disengage, show sprint + git status |
 | `sprintpilot-update` | Check for Sprintpilot updates |
-| `sprintpilot-code-review` | Parallel 3-layer adversarial code review |
 | `sprintpilot-codebase-map` | 5-stream brownfield codebase analysis |
 | `sprintpilot-assess` | Tech debt / dependency audit |
 | `sprintpilot-reverse-architect` | Extract architecture from existing code |
 | `sprintpilot-migrate` | Legacy migration planning |
 | `sprintpilot-research` | Parallel web research |
-| `sprintpilot-party-mode` | Multi-persona agent discussions |
 
 ### Agent-rules marker
 

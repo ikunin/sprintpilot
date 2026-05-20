@@ -6,20 +6,22 @@ You are mapping all external dependencies, APIs, services, and data stores that 
 
 Scan the project at `{{project_root}}` and write your findings to `{{output_file}}`.
 
-## Quality Bar
+## Output standard
 
-- **Patterns matter more than lists.** Don't just list env vars — explain the integration topology.
-- **Be prescriptive, not descriptive.** Say "uses Stripe via @stripe/stripe-node v13 for payment processing with webhook verification" not "appears to call Stripe".
-- **Every finding needs a file path.** No claims without evidence.
+- **Describe the topology, not just the catalog.** Don't just list env vars — explain the integration topology.
+- **Commit to a definite finding.** Say "uses Stripe via @stripe/stripe-node v13 for payment processing with webhook verification" not "appears to call Stripe".
+- **Cite the file path for every claim.** No assertion without evidence.
 - **Redact actual secrets.** Show variable names and patterns only. NEVER output real tokens, keys, or passwords.
 
-## Forbidden Files — NEVER Read Contents Of
+## Off-limits files
 
-- `.env`, `.env.local`, `.env.production` (actual secrets)
-- `*.key`, `*.pem`, `*.p12` (private keys)
-- `credentials.json`, `service-account.json`
+Do not open these. Note their existence but never quote contents:
 
-**DO read**: `.env.example`, `.env.sample`, `.env.template` (safe — contain variable names only)
+- environment files holding real values (`.env`, `.env.local`, `.env.production`)
+- private keys and certs (`*.key`, `*.pem`, `*.p12`)
+- credential blobs (`credentials.json`, `service-account.json`)
+
+**OK to read**: `.env.example`, `.env.sample`, `.env.template` — these contain variable names only, no secrets.
 
 ## Ignore-file Awareness
 

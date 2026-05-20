@@ -57,7 +57,7 @@ The installer will:
 1. Verify BMad Method is installed
 2. Auto-detect which tools have BMad Method configured
 3. Prompt you to select target tools (or press Enter to use detected ones)
-4. Install 10 skills to each selected tool's skills directory
+4. Install Sprintpilot skills to each selected tool's skills directory
 5. Back up any existing skills before overwriting
 6. Add artifact entries to `.gitignore`
 
@@ -130,11 +130,11 @@ After install, check that skills are available in your tool's directory:
 ls <tool-dir>/sprint-autopilot-* <tool-dir>/sprintpilot-*
 ```
 
-You should see 10 skill directories per tool:
+You should see the addon skill directories per tool:
 - `sprint-autopilot-on`, `sprint-autopilot-off`, `sprintpilot-update`
-- `sprintpilot-code-review`, `sprintpilot-codebase-map`, `sprintpilot-assess`
+- `sprintpilot-codebase-map`, `sprintpilot-assess`
 - `sprintpilot-reverse-architect`, `sprintpilot-migrate`
-- `sprintpilot-research`, `sprintpilot-party-mode`
+- `sprintpilot-research`
 
 The installer also creates **system prompt files** that enforce BMad Method workflows:
 

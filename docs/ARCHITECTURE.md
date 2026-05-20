@@ -83,13 +83,11 @@ _Sprintpilot/
     ├── sprint-autopilot-on/   # Enhanced autopilot (profile-aware, parallel-capable)
     ├── sprint-autopilot-off/  # Graceful exit + status report
     ├── sprintpilot-update/    # In-IDE update flow
-    ├── sprintpilot-code-review/      # 3 parallel review agents
     ├── sprintpilot-codebase-map/     # 5 parallel analysis agents
     ├── sprintpilot-assess/           # 3 parallel assessment agents
     ├── sprintpilot-reverse-architect/ # 3 parallel extraction agents
     ├── sprintpilot-migrate/          # 12-step workflow, 4 agents
-    ├── sprintpilot-research/         # N parallel research agents
-    └── sprintpilot-party-mode/       # 2-3 parallel persona agents
+    └── sprintpilot-research/         # N parallel research agents
 ```
 
 ## Key Mechanisms

@@ -192,13 +192,11 @@ Full handoff report format + ledger semantics: [docs/USAGE.md](docs/USAGE.md#han
 | `/sprint-autopilot-on` | Engage autonomous sprint execution |
 | `/sprint-autopilot-off` | Disengage and show status |
 | `/sprintpilot-update` | Check for updates and install the latest version |
-| `/sprintpilot-code-review` | Parallel 3-layer adversarial code review |
 | `/sprintpilot-codebase-map` | 5-stream brownfield codebase analysis |
 | `/sprintpilot-assess` | Tech debt, dependency audit, migration assessment |
 | `/sprintpilot-reverse-architect` | Extract architecture document from existing code |
 | `/sprintpilot-migrate` | 12-step legacy migration planning |
 | `/sprintpilot-research` | Parallel web research fan-out |
-| `/sprintpilot-party-mode` | Multi-persona BMad agent discussions |
 
 Multi-agent skill internals: [docs/USAGE.md](docs/USAGE.md#multi-agent-skills).
 
@@ -348,11 +346,9 @@ Decision matrix and additional knobs: [`modules/git/branching-and-pr-strategy.md
 
 ## Multi-Agent Intelligence
 
-Beyond the autopilot, 7 multi-agent skills launch parallel subagents for tasks that benefit from diverse perspectives.
+Beyond the autopilot, multi-agent skills launch parallel subagents for tasks that benefit from diverse perspectives.
 
-**`/sprintpilot-code-review`** — 3 reviewers run simultaneously: Blind Hunter (adversarial, diff only), Edge Case Hunter (codebase access), Acceptance Auditor (story spec). Findings triaged as **PATCH / WARN / DISMISS**. PATCH findings auto-applied as separate commits.
-
-**`/sprintpilot-codebase-map`** — 5 parallel agents scan an existing codebase: stack, architecture, quality, concerns, integrations. Output under `_bmad-output/codebase-analysis/`.
+**`/sprintpilot-codebase-map`** — 5 parallel agents scan an existing codebase: stack, architecture, quality, concerns, integrations. Output under `_bmad-output/codebase-analysis/`. Inspired by [GSD's map-codebase](https://github.com/gsd-build/get-shit-done) — see [NOTICES.md](NOTICES.md).
 
 **`/sprintpilot-assess`** — Dependency auditor (CVEs), debt classifier (prioritized), migration analyzer. Output: prioritized findings with severity / confidence / effort.
 
@@ -361,8 +357,6 @@ Beyond the autopilot, 7 multi-agent skills launch parallel subagents for tasks t
 **`/sprintpilot-migrate`** — 12-step migration planner with 4 subagent fan-outs. Strategy, compatibility matrix, phased roadmap, per-component cards, data + API migration, risk matrix.
 
 **`/sprintpilot-research`** — Fan out research across multiple topics in parallel; synthesized into a unified report.
-
-**`/sprintpilot-party-mode`** — 2–3 BMad personas (architect, PM, QA, dev) debate a topic over multiple rounds. Output: consensus points, disagreements, action items.
 
 Skill internals + output schemas: [docs/USAGE.md](docs/USAGE.md#multi-agent-skills).
 
