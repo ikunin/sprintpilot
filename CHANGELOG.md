@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.3.2] - 2026-05-22
+
+### Fixed
+
+- **False-positive WARN on every install.** `verifySkillManifest` checked `<projectRoot>/_Sprintpilot/skills/` — a path the installer never populates (skills only land in per-tool dirs like `.claude/skills/`). The verifier now checks the npm bundle source, which is the packaging-hygiene check it was meant to be.
+- **Orphan skills lingering across releases.** Skills removed from the manifest between releases (e.g. `sprintpilot-code-review` and `sprintpilot-party-mode` in v2.3.1) stayed in users' tool `skills/` dirs forever, polluting the slash-command picker. Installer now sweeps each tool's `skills/` after the deploy loop and removes Sprintpilot-namespace dirs that aren't in the current manifest. Backs up to `.sprintpilot-backups/` first. Strictly scoped to `sprint-autopilot-*` and `sprintpilot-*` — never touches BMAD or user skills.
+
 ## [2.3.1] - 2026-05-20
 
 ### Changed
