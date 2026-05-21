@@ -27,7 +27,18 @@ const { _internals } = installMod as {
       },
     ) => Promise<void>;
     applyScalar: (source: string, key: string, value: string | number) => string;
-    verifySkillManifest: (root: string) => Promise<{ missing: string[] }>;
+    verifySkillManifest: (
+      projectRoot: string,
+      bundleDir?: string,
+    ) => Promise<{ missing: string[] }>;
+    pruneOrphanSkillsFromToolDir: (
+      skillsDir: string,
+      currentSkills: string[],
+      backupDir: string,
+      ts: string,
+      opts?: { dryRun?: boolean },
+    ) => Promise<string[]>;
+    SPRINTPILOT_SKILL_PREFIXES: readonly string[];
     RETROSPECTIVE_MODES: readonly string[];
   };
 };
@@ -37,6 +48,8 @@ const {
   patchAutopilotConfig,
   applyScalar,
   verifySkillManifest,
+  pruneOrphanSkillsFromToolDir,
+  SPRINTPILOT_SKILL_PREFIXES,
   RETROSPECTIVE_MODES,
 } = _internals;
 
@@ -325,6 +338,21 @@ describe('patchAutopilotConfig — v2.3.0 auto_plan_on_start persistence', () =>
 // ──────────────────────────────────────────────────────────────────
 
 describe('verifySkillManifest', () => {
+  // Production layout:
+  //   <projectRoot>/_Sprintpilot/manifest.yaml      (consumer's installed manifest)
+  //   <bundleDir>/skills/<name>/SKILL.md            (npm package's bundled skills)
+  // In tests we treat `root` as the projectRoot and `bundle` as the bundleDir
+  // (a sibling dir), so the test layout matches production semantics.
+
+  let bundle: string;
+
+  beforeEach(() => {
+    bundle = mkdtempSync(join(tmpdir(), 'sprintpilot-bundle-'));
+  });
+  afterEach(() => {
+    rmSync(bundle, { recursive: true, force: true });
+  });
+
   function writeManifest(skills: string[]): void {
     const dir = join(root, '_Sprintpilot');
     mkdirSync(dir, { recursive: true });
@@ -338,30 +366,30 @@ describe('verifySkillManifest', () => {
     writeFileSync(join(dir, 'manifest.yaml'), body, 'utf8');
   }
 
-  function writeSkillFile(skillName: string, body = '---\nname: x\n---\n'): void {
-    const dir = join(root, '_Sprintpilot', 'skills', skillName);
+  function writeBundleSkillFile(skillName: string, body = '---\nname: x\n---\n'): void {
+    const dir = join(bundle, 'skills', skillName);
     mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, 'SKILL.md'), body, 'utf8');
   }
 
   it("returns empty missing when manifest file is absent", async () => {
-    const r = await verifySkillManifest(root);
+    const r = await verifySkillManifest(root, bundle);
     expect(r.missing).toEqual([]);
   });
 
-  it("returns empty missing when all listed skills exist on disk", async () => {
+  it("returns empty missing when all manifest skills are present in the bundle", async () => {
     writeManifest(['sprint-autopilot-on', 'sprintpilot-plan-sprint']);
-    writeSkillFile('sprint-autopilot-on');
-    writeSkillFile('sprintpilot-plan-sprint');
-    const r = await verifySkillManifest(root);
+    writeBundleSkillFile('sprint-autopilot-on');
+    writeBundleSkillFile('sprintpilot-plan-sprint');
+    const r = await verifySkillManifest(root, bundle);
     expect(r.missing).toEqual([]);
   });
 
-  it("returns each skill that's in the manifest but missing on disk", async () => {
+  it("returns each manifest skill that's missing from the bundle", async () => {
     writeManifest(['sprint-autopilot-on', 'sprintpilot-plan-sprint', 'sprintpilot-sprint-progress']);
-    writeSkillFile('sprint-autopilot-on');
-    // sprintpilot-plan-sprint + sprintpilot-sprint-progress NOT written
-    const r = await verifySkillManifest(root);
+    writeBundleSkillFile('sprint-autopilot-on');
+    // The other two skills are listed in manifest but not shipped in the bundle.
+    const r = await verifySkillManifest(root, bundle);
     expect(r.missing.sort()).toEqual(['sprintpilot-plan-sprint', 'sprintpilot-sprint-progress']);
   });
 
@@ -369,7 +397,7 @@ describe('verifySkillManifest', () => {
     const dir = join(root, '_Sprintpilot');
     mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, 'manifest.yaml'), 'addon:\n  name: x\n  installed_skills: []\n', 'utf8');
-    const r = await verifySkillManifest(root);
+    const r = await verifySkillManifest(root, bundle);
     expect(r.missing).toEqual([]);
   });
 
@@ -377,7 +405,143 @@ describe('verifySkillManifest', () => {
     const dir = join(root, '_Sprintpilot');
     mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, 'manifest.yaml'), 'not even close to yaml: : :\n', 'utf8');
-    const r = await verifySkillManifest(root);
+    const r = await verifySkillManifest(root, bundle);
     expect(r.missing).toEqual([]);
+  });
+
+  it("regression: false-positive WARN bug — does NOT report skills missing when they exist only in the bundle, not in the project copy (v2.3.2 fix)", async () => {
+    // Reproduces the v2.3.0/v2.3.1 bug: skills live in the bundle, not under
+    // <projectRoot>/_Sprintpilot/skills/. The fixed verifier looks at the
+    // bundle and must report no missing skills here.
+    writeManifest(['sprint-autopilot-on', 'sprintpilot-plan-sprint']);
+    writeBundleSkillFile('sprint-autopilot-on');
+    writeBundleSkillFile('sprintpilot-plan-sprint');
+    // Crucially: do NOT create <root>/_Sprintpilot/skills/. That's the
+    // real-world install state.
+    const r = await verifySkillManifest(root, bundle);
+    expect(r.missing).toEqual([]);
+  });
+});
+
+// ──────────────────────────────────────────────────────────────────
+// v2.3.2 — orphan-skill prune
+// ──────────────────────────────────────────────────────────────────
+
+describe('pruneOrphanSkillsFromToolDir', () => {
+  let skillsDir: string;
+  let backupDir: string;
+  const ts = '2026-01-01T00-00-00';
+
+  beforeEach(() => {
+    skillsDir = join(root, '.claude', 'skills');
+    backupDir = join(root, '.claude', '.sprintpilot-backups');
+    mkdirSync(skillsDir, { recursive: true });
+  });
+
+  function mkSkill(name: string): void {
+    const dir = join(skillsDir, name);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'SKILL.md'), '---\nname: x\n---\n', 'utf8');
+  }
+
+  it('returns empty when skills dir does not exist', async () => {
+    const missingDir = join(root, '.does-not-exist', 'skills');
+    const r = await pruneOrphanSkillsFromToolDir(missingDir, ['sprint-autopilot-on'], backupDir, ts);
+    expect(r).toEqual([]);
+  });
+
+  it('removes Sprintpilot-namespace skills not in the current set', async () => {
+    mkSkill('sprint-autopilot-on');
+    mkSkill('sprintpilot-codebase-map');
+    mkSkill('sprintpilot-code-review'); // orphan
+    mkSkill('sprintpilot-party-mode'); // orphan
+    const current = ['sprint-autopilot-on', 'sprintpilot-codebase-map'];
+    const removed = await pruneOrphanSkillsFromToolDir(skillsDir, current, backupDir, ts);
+    expect(removed.sort()).toEqual(['sprintpilot-code-review', 'sprintpilot-party-mode']);
+    // Verify currents are untouched
+    expect(() => readFileSync(join(skillsDir, 'sprint-autopilot-on', 'SKILL.md'), 'utf8')).not.toThrow();
+    expect(() => readFileSync(join(skillsDir, 'sprintpilot-codebase-map', 'SKILL.md'), 'utf8')).not.toThrow();
+    // Verify orphans are gone
+    expect(() => readFileSync(join(skillsDir, 'sprintpilot-code-review', 'SKILL.md'), 'utf8')).toThrow();
+    expect(() => readFileSync(join(skillsDir, 'sprintpilot-party-mode', 'SKILL.md'), 'utf8')).toThrow();
+  });
+
+  it('does NOT touch skills outside the Sprintpilot namespace', async () => {
+    mkSkill('bmad-code-review');
+    mkSkill('bmad-sprint-planning');
+    mkSkill('custom-user-skill');
+    mkSkill('sprintpilot-codebase-map');
+    const current = ['sprintpilot-codebase-map'];
+    const removed = await pruneOrphanSkillsFromToolDir(skillsDir, current, backupDir, ts);
+    expect(removed).toEqual([]);
+    // Non-Sprintpilot skills still present
+    expect(() => readFileSync(join(skillsDir, 'bmad-code-review', 'SKILL.md'), 'utf8')).not.toThrow();
+    expect(() => readFileSync(join(skillsDir, 'bmad-sprint-planning', 'SKILL.md'), 'utf8')).not.toThrow();
+    expect(() => readFileSync(join(skillsDir, 'custom-user-skill', 'SKILL.md'), 'utf8')).not.toThrow();
+  });
+
+  it('handles both Sprintpilot prefixes (sprint-autopilot- and sprintpilot-)', async () => {
+    mkSkill('sprint-autopilot-on');
+    mkSkill('sprint-autopilot-stale'); // orphan, sprint-autopilot- prefix
+    mkSkill('sprintpilot-stale'); // orphan, sprintpilot- prefix
+    const removed = await pruneOrphanSkillsFromToolDir(
+      skillsDir,
+      ['sprint-autopilot-on'],
+      backupDir,
+      ts,
+    );
+    expect(removed.sort()).toEqual(['sprint-autopilot-stale', 'sprintpilot-stale']);
+  });
+
+  it('dryRun lists orphans without removing them', async () => {
+    mkSkill('sprintpilot-codebase-map');
+    mkSkill('sprintpilot-orphan');
+    const removed = await pruneOrphanSkillsFromToolDir(
+      skillsDir,
+      ['sprintpilot-codebase-map'],
+      backupDir,
+      ts,
+      { dryRun: true },
+    );
+    expect(removed).toEqual(['sprintpilot-orphan']);
+    // Orphan should STILL be on disk after dry-run
+    expect(() => readFileSync(join(skillsDir, 'sprintpilot-orphan', 'SKILL.md'), 'utf8')).not.toThrow();
+  });
+
+  it('regression: removes the v2.3.0 → v2.3.1 orphans (sprintpilot-code-review, sprintpilot-party-mode)', async () => {
+    // The exact orphan set that v2.3.1 left behind in users' tool dirs.
+    mkSkill('sprint-autopilot-on');
+    mkSkill('sprint-autopilot-off');
+    mkSkill('sprintpilot-update');
+    mkSkill('sprintpilot-codebase-map');
+    mkSkill('sprintpilot-assess');
+    mkSkill('sprintpilot-reverse-architect');
+    mkSkill('sprintpilot-migrate');
+    mkSkill('sprintpilot-research');
+    mkSkill('sprintpilot-plan-sprint');
+    mkSkill('sprintpilot-sprint-progress');
+    mkSkill('sprintpilot-dependency-graph');
+    mkSkill('sprintpilot-code-review'); // orphan
+    mkSkill('sprintpilot-party-mode'); // orphan
+    const v231Manifest = [
+      'sprint-autopilot-on',
+      'sprint-autopilot-off',
+      'sprintpilot-update',
+      'sprintpilot-codebase-map',
+      'sprintpilot-assess',
+      'sprintpilot-reverse-architect',
+      'sprintpilot-migrate',
+      'sprintpilot-research',
+      'sprintpilot-plan-sprint',
+      'sprintpilot-sprint-progress',
+      'sprintpilot-dependency-graph',
+    ];
+    const removed = await pruneOrphanSkillsFromToolDir(skillsDir, v231Manifest, backupDir, ts);
+    expect(removed.sort()).toEqual(['sprintpilot-code-review', 'sprintpilot-party-mode']);
+  });
+
+  it('exposes SPRINTPILOT_SKILL_PREFIXES for namespace ownership', () => {
+    expect(SPRINTPILOT_SKILL_PREFIXES).toContain('sprint-autopilot-');
+    expect(SPRINTPILOT_SKILL_PREFIXES).toContain('sprintpilot-');
   });
 });
