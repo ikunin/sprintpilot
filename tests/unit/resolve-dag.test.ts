@@ -211,6 +211,59 @@ describe('buildEdges', () => {
     // Outbound c→d survives:
     expect(edges).toContainEqual(['c', 'd']);
   });
+
+  it('v2.3.4 regression: ordering is suppressed when explicit produced edges (no fake cycle)', () => {
+    // Reproduces the jarvis epic-6 cycle: an explicit "6-1 depends on 6-3"
+    // emits 6-3 → 6-1 (backwards against story order). With ordering's
+    // linear chain 6-1 → 6-2 → 6-3 added on top, this closes a fake
+    // cycle 6-3 → 6-1 → 6-2 → 6-3 that the user never declared. The fix
+    // suppresses ordering whenever explicit produced any edges.
+    const nodes = ['6-1', '6-2', '6-3', '6-4', '6-5', '6-6'];
+    const doc = {
+      stories: {
+        '6-1': { depends_on: ['6-3', '6-4'] },
+        '6-4': { depends_on: ['6-3'] },
+        '6-5': { depends_on: ['6-3', '6-4'] },
+      },
+    };
+    const edges = buildEdges(['explicit', 'ordering'], nodes, doc);
+    // Only explicit edges should remain — no linear-chain edges.
+    expect(edges).toContainEqual(['6-3', '6-1']);
+    expect(edges).toContainEqual(['6-4', '6-1']);
+    expect(edges).toContainEqual(['6-3', '6-4']);
+    expect(edges).toContainEqual(['6-3', '6-5']);
+    expect(edges).toContainEqual(['6-4', '6-5']);
+    expect(edges.length).toBe(5);
+    // Ordering's linear-chain edges must NOT be present.
+    expect(edges).not.toContainEqual(['6-1', '6-2']);
+    expect(edges).not.toContainEqual(['6-2', '6-3']);
+    expect(edges).not.toContainEqual(['6-5', '6-6']);
+  });
+
+  it('ordering still applies when explicit is empty (greenfield epic with no declared deps)', () => {
+    const nodes = ['1-1-a', '1-2-b', '1-3-c'];
+    const doc = { stories: {} };
+    const edges = buildEdges(['explicit', 'ordering'], nodes, doc);
+    expect(edges).toEqual([
+      ['1-1-a', '1-2-b'],
+      ['1-2-b', '1-3-c'],
+    ]);
+  });
+
+  it('ordering also suppressed when explicit edges come only from cross_epic_deps', () => {
+    const nodes = ['1-1', '1-2', '2-1'];
+    const doc = {
+      cross_epic_deps: [{ from_story: '2-1', to_story: '1-2' }],
+    };
+    const edges = buildEdges(['explicit', 'ordering'], nodes, doc, { includeCrossEpic: true });
+    // Cross-epic edge present (emitted as [to, from] = ['1-2', '2-1']).
+    expect(edges).toContainEqual(['1-2', '2-1']);
+    // Ordering's linear chain is suppressed even though only cross-epic
+    // produced explicit edges (no per-epic depends_on entries).
+    expect(edges).not.toContainEqual(['1-1', '1-2']);
+    expect(edges).not.toContainEqual(['1-2', '2-1'].slice(0).reverse() as [string, string]);
+    expect(edges.length).toBe(1);
+  });
 });
 
 describe('buildDag — full pipeline', () => {

@@ -260,12 +260,28 @@ function buildEdges(strategies, nodes, depsDoc, { includeCrossEpic = false } = {
       out.push([a, b]);
     }
   };
+  // Track whether explicit produced any edges in this build — if it did,
+  // ordering is suppressed for the same nodeset to avoid the back-edge
+  // cycle bug: when an explicit dep points "backwards" against story
+  // order (e.g. 6-1 depends on 6-3 — explicit emits 6-3 → 6-1), the
+  // linear ordering chain (6-1 → 6-2 → 6-3) closes a fake cycle that
+  // the user never declared. Explicit deps express the user's intent
+  // in full; ordering is only a fallback when none are provided.
+  let explicitProducedEdges = false;
   for (const strat of strategies) {
     if (strat === 'explicit') {
-      pushEdges(edgesFromExplicit(depsDoc, nodes));
-      if (includeCrossEpic) pushEdges(edgesFromCrossEpic(depsDoc, nodes));
+      const explicit = edgesFromExplicit(depsDoc, nodes);
+      pushEdges(explicit);
+      if (explicit.length > 0) explicitProducedEdges = true;
+      if (includeCrossEpic) {
+        const cross = edgesFromCrossEpic(depsDoc, nodes);
+        pushEdges(cross);
+        if (cross.length > 0) explicitProducedEdges = true;
+      }
     } else if (strat === 'ordering') {
-      pushEdges(edgesFromOrdering(nodes));
+      if (!explicitProducedEdges) {
+        pushEdges(edgesFromOrdering(nodes));
+      }
     } else if (strat === 'files') {
       // files strategy opt-in, not implemented yet — a future
       // sprintpilot-infer-dependencies skill populates the explicit sidecar.

@@ -1,5 +1,11 @@
 # Changelog
 
+## [2.3.4] - 2026-05-22
+
+### Fixed
+
+- **`resolve-dag` reported phantom cycles when explicit dependencies pointed "backwards" against story order.** Default strategy combined `explicit` + `ordering` unconditionally. An explicit dep like `6-1 depends_on: [6-3]` emits edge `6-3 → 6-1` (backwards vs lexical order). Layered on top of `ordering`'s linear chain `6-1 → 6-2 → 6-3 → …`, this closes a fake cycle `6-3 → 6-1 → 6-2 → 6-3` that the user never declared. Affected `/sprintpilot-dependency-graph`, `/sprintpilot-plan-sprint`, and the orchestrator's DAG-aware queue. Ordering is now suppressed whenever explicit (or cross-epic) produced any edges — the user's declared deps express full intent.
+
 ## [2.3.3] - 2026-05-22
 
 ### Fixed
