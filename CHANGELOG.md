@@ -1,5 +1,11 @@
 # Changelog
 
+## [2.3.3] - 2026-05-22
+
+### Fixed
+
+- **`/sprintpilot-plan-sprint` and dependency inference crashed with `MODULE_NOT_FOUND` in consumer projects.** Two runtime scripts (`sprint-plan.js`, `infer-dependencies.js`) require `js-yaml` for full YAML parse/dump — beyond what the in-tree `yaml-lite` covers. js-yaml exists in Sprintpilot's own `node_modules/` but was never bundled into the installed `_Sprintpilot/`, so the require failed on every invocation in user projects. Installer now copies `js-yaml` into `<projectRoot>/_Sprintpilot/node_modules/js-yaml/` and adds `_Sprintpilot/node_modules/` to `.gitignore`.
+
 ## [2.3.2] - 2026-05-22
 
 ### Fixed
