@@ -401,4 +401,35 @@ describe('CLI integration', () => {
     expect(res.stderr).toMatch(/cycle detected/);
   });
 
+  it('v2.3.5 regression: mermaid output puts "flowchart" on the first line (strict-renderer compatibility)', () => {
+    // Reproduces the jarvis report: Claude Code's chat renderer (and
+    // some markdown→mermaid pipelines) detect mermaid by sniffing the
+    // first non-blank line for a diagram type. Leading `%%` comments
+    // caused them to silently skip rendering.
+    seed(
+      tmpRoot,
+      'development_status:\n  1-1-a: ready-for-dev\n  1-2-b: backlog\n',
+    );
+    const outputPath = join(tmpRoot, '_bmad-output', 'dag.mmd');
+    execFileSync(process.execPath, [
+      SCRIPT,
+      'render',
+      '--format',
+      'mermaid',
+      '--epic',
+      '1',
+      '--output',
+      outputPath,
+      '--project-root',
+      tmpRoot,
+    ]);
+    const rendered = readFileSync(outputPath, 'utf8');
+    const firstNonBlankLine = rendered
+      .split('\n')
+      .find((line) => line.trim().length > 0);
+    expect(firstNonBlankLine).toBe('flowchart LR');
+    // Sanity: %% comments still present after the type declaration.
+    expect(rendered).toMatch(/^flowchart LR\n%% plan-id:/m);
+  });
+
 });

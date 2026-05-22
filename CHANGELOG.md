@@ -1,5 +1,11 @@
 # Changelog
 
+## [2.3.5] - 2026-05-22
+
+### Fixed
+
+- **Mermaid diagrams from `/sprintpilot-dependency-graph` were silently not rendered** by strict markdown→mermaid pipelines (Claude Code's chat renderer among them). The renderer emitted four `%%` comment lines before `flowchart LR`; renderers that sniff for the diagram type on the first non-blank line treated the block as not-mermaid and skipped rendering. Type declaration now comes first; metadata comments follow inside the diagram body (still valid `%%` mermaid comments).
+
 ## [2.3.4] - 2026-05-22
 
 ### Fixed

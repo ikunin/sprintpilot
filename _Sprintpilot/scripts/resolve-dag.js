@@ -508,11 +508,16 @@ function renderMermaid(dag, plan) {
   const epicIssueIds = issueIdByEpicId(plan);
   const { intra, cross } = bucketEdges(dag.edges);
   const lines = [];
+  // The diagram-type declaration MUST be the first non-blank line.
+  // Strict markdown→mermaid renderers (Claude Code's chat renderer
+  // included) sniff for `flowchart`/`graph`/etc. as the first content
+  // line; leading `%%` comments cause them to silently skip rendering.
+  // Comments after the type declaration are fine.
+  lines.push('flowchart LR');
   lines.push(`%% plan-id: ${plan?.plan_id ?? 'unknown'}`);
   lines.push(`%% generated: ${plan?.generated ?? new Date().toISOString()}`);
   lines.push('%% Sprint plan DAG — node fill encodes plan_status; cross-epic edges are dashed.');
   lines.push('%% Story labels are prefixed with their issue_id when set in plan.stories.');
-  lines.push('flowchart LR');
 
   // Group nodes by epic (if any). When sprint-wide, emit subgraphs.
   const epicGroups = new Map();
