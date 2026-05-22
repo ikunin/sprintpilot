@@ -1,5 +1,11 @@
 # Changelog
 
+## [2.3.7] - 2026-05-22
+
+### Changed
+
+- **`/sprintpilot-dependency-graph` workflow now mandates surfacing the Mermaid CLI install instruction.** When the envelope returns `png_reason: "mmdc-missing"`, the skill **MUST** print the install command (`npm install -g @mermaid-js/mermaid-cli`) verbatim. Previously the hint was a sub-bullet that could be missed; now it's an explicit MUST in both the per-format docs and the failure-modes table, with a noted cross-platform note (Windows/Linux/macOS, Node 18+).
+
 ## [2.3.6] - 2026-05-22
 
 ### Added

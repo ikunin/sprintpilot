@@ -136,18 +136,32 @@ silence communicates "not tracked" rather than spamming `[no issue]`.
 
 **PNG sibling render.** As a side-effect of the mermaid render, the
 script tries to produce a `<file>.png` next to the `.mmd` via the
-official Mermaid CLI (`mmdc`). Three outcomes to surface:
+official Mermaid CLI (`mmdc`). You **MUST** examine the envelope's
+`png_*` fields and surface one of the three outcomes to the user —
+silence is a bug, especially when mmdc is missing.
 
-- `png_file` set → PNG produced. Report:
+- **`png_file` set** → PNG produced. Report:
   > Also wrote PNG: `<png_file>` (rendered via Mermaid CLI).
-- `png_reason: "mmdc-missing"` → Mermaid CLI not installed. Report:
-  > PNG render skipped — install Mermaid CLI to get a `.png` next to
-  > the `.mmd`:
-  >   `npm install -g @mermaid-js/mermaid-cli`
-  > (Requires Node 18+. Then re-run this skill.)
-- `png_reason: "render-failed"` → mmdc errored. Report the `png_message`
-  verbatim and suggest re-running with `mmdc -i <mmd> -o <png>` to see
-  the full error.
+
+- **`png_reason: "mmdc-missing"`** → Mermaid CLI is not installed.
+  You **MUST** tell the user how to install it, verbatim:
+  > PNG render skipped — Mermaid CLI (`mmdc`) is not installed.
+  > To get a `.png` alongside the `.mmd` next time, install it:
+  >
+  > ```
+  > npm install -g @mermaid-js/mermaid-cli
+  > ```
+  >
+  > Works on Windows, Linux, and macOS. Requires Node 18+.
+  > After installing, re-run `/sprintpilot-dependency-graph mermaid`.
+
+  Do not silently drop this. The `.mmd` file is still useful but the
+  install hint is the primary value of this code path.
+
+- **`png_reason: "render-failed"`** → mmdc was found but errored.
+  Report the `png_message` verbatim and suggest re-running with
+  `mmdc -i <mmd-path> -o <png-path>` outside the skill to see the
+  full toolchain error.
 
 ### Graphviz
 
@@ -239,4 +253,6 @@ have different leading hyphen segments — leverage the JSON output).</action>
 | Plan file corrupt | Surface the parse error from `sprint-plan.js read`; suggest re-running the planning skill. |
 | Cycle detected (`resolve-dag.js` exits 1 with "cycle detected") | Report the cycling node list verbatim. Suggest reviewing `plan.dependencies.stories` for the named keys, or re-running `/sprintpilot-plan-sprint` to re-infer. |
 | Graphviz binary missing | Note the fallback; tell the user how to install `dot`; do NOT silently retry with a different format. |
+| Mermaid CLI (`mmdc`) missing (mermaid format, `png_reason: "mmdc-missing"`) | You **MUST** report the install command: `npm install -g @mermaid-js/mermaid-cli` (cross-platform, requires Node 18+). The `.mmd` file is still written, but never skip the install hint — that's the user-actionable signal. |
+| Mermaid CLI present but errored (`png_reason: "render-failed"`) | Surface `png_message` verbatim; suggest re-running `mmdc -i <mmd> -o <png>` outside the skill to see the full toolchain error. |
 | Output file write fails (permission, disk full) | Surface the error from the resolve-dag stderr; chat-render the JSON output as a fallback so the user still gets something usable. |
