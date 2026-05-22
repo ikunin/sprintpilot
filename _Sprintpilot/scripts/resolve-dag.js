@@ -640,6 +640,50 @@ function hasGraphvizBinary() {
   }
 }
 
+// Find the Mermaid CLI binary on PATH. Cross-platform: npm installs
+// CLI tools as `.cmd` shims on Windows, and Node's spawn family does
+// not auto-resolve PATHEXT extensions without `shell: true`. We probe
+// platform-appropriate candidates explicitly. Returns the resolved
+// binary name (suitable for spawnSync) or null if none found.
+function findMermaidCliBinary() {
+  const candidates =
+    process.platform === 'win32'
+      ? ['mmdc.cmd', 'mmdc.ps1', 'mmdc.bat', 'mmdc.exe', 'mmdc']
+      : ['mmdc'];
+  for (const name of candidates) {
+    try {
+      const r = spawnSync(name, ['--version'], { stdio: 'ignore' });
+      if (r.status === 0) return name;
+    } catch {
+      // ENOENT etc — try next candidate
+    }
+  }
+  return null;
+}
+
+// Try to render `<mmd>` to a sibling `<mmd>.png` via mmdc. Returns
+//   { written: true, file: <png-path> }                                — success
+//   { written: false, reason: 'mmdc-missing' }                         — toolchain absent
+//   { written: false, reason: 'render-failed', message: <stderr> }    — toolchain errored
+// Never throws; the caller threads the result into the envelope.
+function tryRenderMermaidPng(mmdPath) {
+  const bin = findMermaidCliBinary();
+  if (!bin) {
+    return { written: false, reason: 'mmdc-missing' };
+  }
+  const pngPath = mmdPath.endsWith('.mmd') ? mmdPath.slice(0, -4) + '.png' : mmdPath + '.png';
+  const r = spawnSync(bin, ['-i', mmdPath, '-o', pngPath, '-b', 'transparent', '--quiet'], {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+    windowsHide: true,
+  });
+  if (r.status !== 0) {
+    const message = (r.stderr || r.stdout || 'mmdc exited non-zero').trim();
+    return { written: false, reason: 'render-failed', message };
+  }
+  return { written: true, file: pngPath };
+}
+
 function defaultRenderOutputPath(projectRoot, format) {
   const ext = format === 'graphviz' ? 'dot' : 'mmd';
   return path.join(projectRoot, '_bmad-output', 'implementation-artifacts', `sprint-plan-dag.${ext}`);
@@ -694,12 +738,29 @@ function runRender({ projectRoot, epic, format, output }) {
     };
   }
 
+  // Sibling-PNG render (mermaid only). Non-fatal: caller surfaces the
+  // reason if mmdc is missing or errored. graphviz users render via
+  // `dot -Tpng …` themselves; no auto-PNG for that format.
+  let pngEnvelope = null;
+  if (effectiveFormat === 'mermaid') {
+    const pngResult = tryRenderMermaidPng(outputPath);
+    if (pngResult.written) {
+      pngEnvelope = { png_file: pngResult.file };
+    } else {
+      pngEnvelope = {
+        png_reason: pngResult.reason,
+        ...(pngResult.message ? { png_message: pngResult.message } : {}),
+      };
+    }
+  }
+
   return {
     wrote: true,
     file: outputPath,
     format: effectiveFormat,
     requested_format: requestedFormat,
     ...(fallbackReason ? { fallback: fallbackReason } : {}),
+    ...(pngEnvelope || {}),
     nodes: dag.nodes.length,
     edges: dag.edges.length,
   };

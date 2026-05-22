@@ -1,5 +1,11 @@
 # Changelog
 
+## [2.3.6] - 2026-05-22
+
+### Added
+
+- **PNG sibling render for `/sprintpilot-dependency-graph mermaid`.** When the official Mermaid CLI (`mmdc`) is available on PATH, the script now writes `sprint-plan-dag.png` next to the `.mmd` file automatically. Envelope adds `png_file` on success or `png_reason: "mmdc-missing" | "render-failed"` (with `png_message`) so the skill can surface the install hint or the underlying error. Cross-platform: probes `mmdc` on POSIX and `mmdc.cmd` / `.ps1` / `.bat` / `.exe` / `mmdc` on Windows since Node's `spawnSync` doesn't auto-resolve PATHEXT. Install via `npm install -g @mermaid-js/mermaid-cli` (Node 18+, all OSes).
+
 ## [2.3.5] - 2026-05-22
 
 ### Fixed

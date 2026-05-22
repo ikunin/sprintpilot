@@ -401,6 +401,96 @@ describe('CLI integration', () => {
     expect(res.stderr).toMatch(/cycle detected/);
   });
 
+  it('v2.3.6: mermaid render reports png_reason="mmdc-missing" when Mermaid CLI is absent from PATH', () => {
+    seed(
+      tmpRoot,
+      'development_status:\n  1-1-a: ready-for-dev\n  1-2-b: backlog\n',
+    );
+    const outputPath = join(tmpRoot, '_bmad-output', 'dag.mmd');
+    // Run with an empty PATH so mmdc cannot be resolved regardless of
+    // whether it's installed on the test machine. (Empty string would
+    // make spawnSync fall back to system defaults on some platforms; a
+    // single non-existent directory is unambiguous.)
+    const isolated = join(tmpRoot, 'no-such-bin');
+    const out = execFileSync(
+      process.execPath,
+      [
+        SCRIPT,
+        'render',
+        '--format',
+        'mermaid',
+        '--epic',
+        '1',
+        '--output',
+        outputPath,
+        '--project-root',
+        tmpRoot,
+      ],
+      { encoding: 'utf8', env: { ...process.env, PATH: isolated } },
+    );
+    const envelope = JSON.parse(out);
+    expect(envelope.wrote).toBe(true);
+    expect(envelope.file).toBe(outputPath);
+    expect(envelope.png_reason).toBe('mmdc-missing');
+    expect(envelope.png_file).toBeUndefined();
+  });
+
+  // Skipped on Windows: the shim is a POSIX shell script. The
+  // production code IS Windows-aware (resolves mmdc.cmd/.ps1/.bat/.exe
+  // explicitly because Node's spawn doesn't auto-resolve PATHEXT), but
+  // testing that path needs a Windows .cmd shim — out of scope here.
+  // The mmdc-missing test above covers the cross-platform absent case.
+  (process.platform === 'win32' ? it.skip : it)('v2.3.6: mermaid render reports png_file when mmdc is on PATH and exits 0', () => {
+    seed(
+      tmpRoot,
+      'development_status:\n  1-1-a: ready-for-dev\n  1-2-b: backlog\n',
+    );
+    // Shim mmdc into a temp dir on PATH. The shim ignores most flags;
+    // for `--version` it prints a string; otherwise it touches whatever
+    // path follows `-o` and exits 0. That's enough to exercise the
+    // happy path in resolve-dag's spawnSync wrapper.
+    const shimDir = join(tmpRoot, 'mmdc-shim');
+    mkdirSync(shimDir, { recursive: true });
+    const shimPath = join(shimDir, 'mmdc');
+    writeFileSync(
+      shimPath,
+      '#!/bin/sh\n' +
+        '[ "$1" = "--version" ] && echo "shim" && exit 0\n' +
+        'output_next=\n' +
+        'for arg in "$@"; do\n' +
+        '  if [ -n "$output_next" ]; then : > "$arg"; output_next=; continue; fi\n' +
+        '  [ "$arg" = "-o" ] && output_next=1\n' +
+        'done\n' +
+        'exit 0\n',
+      { mode: 0o755 },
+    );
+    const outputPath = join(tmpRoot, '_bmad-output', 'dag.mmd');
+    const out = execFileSync(
+      process.execPath,
+      [
+        SCRIPT,
+        'render',
+        '--format',
+        'mermaid',
+        '--epic',
+        '1',
+        '--output',
+        outputPath,
+        '--project-root',
+        tmpRoot,
+      ],
+      {
+        encoding: 'utf8',
+        env: { ...process.env, PATH: `${shimDir}:${process.env.PATH ?? ''}` },
+      },
+    );
+    const envelope = JSON.parse(out);
+    expect(envelope.wrote).toBe(true);
+    expect(envelope.png_file).toBe(outputPath.replace(/\.mmd$/, '.png'));
+    expect(envelope.png_reason).toBeUndefined();
+    expect(existsSync(envelope.png_file)).toBe(true);
+  });
+
   it('v2.3.5 regression: mermaid output puts "flowchart" on the first line (strict-renderer compatibility)', () => {
     // Reproduces the jarvis report: Claude Code's chat renderer (and
     // some markdown→mermaid pipelines) detect mermaid by sniffing the

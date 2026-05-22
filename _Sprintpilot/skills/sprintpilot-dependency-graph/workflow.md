@@ -113,8 +113,8 @@ node _Sprintpilot/scripts/resolve-dag.js render --format mermaid \
   [--epic <id>] [--output <path>] --project-root <root>
 ```
 
-Returns JSON `{wrote, file, format, nodes, edges, fallback?}`. Then
-read the rendered file and inline its contents in a ```mermaid fenced
+Returns JSON `{wrote, file, format, nodes, edges, fallback?, png_file?, png_reason?, png_message?}`.
+Then read the rendered file and inline its contents in a ```mermaid fenced
 code block so the chat client (Claude Code, etc.) renders the diagram
 inline. Also report the file path so the user can preview elsewhere:
 
@@ -133,6 +133,21 @@ renderer prefixes the visual label with `<issue_id>: ` so the diagram
 cross-references back to the user's tracker (Jira / Linear / GitHub /
 GitLab). Stories/epics without an issue_id render with the bare key —
 silence communicates "not tracked" rather than spamming `[no issue]`.
+
+**PNG sibling render.** As a side-effect of the mermaid render, the
+script tries to produce a `<file>.png` next to the `.mmd` via the
+official Mermaid CLI (`mmdc`). Three outcomes to surface:
+
+- `png_file` set → PNG produced. Report:
+  > Also wrote PNG: `<png_file>` (rendered via Mermaid CLI).
+- `png_reason: "mmdc-missing"` → Mermaid CLI not installed. Report:
+  > PNG render skipped — install Mermaid CLI to get a `.png` next to
+  > the `.mmd`:
+  >   `npm install -g @mermaid-js/mermaid-cli`
+  > (Requires Node 18+. Then re-run this skill.)
+- `png_reason: "render-failed"` → mmdc errored. Report the `png_message`
+  verbatim and suggest re-running with `mmdc -i <mmd> -o <png>` to see
+  the full error.
 
 ### Graphviz
 
