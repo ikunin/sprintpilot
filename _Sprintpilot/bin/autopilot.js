@@ -459,6 +459,88 @@ function readSprintStatuses(projectRoot) {
   }
 }
 
+// v2.3.13 — boot-time state reconciliation with BMAD's sprint-status.yaml.
+//
+// BMAD's sprint-status.yaml is the master record of story progress.
+// Whenever the autopilot resumes, the world may have moved on outside
+// it: stories merged manually, stories deleted, new stories appended.
+// Previously every divergence forced a `resume_divergence` halt and
+// required the user to pass `--accept-divergence` — friction that
+// turned routine boot into a manual step.
+//
+// Reconciliation mutates the persisted state in-place so the rest of
+// cmdStart sees an already-aligned view. Returns
+//
+//   { ok: true, actions: Reconciliation[] }   — silent success (may be empty)
+//   { ok: false, reason, details }            — cannot reconcile (caller
+//                                                falls back to the divergence
+//                                                halt path)
+//
+// Each Reconciliation action is one of:
+//   { kind: 'clear_completed_story',    story }
+//   { kind: 'clear_unknown_story',      story }
+//   { kind: 'prune_completed_from_queue', removed: string[] }
+//
+// Pure-ish: reads sprint-status.yaml, mutates `persisted` fields, and
+// returns a diff. No ledger writes, no fingerprint writes — caller owns
+// those so reconciliation can be unit-tested without I/O fixtures.
+function reconcileWithSprintStatus({ projectRoot, persisted }) {
+  if (!persisted || typeof persisted !== 'object') {
+    return { ok: false, reason: 'no_persisted_state' };
+  }
+  const sprintStatus = readSprintStatuses(projectRoot);
+  // Missing or unparseable sprint-status: can't reconcile blind. The
+  // caller should fall back to the existing divergence flow (which has
+  // its own clearer error messages for the no-baseline case).
+  if (!sprintStatus) {
+    return { ok: false, reason: 'sprint_status_missing_or_unparseable' };
+  }
+
+  const statusOf = (key) => {
+    const entry = sprintStatus[key];
+    if (!entry) return null;
+    return String(entry.status || '').trim().toLowerCase() || null;
+  };
+
+  const actions = [];
+
+  // 1. persisted.current_story — clear if it's now done in sprint-status,
+  //    or if sprint-status no longer knows about it.
+  if (persisted.current_story && typeof persisted.current_story === 'string') {
+    const s = statusOf(persisted.current_story);
+    if (s === 'done') {
+      actions.push({ kind: 'clear_completed_story', story: persisted.current_story });
+      persisted.current_story = null;
+      persisted.story_file_path = null;
+      persisted.current_epic = null;
+      persisted.current_bmad_step = null;
+    } else if (s === null) {
+      actions.push({ kind: 'clear_unknown_story', story: persisted.current_story });
+      persisted.current_story = null;
+      persisted.story_file_path = null;
+      persisted.current_epic = null;
+      persisted.current_bmad_step = null;
+    }
+  }
+
+  // 2. persisted.story_queue — drop entries that are now done.
+  if (Array.isArray(persisted.story_queue) && persisted.story_queue.length > 0) {
+    const removed = [];
+    const kept = [];
+    for (const key of persisted.story_queue) {
+      if (typeof key !== 'string') continue;
+      if (statusOf(key) === 'done') removed.push(key);
+      else kept.push(key);
+    }
+    if (removed.length > 0) {
+      actions.push({ kind: 'prune_completed_from_queue', removed });
+      persisted.story_queue = kept;
+    }
+  }
+
+  return { ok: true, actions };
+}
+
 // Resolve all non-done story keys for the given epic id, in
 // sprint-status.yaml insertion order. Used by `autopilot start
 // --epic <id>` to expand into an explicit queue. Returns [] when:
@@ -1652,12 +1734,58 @@ function cmdStart(opts) {
   //      cover (multiple stories completed, branch heads moved, etc.). The
   //      flag is logged into the ledger so the audit trail records that
   //      the user opted in to bypass.
+  // v2.3.13 — auto-reconcile with BMAD's sprint-status.yaml.
+  //
+  // BMAD's sprint-status.yaml is the source of truth for story progress.
+  // If stories were completed (or removed) outside the autopilot, the
+  // persisted state must yield to sprint-status — no user prompt, no
+  // `--accept-divergence` ritual. Reconciliation mutates `persisted`
+  // in-place, logs the diff to the ledger as `state_reconciled`, and
+  // stamps a fresh fingerprint so the legacy divergence detector below
+  // sees nothing to halt on.
+  //
+  // If sprint-status is missing or unparseable, reconciliation reports
+  // `ok: false` and we fall through to the legacy fingerprint divergence
+  // path — which produces a clearer "sprint-status missing" error.
+  let reconciledThisBoot = false;
+  const reconcileResult = reconcileWithSprintStatus({ projectRoot, persisted });
+  if (reconcileResult.ok && reconcileResult.actions.length > 0) {
+    ledger.append(
+      { kind: 'state_reconciled', detail: { actions: reconcileResult.actions } },
+      { projectRoot },
+    );
+    // Fresh fingerprint = new baseline. Computed AFTER the state_reconciled
+    // and resume appends below to keep the bmadTree hash stable for the
+    // next boot. (Computing before would let the very next append shift
+    // the tree out from under the stamp.)
+    const reconcileFp = divergence.fingerprint({ projectRoot });
+    ledger.append(
+      {
+        kind: 'resume',
+        divergence: { kind: 'state_reconciled', actions: reconcileResult.actions },
+        fingerprint: reconcileFp,
+      },
+      { projectRoot },
+    );
+    reconciledThisBoot = true;
+  }
+
   // Most-recent ledger entry that carries a fingerprint — either the last
   // clean `halt` or a previously-accepted `resume` (which we re-baseline
   // on accept, below). Without the re-baseline, every subsequent
   // `autopilot start` re-detected the same divergence and re-accepted
   // in a loop.
-  const lastBaseline = ledger.lastWithFingerprint({ projectRoot });
+  //
+  // v2.3.13: when reconciliation already handled drift this boot, the
+  // legacy fingerprint divergence path is skipped entirely. Reconciliation
+  // is the authoritative answer for sprint-status drift; running the
+  // fingerprint comparator on top would (a) re-stamp redundantly and
+  // (b) risk false-positive divergence because ledger appends shift the
+  // bmadTree hash mid-flight. The freshly-stamped state_reconciled
+  // baseline is the truth subsequent boots see.
+  const lastBaseline = reconciledThisBoot
+    ? null
+    : ledger.lastWithFingerprint({ projectRoot });
   if (lastBaseline && lastBaseline.fingerprint) {
     const d = divergence.detect({ projectRoot }, lastBaseline.fingerprint);
     if (!d.identical) {
@@ -2834,4 +2962,6 @@ module.exports = {
   STORY_PHASE_ORDER,
   deriveTasksForStory,
   tasksToMarkdown,
+  // v2.3.13 — boot-time sprint-status reconciliation helper
+  reconcileWithSprintStatus,
 };

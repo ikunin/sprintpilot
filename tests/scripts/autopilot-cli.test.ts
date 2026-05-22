@@ -219,7 +219,7 @@ describe('autopilot start — resume divergence handling (v2.2.30)', () => {
     writeFileSync(join(artDir, 'sprint-status.yaml'), opts.sprint_status_yaml);
   }
 
-  it('auto-accepts divergence when persisted current_story is now `done` in sprint-status', () => {
+  it('auto-accepts divergence when persisted current_story is now `done` in sprint-status (v2.3.13: via state_reconciled)', () => {
     seedDiverged({
       current_story: '4-6-realm',
       sprint_status_yaml: 'development_status:\n  4-6-realm: done  # PR #42 merged manually\n  4-7-next: backlog\n',
@@ -228,7 +228,12 @@ describe('autopilot start — resume divergence handling (v2.2.30)', () => {
     expect(r.status).toBe(0);
     // Should NOT emit resume_divergence — should proceed to action.
     expect(r.stdout).not.toContain('resume_divergence');
-    // Ledger should record the auto-accept decision.
+    // v2.3.13: the boot-time reconciliation step is now the primary
+    // auto-accept mechanism. It runs BEFORE the legacy divergence path
+    // and emits its own `state_reconciled` ledger entry + a fresh-baseline
+    // resume entry. The legacy `divergence_accepted` resume no longer
+    // fires (the divergence detector sees the freshly-baselined fingerprint
+    // and finds nothing to flag).
     const ledgerPath = join(
       projectRoot,
       '_bmad-output',
@@ -236,12 +241,23 @@ describe('autopilot start — resume divergence handling (v2.2.30)', () => {
       'ledger.jsonl',
     );
     const entries = readFileSync(ledgerPath, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
-    const accepted = entries.find(
-      (e) => e.kind === 'resume' && e.divergence && e.divergence.kind === 'divergence_accepted',
+    const reconciled = entries.find((e) => e.kind === 'state_reconciled');
+    expect(reconciled).toBeDefined();
+    const action = reconciled.detail.actions.find(
+      (a: { kind: string; story?: string }) => a.kind === 'clear_completed_story',
     );
-    expect(accepted).toBeDefined();
-    expect(accepted.divergence.reason).toBe('external_completion');
-    expect(accepted.divergence.story).toBe('4-6-realm');
+    expect(action).toBeDefined();
+    expect(action.story).toBe('4-6-realm');
+    // The reconcile path also stamps a fresh-baseline resume entry so
+    // subsequent boots see no divergence.
+    const rebaselined = entries.find(
+      (e) =>
+        e.kind === 'resume' &&
+        e.divergence &&
+        e.divergence.kind === 'state_reconciled' &&
+        e.fingerprint,
+    );
+    expect(rebaselined).toBeDefined();
   });
 
   it('blocks with resume_divergence when persisted story is NOT yet done', () => {

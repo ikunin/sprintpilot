@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.3.13] - 2026-05-22
+
+### Changed
+
+- **Boot-time auto-reconciliation with BMAD's `sprint-status.yaml`.** Previously every external completion triggered a `resume_divergence` halt that required `--accept-divergence` to bypass — friction that turned routine boots into manual steps. BMAD's `sprint-status.yaml` is now treated as the authoritative source of truth on every `autopilot start`:
+  - If a story marked `current_story` in persisted state is now `done` in sprint-status → silently cleared, log `state_reconciled` ledger entry, fresh fingerprint baseline stamped.
+  - If `current_story` is no longer present in sprint-status → silently cleared (treated as removed).
+  - Any entries in `story_queue` that are now `done` → silently pruned.
+  - Legacy fingerprint divergence detector is skipped entirely when reconciliation took effect (avoids the false-positive risk from ledger-append-shifts-bmadTree-hash race).
+- New ledger kind `state_reconciled` carries the action diff for full audit visibility.
+- The legacy `resume_divergence` halt still fires when `sprint-status.yaml` is missing or unparseable — that's a real "can't reconcile blind" case that warrants operator attention.
+
 ## [2.3.12] - 2026-05-22
 
 ### Added

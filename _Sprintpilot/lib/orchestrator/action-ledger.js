@@ -78,6 +78,14 @@ const VALID_KINDS = [
   'story_step_started',
   'story_step_progress',
   'story_step_completed',
+  // v2.3.13 — boot-time reconciliation with BMAD's sprint-status.yaml.
+  // Emitted from cmdStart whenever the persisted state has drifted from
+  // sprint-status (story marked done externally, story removed entirely,
+  // queue contains completed entries) and the autopilot silently brought
+  // its internal state back in line. Replaces the prior pattern of
+  // halting with `resume_divergence` and demanding `--accept-divergence`
+  // for every external completion.
+  'state_reconciled',
 ];
 
 function isPlainObject(v) {
