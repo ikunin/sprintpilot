@@ -49,7 +49,51 @@ const {
 
 const { STATES } = stateMachine;
 
-const SUBCOMMANDS = ['start', 'next', 'record', 'state', 'report', 'validate-config', 'status', 'progress', 'heartbeat'];
+const SUBCOMMANDS = ['start', 'next', 'record', 'state', 'report', 'validate-config', 'status', 'progress', 'heartbeat', 'tasks'];
+
+// v2.3.12 — canonical per-story task list (the BMad 7-step cycle,
+// collapsed into operator-visible labels). Used by `autopilot tasks` to
+// derive a checkbox view of progress, mirrored into the host coding
+// agent's native task tool (Claude Code's TaskCreate, Gemini's TODO,
+// etc.) AND auto-written to sprint-tasks.md as a portable fallback.
+//
+// Each entry maps one user-facing task to the orchestrator phases that
+// "satisfy" it: a task counts as done when its terminal phase has been
+// recorded as completed in the ledger (or when the current phase is
+// past its terminal one).
+//
+// Order here is execution order — also the rendering order.
+const STORY_TASK_DEFINITIONS = [
+  { id: 'create_story', label: 'Create story spec', phases: ['create_story'] },
+  { id: 'check_readiness', label: 'Check readiness', phases: ['check_readiness'] },
+  { id: 'dev_red', label: 'Write failing tests (RED)', phases: ['dev_red'] },
+  { id: 'dev_green', label: 'Implement to GREEN', phases: ['dev_green'] },
+  { id: 'code_review', label: 'Run code review', phases: ['code_review'] },
+  { id: 'patch_apply_retest', label: 'Apply review patches + retest', phases: ['patch_apply', 'patch_retest'] },
+  { id: 'story_land', label: 'Land story (commit, push, merge)', phases: ['story_done', 'story_land'] },
+];
+
+// Total ordered list of phases for "which phase is past which". Used to
+// classify tasks as completed when the current phase has moved beyond
+// their terminal phase.
+const STORY_PHASE_ORDER = [
+  'prepare_story_branch',
+  'create_story',
+  'check_readiness',
+  'dev_red',
+  'dev_green',
+  'code_review',
+  'patch_apply',
+  'patch_retest',
+  'story_done',
+  'story_land',
+];
+
+function phaseOrderIndex(phase) {
+  if (!phase) return -1;
+  const i = STORY_PHASE_ORDER.indexOf(phase);
+  return i < 0 ? -1 : i;
+}
 
 function help() {
   log.out(
@@ -2160,6 +2204,12 @@ function cmdRecord(opts) {
   // Persist new runtime state.
   persistRuntimeState(result.newState, result.newProfile, projectRoot);
 
+  // v2.3.12 — auto-update the portable sprint-tasks.md file so any host
+  // coding agent (Claude Code, Gemini CLI, Codex, Cursor, …) can surface
+  // a fresh task-list view to the user at every phase transition.
+  // Side-effect only; failures are logged but never block.
+  writeSprintTasksFile(projectRoot, result.newState);
+
   // v2.3.0 Phase 4.5 — streaming progress. Emit step-level ledger events
   // on every phase transition so `autopilot progress` can render live
   // status. Mirrors the change to plan.stories[].current_step via
@@ -2280,6 +2330,131 @@ function cmdStatus(opts) {
 // heartbeats there is no signal distinguishing "LLM is working" from
 // "session crashed." The wrapper skill MUST emit one of these at least
 // every 10 minutes during long-running phases (see workflow.orchestrator.md).
+// v2.3.12 — derive the canonical task list for a story from persisted
+// state + the ledger tail. Status per task:
+//   pending     — terminal phase not yet entered
+//   in_progress — terminal phase is the current orchestrator phase
+//   completed   — current phase has advanced past terminal phase
+//   failed      — last signal in this task's phases was failure / blocked
+//                 and the autopilot halted (no further advancement)
+//
+// Pure function — no I/O — for easy testing.
+function deriveTasksForStory(currentPhase, recentLedgerEntries, opts = {}) {
+  const haltActive = opts.haltActive === true;
+  const currentIdx = phaseOrderIndex(currentPhase);
+  // Map phase → latest signal status from ledger (only relevant entries).
+  const lastSignalByPhase = new Map();
+  for (const e of recentLedgerEntries) {
+    if (e && e.kind === 'signal_recorded' && typeof e.phase === 'string' && typeof e.status === 'string') {
+      lastSignalByPhase.set(e.phase, e.status);
+    }
+  }
+  return STORY_TASK_DEFINITIONS.map((def) => {
+    const terminalPhase = def.phases[def.phases.length - 1];
+    const terminalIdx = phaseOrderIndex(terminalPhase);
+    let status = 'pending';
+    // Past all phases of this task?
+    if (currentIdx > terminalIdx) {
+      status = 'completed';
+    } else if (def.phases.includes(currentPhase)) {
+      status = 'in_progress';
+      // If we're halted on this phase with a non-success last signal,
+      // surface as failed so the operator notices.
+      if (haltActive) {
+        const sig = lastSignalByPhase.get(currentPhase);
+        if (sig && sig !== 'success' && sig !== 'user_input') status = 'failed';
+      }
+    }
+    return { id: def.id, label: def.label, phases: def.phases.slice(), status };
+  });
+}
+
+function tasksToMarkdown(story, tasks, { heading = 'Sprintpilot — current story' } = {}) {
+  const lines = [];
+  lines.push(`# ${heading}`);
+  lines.push('');
+  lines.push(story ? `**Story:** \`${story}\`` : '**Story:** (none — between stories or idle)');
+  lines.push('');
+  for (const t of tasks) {
+    let glyph = '[ ]';
+    let suffix = '';
+    if (t.status === 'completed') glyph = '[x]';
+    else if (t.status === 'in_progress') {
+      glyph = '[ ]';
+      suffix = ' ← in progress';
+    } else if (t.status === 'failed') {
+      glyph = '[ ]';
+      suffix = ' ⚠ failed';
+    }
+    lines.push(`- ${glyph} ${t.label}${suffix}`);
+  }
+  lines.push('');
+  lines.push(`_Updated: ${new Date().toISOString()}_`);
+  lines.push('');
+  return lines.join('\n');
+}
+
+function tasksFilePath(projectRoot, persisted) {
+  // Honour output_folder via implementation_artifacts (resolved at boot).
+  const baseDir =
+    (persisted && persisted.implementation_artifacts) ||
+    path.join(projectRoot, '_bmad-output', 'implementation-artifacts');
+  return path.join(baseDir, 'sprint-tasks.md');
+}
+
+// Auto-update the portable task file. Called from cmdRecord after every
+// state advancement so the file is always fresh. Best-effort: a write
+// failure logs a warning but never aborts the orchestrator.
+function writeSprintTasksFile(projectRoot, persisted) {
+  try {
+    const currentPhase = persisted && persisted.current_bmad_step ? String(persisted.current_bmad_step) : null;
+    const story = persisted && persisted.current_story ? String(persisted.current_story) : null;
+    const recent = ledger.read({ projectRoot }, { limit: 30 });
+    // Detect halt — most recent halt entry is at the tail and we haven't
+    // resumed since.
+    const tail = recent[recent.length - 1] || null;
+    const haltActive = !!(tail && tail.kind === 'halt');
+    const tasks = deriveTasksForStory(currentPhase, recent, { haltActive });
+    const body = tasksToMarkdown(story, tasks);
+    const file = tasksFilePath(projectRoot, persisted);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, body, 'utf8');
+  } catch (e) {
+    // Never crash the orchestrator on a docs side-effect.
+    if (process.env.SPRINTPILOT_DEBUG) {
+      log.warn(`writeSprintTasksFile: ${e.message || e}`);
+    }
+  }
+}
+
+// v2.3.12 — `autopilot tasks` CLI subcommand. Renders the canonical
+// per-story task list as JSON (default) or Markdown.
+//
+// The host coding agent's wrapper skill calls this on every phase
+// transition, reads the result, and:
+//   1. Mirrors the task list into its native task tool when one exists
+//      (Claude Code's TaskCreate, Gemini's TODO panel, etc.)
+//   2. Falls back to printing the markdown rendering to chat for hosts
+//      without a native task tool.
+//
+// See workflow.orchestrator.md for the agent-side contract.
+function cmdTasks(opts) {
+  const projectRoot = resolveProjectRoot(opts);
+  const persisted = loadState(projectRoot);
+  const currentPhase = persisted.current_bmad_step ? String(persisted.current_bmad_step) : null;
+  const story = persisted.current_story ? String(persisted.current_story) : null;
+  const recent = ledger.read({ projectRoot }, { limit: 30 });
+  const tail = recent[recent.length - 1] || null;
+  const haltActive = !!(tail && tail.kind === 'halt');
+  const tasks = deriveTasksForStory(currentPhase, recent, { haltActive });
+  if (opts.markdown || opts.md) {
+    process.stdout.write(tasksToMarkdown(story, tasks));
+    return 0;
+  }
+  process.stdout.write(`${JSON.stringify({ story, current_phase: currentPhase, halt_active: haltActive, tasks }, null, 2)}\n`);
+  return 0;
+}
+
 function cmdHeartbeat(opts) {
   const projectRoot = resolveProjectRoot(opts);
   const message = opts.message || opts.m || '';
@@ -2631,6 +2806,8 @@ function main(argv) {
         return cmdProgress(opts);
       case 'heartbeat':
         return cmdHeartbeat(opts);
+      case 'tasks':
+        return cmdTasks(opts);
       default:
         return 2;
     }
@@ -2652,4 +2829,9 @@ module.exports = {
   composeRuntimeState,
   acquireAutopilotLock,
   runWorktreeHealthCheck,
+  // v2.3.12 — task list helpers exposed for unit tests
+  STORY_TASK_DEFINITIONS,
+  STORY_PHASE_ORDER,
+  deriveTasksForStory,
+  tasksToMarkdown,
 };

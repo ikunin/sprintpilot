@@ -85,6 +85,61 @@ Wrap everything in `{ "status": "...", ... }` and pass to
 | `user_input`          | `commands: UserCommand[]` (validated server-side; see user-commands.js). Kinds: `skip_story`, `abort_sprint`, `force_continue`, `override_decision`, `change_profile`, `pause` (cleanly halts THIS session; next `/sprint-autopilot-on` resumes), `accept_alternative` (dispatches the stored `pending_alternative`), `trigger_retrospective` (force-routes to RETROSPECTIVE for the current epic regardless of `remaining_stories_in_epic`; use when the user explicitly says "close out epic N with retro" while non-terminal stories remain). **NEVER send `pause` on your own initiative** — see "Pause is human-only" below. |
 | `verify_override`     | `evidence: { decision_log_ref?, explanation, expected_paths? }` — used when verify.js is wrong   |
 
+## Visibility — show the user a live task list
+
+The operator running the autopilot has **no other window** into what's happening between phase transitions. You MUST surface a per-story task list at every meaningful change, using two channels:
+
+### Channel 1 — host's native task tool (when available)
+
+If your host coding agent exposes a task tool, you **MUST** use it:
+
+| Host | Tool to use |
+|---|---|
+| Claude Code | `TaskCreate` at story start with the 7 canonical tasks (see below); `TaskUpdate` to flip status on each phase transition. |
+| Gemini CLI | The agent's TODO mechanism (whatever it exposes — call it natively). |
+| Codex / Cursor / Windsurf | Each agent's native task UI / TODO panel. |
+| Other | Whatever your host provides for surfacing a checklist. |
+
+The **7 canonical tasks per story** (in execution order):
+
+1. Create story spec
+2. Check readiness
+3. Write failing tests (RED)
+4. Implement to GREEN
+5. Run code review
+6. Apply review patches + retest
+7. Land story (commit, push, merge)
+
+Status transitions:
+
+- **Story start** → create all 7 tasks as `pending`, mark task 1 `in_progress`.
+- **`state_transition` advances to next phase** → mark the previous task `completed`, the new phase's task `in_progress`.
+- **`verify_rejected`** → keep the current task `in_progress` (do not flip to completed), the verify gate will retry.
+- **Halt / `user_prompt`** → add an ad-hoc task: `"Awaiting user input: <prompt-summary>"`. Mark `in_progress` until resolved.
+- **`propose_alternative` accepted** → add a task for the alternative if it's non-trivial.
+- **`epic_boundary_check` → `retrospective`** → add a 1-off "Run epic retrospective" task.
+
+Use `node _Sprintpilot/bin/autopilot.js tasks --markdown` to fetch the current canonical view; mirror its rows into your host's task tool. The JSON form (`--json`) is easier to parse if you're building structured task entries.
+
+### Channel 2 — portable markdown fallback (always)
+
+The orchestrator auto-writes `_bmad-output/implementation-artifacts/sprint-tasks.md` on every phase transition. You **MUST**, after each phase transition (or after a halt / verify-reject), print the contents of that file to chat so users on hosts WITHOUT a native task tool can still see progress.
+
+A one-liner is enough:
+
+```
+cat _bmad-output/implementation-artifacts/sprint-tasks.md
+```
+
+Render it inline in the chat reply so the user sees the checkbox list update in real time.
+
+### Why both channels
+
+- Native task tools (Channel 1) give the best UX on hosts that have them — checkboxes update in the user's sidebar without filling chat.
+- The portable markdown (Channel 2) is the contract for everything else. It always exists, always works, and is the source of truth if a host has no task tool.
+
+**Do not pick one over the other.** Use both whenever possible. Silence equals invisibility — exactly the bug we're solving.
+
 ## Visibility — emit heartbeats during long phases
 
 Long-running phases (`dev_red`, `dev_green`, `code_review`, `patch_apply`, `patch_retest`) often run **30–60+ minutes** of silent implementation work between state transitions. From the operator's perspective — `autopilot progress`, external monitors, the ledger tail — a healthy long phase is **indistinguishable from a crashed session** unless you emit periodic activity markers.

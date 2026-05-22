@@ -1,5 +1,15 @@
 # Changelog
 
+## [2.3.12] - 2026-05-22
+
+### Added
+
+- **Live per-story task list visible to the user across coding agents.** Previously the autopilot ran ~7 phases per story in 30–60 min of silence; from outside, healthy work was indistinguishable from a hang. Now:
+  - New CLI subcommand `node _Sprintpilot/bin/autopilot.js tasks [--json|--markdown]` derives the 7 canonical tasks per story (Create spec / Check readiness / RED / GREEN / Code review / Patches+retest / Land) with per-task status (`pending` / `in_progress` / `completed` / `failed`).
+  - Auto-written portable markdown at `_bmad-output/implementation-artifacts/sprint-tasks.md`, refreshed on every state transition. Any host coding agent can `cat` it to surface live progress.
+  - `workflow.orchestrator.md` now mandates two visibility channels: (1) mirror tasks into the host's native task tool when available — `TaskCreate`/`TaskUpdate` in Claude Code, TODO mechanism in Gemini CLI, equivalents in Codex / Cursor / Windsurf; (2) for hosts without a native task tool, the LLM **MUST** print the markdown file's contents to chat at each phase transition.
+  - Halts and verify-rejects keep the current task `in_progress` (not completed); on halt+failure the task flips to `failed` (⚠ glyph) so operators notice. Ad-hoc tasks added for user-prompt halts, accepted alternatives, and epic retrospectives.
+
 ## [2.3.11] - 2026-05-22
 
 ### Changed
