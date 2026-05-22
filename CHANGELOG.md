@@ -1,5 +1,11 @@
 # Changelog
 
+## [2.3.9] - 2026-05-22
+
+### Fixed
+
+- **Accepted divergence re-fired on every `autopilot start`.** When the orchestrator auto-accepted a `divergence_accepted` (e.g. `external_completion` — a story finished outside the autopilot), it did not refresh the baseline fingerprint. The next boot read the same stale `halt.fingerprint`, re-detected the same divergence, accepted it again, and so on — a silent infinite loop that never persisted progress. The resume entry now carries the freshly-computed fingerprint, and divergence detection looks up the most-recent ledger entry with ANY fingerprint (`lastWithFingerprint`) rather than only the most-recent `halt`. Caught live in jarvis-personal-assistant.
+
 ## [2.3.8] - 2026-05-22
 
 ### Changed

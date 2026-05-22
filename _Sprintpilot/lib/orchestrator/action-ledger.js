@@ -159,6 +159,20 @@ function last(context, kind) {
   return null;
 }
 
+// lastWithFingerprint(context) — return the most recent entry that carries
+// a `.fingerprint` field, regardless of kind. Used by resume-divergence
+// detection so the baseline can come from either a `halt` (clean stop) or
+// a `resume` with `divergence_accepted` (rebaselined after auto-accept).
+// Without this, accepting a divergence didn't refresh the baseline and
+// every subsequent `autopilot start` re-detected the same divergence.
+function lastWithFingerprint(context) {
+  const entries = read(context);
+  for (let i = entries.length - 1; i >= 0; i -= 1) {
+    if (entries[i] && entries[i].fingerprint) return entries[i];
+  }
+  return null;
+}
+
 // nextSeq — compute the next sequence number by inspecting the last line.
 // Reading just the tail is cheap because we use append-only JSONL.
 function nextSeq(fs, filePath) {
@@ -360,6 +374,7 @@ module.exports = {
   read,
   readSince,
   last,
+  lastWithFingerprint,
   tail,
   resolveLedgerPath,
 };

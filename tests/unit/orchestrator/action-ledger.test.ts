@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 // @ts-expect-error — CommonJS module
 import ledger from '../../../_Sprintpilot/lib/orchestrator/action-ledger.js';
 
-const { append, read, last, resolveLedgerPath, VALID_KINDS } = ledger as {
+const { append, read, last, lastWithFingerprint, resolveLedgerPath, VALID_KINDS } = ledger as {
   append: (
     entry: Record<string, unknown>,
     context: { projectRoot: string; now?: () => Date },
@@ -16,6 +16,7 @@ const { append, read, last, resolveLedgerPath, VALID_KINDS } = ledger as {
     options?: { limit?: number },
   ) => Record<string, unknown>[];
   last: (context: { projectRoot: string }, kind?: string) => Record<string, unknown> | null;
+  lastWithFingerprint: (context: { projectRoot: string }) => Record<string, unknown> | null;
   resolveLedgerPath: (projectRoot: string) => string;
   VALID_KINDS: string[];
 };
@@ -134,6 +135,55 @@ describe('last', () => {
   it('returns null when kind not found', () => {
     append({ kind: 'action_emitted' }, { projectRoot });
     expect(last({ projectRoot }, 'halt')).toBeNull();
+  });
+});
+
+// v2.3.9 — divergence baseline lookup. The resume-divergence detector
+// reads the most-recent entry carrying a `.fingerprint` field, which
+// can be either a clean `halt` or a `resume` with `divergence_accepted`
+// that re-baselined. Pre-fix the lookup was `last('halt')` only, so
+// accepted divergences never refreshed the baseline and re-fired on
+// every subsequent `autopilot start`.
+describe('lastWithFingerprint', () => {
+  it('returns null when no entry carries a fingerprint', () => {
+    append({ kind: 'action_emitted' }, { projectRoot });
+    append({ kind: 'signal_recorded' }, { projectRoot });
+    expect(lastWithFingerprint({ projectRoot })).toBeNull();
+  });
+
+  it('returns the most recent entry that carries a fingerprint, regardless of kind', () => {
+    append({ kind: 'halt', phase: 'p1', fingerprint: { sprintStatusSha: 'a' } }, { projectRoot });
+    append({ kind: 'action_emitted', phase: 'p2' }, { projectRoot }); // no fingerprint
+    append({ kind: 'resume', fingerprint: { sprintStatusSha: 'b' } }, { projectRoot });
+    append({ kind: 'state_transition' }, { projectRoot }); // no fingerprint
+    const r = lastWithFingerprint({ projectRoot });
+    expect(r?.kind).toBe('resume');
+    expect((r as { fingerprint: { sprintStatusSha: string } }).fingerprint.sprintStatusSha).toBe('b');
+  });
+
+  it('regression: resume divergence_accepted with fingerprint becomes the new baseline (no infinite re-acceptance loop)', () => {
+    // Scenario mirroring jarvis: a stale halt with fingerprint A. The
+    // resumer accepts a divergence, appends a resume with fingerprint B.
+    // lastWithFingerprint must surface B (the fresh baseline), not A.
+    append({ kind: 'halt', phase: 'story_land', fingerprint: { sprintStatusSha: 'OLD' } }, { projectRoot });
+    append(
+      {
+        kind: 'resume',
+        divergence: { kind: 'divergence_accepted', reason: 'external_completion' },
+        fingerprint: { sprintStatusSha: 'NEW' },
+      },
+      { projectRoot },
+    );
+    const baseline = lastWithFingerprint({ projectRoot });
+    expect((baseline as { fingerprint: { sprintStatusSha: string } }).fingerprint.sprintStatusSha).toBe('NEW');
+  });
+
+  it('returns the halt baseline when no later resume has a fingerprint', () => {
+    append({ kind: 'halt', phase: 'p1', fingerprint: { sprintStatusSha: 'A' } }, { projectRoot });
+    append({ kind: 'resume', divergence: { kind: 'resume_divergence' } }, { projectRoot }); // no fingerprint (rejected)
+    const r = lastWithFingerprint({ projectRoot });
+    expect(r?.kind).toBe('halt');
+    expect((r as { fingerprint: { sprintStatusSha: string } }).fingerprint.sprintStatusSha).toBe('A');
   });
 });
 

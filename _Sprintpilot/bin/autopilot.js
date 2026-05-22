@@ -1608,9 +1608,14 @@ function cmdStart(opts) {
   //      cover (multiple stories completed, branch heads moved, etc.). The
   //      flag is logged into the ledger so the audit trail records that
   //      the user opted in to bypass.
-  const lastHalt = ledger.last({ projectRoot }, 'halt');
-  if (lastHalt && lastHalt.fingerprint) {
-    const d = divergence.detect({ projectRoot }, lastHalt.fingerprint);
+  // Most-recent ledger entry that carries a fingerprint — either the last
+  // clean `halt` or a previously-accepted `resume` (which we re-baseline
+  // on accept, below). Without the re-baseline, every subsequent
+  // `autopilot start` re-detected the same divergence and re-accepted
+  // in a loop.
+  const lastBaseline = ledger.lastWithFingerprint({ projectRoot });
+  if (lastBaseline && lastBaseline.fingerprint) {
+    const d = divergence.detect({ projectRoot }, lastBaseline.fingerprint);
     if (!d.identical) {
       let autoAck = null;
       const persistedStory = persisted.current_story || null;
@@ -1643,6 +1648,11 @@ function cmdStart(opts) {
       persisted.story_file_path = null;
       persisted.current_epic = null;
       persisted.current_bmad_step = null;
+      // v2.3.9 — re-baseline the fingerprint on the resume entry. The
+      // next `autopilot start` reads lastWithFingerprint and sees THIS
+      // fresh fingerprint instead of the stale halt one, so the same
+      // divergence won't re-fire on every boot.
+      const rebaseline = divergence.fingerprint({ projectRoot });
       ledger.append(
         {
           kind: 'resume',
@@ -1650,8 +1660,9 @@ function cmdStart(opts) {
             kind: 'divergence_accepted',
             ...accepted,
             differences: d.differences,
-            last_phase: lastHalt.phase || null,
+            last_phase: lastBaseline.phase || null,
           },
+          fingerprint: rebaseline,
         },
         { projectRoot },
       );
