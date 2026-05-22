@@ -661,61 +661,112 @@ function findMermaidCliBinary() {
   return null;
 }
 
-// PNG render dimensions. mmdc defaults are 800×600 which produces an
-// unusably-small image once a DAG has more than a handful of nodes
-// — story labels and edges get squashed and unreadable. We override
-// with a wide-format high-DPI render that stays legible up to ~80
-// nodes and prints / pastes cleanly into PRs and docs:
-//   width  2400 (wide; flowchart LR is wider than tall)
-//   height 1800
-//   scale  2    (final PNG = width*scale × height*scale = 4800×3600)
-// Roughly 1–3 MB per render — well within reason for sprint artifacts.
-const PNG_WIDTH = 2400;
-const PNG_HEIGHT = 1800;
+// Bitmap output settings. A fixed canvas + lots of nodes squashes
+// text into illegibility. We scale the canvas linearly with node
+// count and cap at a sane ceiling so the PNG stays large enough to
+// keep labels readable on dense DAGs (~130 stories in real sprints)
+// without producing absurdly large files.
+const PNG_MIN_WIDTH = 2400;
+const PNG_MIN_HEIGHT = 1800;
+const PNG_PER_NODE_WIDTH = 50;
+const PNG_PER_NODE_HEIGHT = 30;
+const PNG_MAX_WIDTH = 8000;
+const PNG_MAX_HEIGHT = 5000;
 const PNG_SCALE = 2;
 
-// Try to render `<mmd>` to a sibling `<mmd>.png` via mmdc. Returns
-//   { written: true, file: <png-path> }                                — success
+function computePngDimensions(nodeCount) {
+  const n = Math.max(0, Number(nodeCount) || 0);
+  const w = Math.min(PNG_MAX_WIDTH, Math.max(PNG_MIN_WIDTH, PNG_MIN_WIDTH + n * PNG_PER_NODE_WIDTH));
+  const h = Math.min(PNG_MAX_HEIGHT, Math.max(PNG_MIN_HEIGHT, PNG_MIN_HEIGHT + n * PNG_PER_NODE_HEIGHT));
+  return { width: w, height: h };
+}
+
+function runMmdc(bin, inputPath, outputPath, dims) {
+  const args = [
+    '-i',
+    inputPath,
+    '-o',
+    outputPath,
+    // White background, not transparent — DAG node fills (greens,
+    // yellows, greys) need a known light surface for contrast. On a
+    // transparent SVG/PNG these wash out against dark themes.
+    '-b',
+    'white',
+    '--quiet',
+  ];
+  // PNG renders need width/height/scale; SVG is vector and ignores them
+  // (but passing them through doesn't hurt — mmdc accepts the flags
+  // for any output type).
+  if (dims) {
+    args.push(
+      '--width',
+      String(dims.width),
+      '--height',
+      String(dims.height),
+      '--scale',
+      String(PNG_SCALE),
+    );
+  }
+  return spawnSync(bin, args, {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+    windowsHide: true,
+  });
+}
+
+// Try to render `<mmd>` to sibling bitmap + vector outputs via mmdc.
+//
+// SVG is the preferred consumer (vector → crisp at any zoom, smaller
+// file). PNG is kept for clients that can't render SVG (some chat
+// surfaces, image-only previews) and uses dynamic dimensions scaled to
+// node count so dense DAGs stay legible.
+//
+// Returns
+//   { written: true, file_png, file_svg }                              — both succeeded
+//   { written: true, file_svg, png_failed: <message> }                 — SVG ok, PNG failed
+//   { written: true, file_png, svg_failed: <message> }                 — PNG ok, SVG failed
 //   { written: false, reason: 'mmdc-missing' }                         — toolchain absent
-//   { written: false, reason: 'render-failed', message: <stderr> }    — toolchain errored
-// Never throws; the caller threads the result into the envelope.
-function tryRenderMermaidPng(mmdPath) {
+//   { written: false, reason: 'render-failed', message }              — both failed
+// Never throws.
+function tryRenderMermaidImages(mmdPath, nodeCount) {
   const bin = findMermaidCliBinary();
   if (!bin) {
     return { written: false, reason: 'mmdc-missing' };
   }
-  const pngPath = mmdPath.endsWith('.mmd') ? mmdPath.slice(0, -4) + '.png' : mmdPath + '.png';
-  const r = spawnSync(
-    bin,
-    [
-      '-i',
-      mmdPath,
-      '-o',
-      pngPath,
-      // White background, not transparent — DAG node fills (greens,
-      // yellows, greys) need a known light surface for contrast. On a
-      // transparent PNG these wash out against dark IDE/browser themes.
-      '-b',
-      'white',
-      '--width',
-      String(PNG_WIDTH),
-      '--height',
-      String(PNG_HEIGHT),
-      '--scale',
-      String(PNG_SCALE),
-      '--quiet',
-    ],
-    {
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'pipe'],
-      windowsHide: true,
-    },
-  );
-  if (r.status !== 0) {
-    const message = (r.stderr || r.stdout || 'mmdc exited non-zero').trim();
-    return { written: false, reason: 'render-failed', message };
+  const base = mmdPath.endsWith('.mmd') ? mmdPath.slice(0, -4) : mmdPath;
+  const pngPath = base + '.png';
+  const svgPath = base + '.svg';
+  const dims = computePngDimensions(nodeCount);
+
+  const svgRes = runMmdc(bin, mmdPath, svgPath, null);
+  const pngRes = runMmdc(bin, mmdPath, pngPath, dims);
+
+  const svgOk = svgRes.status === 0;
+  const pngOk = pngRes.status === 0;
+
+  if (svgOk && pngOk) {
+    return { written: true, file_svg: svgPath, file_png: pngPath, png_dimensions: dims };
   }
-  return { written: true, file: pngPath };
+  if (svgOk && !pngOk) {
+    return {
+      written: true,
+      file_svg: svgPath,
+      png_failed: (pngRes.stderr || pngRes.stdout || 'mmdc PNG exited non-zero').trim(),
+    };
+  }
+  if (!svgOk && pngOk) {
+    return {
+      written: true,
+      file_png: pngPath,
+      png_dimensions: dims,
+      svg_failed: (svgRes.stderr || svgRes.stdout || 'mmdc SVG exited non-zero').trim(),
+    };
+  }
+  return {
+    written: false,
+    reason: 'render-failed',
+    message: (svgRes.stderr || pngRes.stderr || 'mmdc exited non-zero').trim(),
+  };
 }
 
 function defaultRenderOutputPath(projectRoot, format) {
@@ -772,18 +823,27 @@ function runRender({ projectRoot, epic, format, output }) {
     };
   }
 
-  // Sibling-PNG render (mermaid only). Non-fatal: caller surfaces the
-  // reason if mmdc is missing or errored. graphviz users render via
-  // `dot -Tpng …` themselves; no auto-PNG for that format.
-  let pngEnvelope = null;
+  // Sibling SVG + PNG render (mermaid only). Non-fatal: caller surfaces
+  // the reason if mmdc is missing or errored. SVG is the preferred
+  // output for dense DAGs (vector → crisp at any zoom); PNG kept for
+  // clients that can't render SVG, with dimensions that scale to node
+  // count so labels stay legible. graphviz users render via
+  // `dot -Tpng …`/`-Tsvg` themselves; no auto-render for that format.
+  let imageEnvelope = null;
   if (effectiveFormat === 'mermaid') {
-    const pngResult = tryRenderMermaidPng(outputPath);
-    if (pngResult.written) {
-      pngEnvelope = { png_file: pngResult.file };
+    const imgResult = tryRenderMermaidImages(outputPath, dag.nodes.length);
+    if (imgResult.written) {
+      imageEnvelope = {
+        ...(imgResult.file_svg ? { svg_file: imgResult.file_svg } : {}),
+        ...(imgResult.file_png ? { png_file: imgResult.file_png } : {}),
+        ...(imgResult.png_dimensions ? { png_dimensions: imgResult.png_dimensions } : {}),
+        ...(imgResult.svg_failed ? { svg_message: imgResult.svg_failed } : {}),
+        ...(imgResult.png_failed ? { png_message: imgResult.png_failed } : {}),
+      };
     } else {
-      pngEnvelope = {
-        png_reason: pngResult.reason,
-        ...(pngResult.message ? { png_message: pngResult.message } : {}),
+      imageEnvelope = {
+        png_reason: imgResult.reason,
+        ...(imgResult.message ? { png_message: imgResult.message } : {}),
       };
     }
   }
@@ -794,7 +854,7 @@ function runRender({ projectRoot, epic, format, output }) {
     format: effectiveFormat,
     requested_format: requestedFormat,
     ...(fallbackReason ? { fallback: fallbackReason } : {}),
-    ...(pngEnvelope || {}),
+    ...(imageEnvelope || {}),
     nodes: dag.nodes.length,
     edges: dag.edges.length,
   };

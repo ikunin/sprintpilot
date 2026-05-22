@@ -134,19 +134,31 @@ cross-references back to the user's tracker (Jira / Linear / GitHub /
 GitLab). Stories/epics without an issue_id render with the bare key —
 silence communicates "not tracked" rather than spamming `[no issue]`.
 
-**PNG sibling render.** As a side-effect of the mermaid render, the
-script tries to produce a `<file>.png` next to the `.mmd` via the
-official Mermaid CLI (`mmdc`). You **MUST** examine the envelope's
-`png_*` fields and surface one of the three outcomes to the user —
-silence is a bug, especially when mmdc is missing.
+**SVG + PNG sibling renders.** As a side-effect of the mermaid render,
+the script tries to produce BOTH `<file>.svg` (preferred — vector,
+crisp at any zoom, smaller file) AND `<file>.png` (fallback for clients
+that don't render SVG, with dimensions scaled to node count) via the
+official Mermaid CLI (`mmdc`). You **MUST** examine the envelope and
+surface one of these outcomes — silence is a bug, especially when
+mmdc is missing.
 
-- **`png_file` set** → PNG produced. Report:
-  > Also wrote PNG: `<png_file>` (rendered via Mermaid CLI).
+- **`svg_file` AND/OR `png_file` set** → at least one render succeeded.
+  Report whichever paths are present, recommending SVG when available:
+  > Also wrote:
+  >   - SVG: `<svg_file>` ← **preferred — crisp at any zoom**
+  >   - PNG: `<png_file>` (`<W>×<H>`, scaled to node count)
+  >
+  > SVG is best for dense DAGs (>20 nodes) and zooming in; PNG is for
+  > clients that can't render SVG.
+  >
+  > If only one path is present, report just that one. If both succeeded
+  > but `svg_message` / `png_message` is also set, note the partial
+  > failure for the other format.
 
 - **`png_reason: "mmdc-missing"`** → Mermaid CLI is not installed.
   You **MUST** tell the user how to install it, verbatim:
-  > PNG render skipped — Mermaid CLI (`mmdc`) is not installed.
-  > To get a `.png` alongside the `.mmd` next time, install it:
+  > SVG + PNG render skipped — Mermaid CLI (`mmdc`) is not installed.
+  > To get `.svg` and `.png` alongside the `.mmd` next time, install it:
   >
   > ```
   > npm install -g @mermaid-js/mermaid-cli
@@ -158,10 +170,10 @@ silence is a bug, especially when mmdc is missing.
   Do not silently drop this. The `.mmd` file is still useful but the
   install hint is the primary value of this code path.
 
-- **`png_reason: "render-failed"`** → mmdc was found but errored.
-  Report the `png_message` verbatim and suggest re-running with
-  `mmdc -i <mmd-path> -o <png-path>` outside the skill to see the
-  full toolchain error.
+- **`png_reason: "render-failed"`** → mmdc was found but both SVG and
+  PNG renders failed. Report the `png_message` verbatim and suggest
+  re-running with `mmdc -i <mmd-path> -o <out>.svg` outside the skill
+  to see the full toolchain error.
 
 ### Graphviz
 

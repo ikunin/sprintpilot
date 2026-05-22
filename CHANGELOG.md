@@ -1,5 +1,14 @@
 # Changelog
 
+## [2.3.11] - 2026-05-22
+
+### Changed
+
+- **Crisp DAG visuals at any size.** Dense sprints (130+ stories) produced unreadable PNGs because the fixed 2400×1800 canvas squashed each node + its label as node count grew. Two changes:
+  - **SVG output is now emitted alongside PNG.** SVG is vector — crisp at any zoom, smaller file size, the right format for dense DAGs. The envelope adds `svg_file` next to `png_file`; the skill workflow now recommends SVG for >20 nodes.
+  - **PNG dimensions scale with node count** (linear, with floor/cap). 6 nodes → 2700×1980; 130 nodes → 8000×5000 (capped). Final image still rendered at `--scale 2` for high-DPI sharpness, white background.
+- `png_dimensions: { width, height }` added to the envelope so monitors and IDE extensions can preflight image-size expectations.
+
 ## [2.3.10] - 2026-05-22
 
 ### Added

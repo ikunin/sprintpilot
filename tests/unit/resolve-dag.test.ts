@@ -440,7 +440,7 @@ describe('CLI integration', () => {
   // explicitly because Node's spawn doesn't auto-resolve PATHEXT), but
   // testing that path needs a Windows .cmd shim — out of scope here.
   // The mmdc-missing test above covers the cross-platform absent case.
-  (process.platform === 'win32' ? it.skip : it)('v2.3.6: mermaid render reports png_file when mmdc is on PATH and exits 0', () => {
+  (process.platform === 'win32' ? it.skip : it)('v2.3.11: mermaid render produces SVG + PNG siblings with dynamic dimensions when mmdc is on PATH', () => {
     seed(
       tmpRoot,
       'development_status:\n  1-1-a: ready-for-dev\n  1-2-b: backlog\n',
@@ -486,10 +486,18 @@ describe('CLI integration', () => {
     );
     const envelope = JSON.parse(out);
     expect(envelope.wrote).toBe(true);
+    // Both SVG and PNG should be reported; SVG is the preferred output
+    // for dense DAGs because it's vector and stays crisp at any zoom.
+    expect(envelope.svg_file).toBe(outputPath.replace(/\.mmd$/, '.svg'));
     expect(envelope.png_file).toBe(outputPath.replace(/\.mmd$/, '.png'));
     expect(envelope.png_reason).toBeUndefined();
+    expect(existsSync(envelope.svg_file)).toBe(true);
     expect(existsSync(envelope.png_file)).toBe(true);
+    // PNG dimensions should be reported and scaled by node count
+    // (2 nodes here → still at the minimum 2400×1800 floor).
+    expect(envelope.png_dimensions).toEqual({ width: 2500, height: 1860 });
   });
+
 
   it('v2.3.5 regression: mermaid output puts "flowchart" on the first line (strict-renderer compatibility)', () => {
     // Reproduces the jarvis report: Claude Code's chat renderer (and
