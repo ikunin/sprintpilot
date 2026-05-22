@@ -1,5 +1,11 @@
 # Changelog
 
+## [2.3.8] - 2026-05-22
+
+### Changed
+
+- **PNG render is now high-DPI and uses a white background.** The previous defaults (mmdc's 800×600, transparent background) produced an unusable image once a DAG had more than a handful of nodes — labels squashed, edges illegible — and node fills washed out on dark themes. New defaults: `--width 2400 --height 1800 --scale 2 -b white`, producing a sharp 4800×3600 PNG with a clean white surface. Roughly 1–3 MB per render — usable for paste-into-docs and PR reviews.
+
 ## [2.3.7] - 2026-05-22
 
 ### Changed

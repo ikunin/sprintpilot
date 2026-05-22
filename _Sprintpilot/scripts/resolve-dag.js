@@ -661,6 +661,19 @@ function findMermaidCliBinary() {
   return null;
 }
 
+// PNG render dimensions. mmdc defaults are 800×600 which produces an
+// unusably-small image once a DAG has more than a handful of nodes
+// — story labels and edges get squashed and unreadable. We override
+// with a wide-format high-DPI render that stays legible up to ~80
+// nodes and prints / pastes cleanly into PRs and docs:
+//   width  2400 (wide; flowchart LR is wider than tall)
+//   height 1800
+//   scale  2    (final PNG = width*scale × height*scale = 4800×3600)
+// Roughly 1–3 MB per render — well within reason for sprint artifacts.
+const PNG_WIDTH = 2400;
+const PNG_HEIGHT = 1800;
+const PNG_SCALE = 2;
+
 // Try to render `<mmd>` to a sibling `<mmd>.png` via mmdc. Returns
 //   { written: true, file: <png-path> }                                — success
 //   { written: false, reason: 'mmdc-missing' }                         — toolchain absent
@@ -672,11 +685,32 @@ function tryRenderMermaidPng(mmdPath) {
     return { written: false, reason: 'mmdc-missing' };
   }
   const pngPath = mmdPath.endsWith('.mmd') ? mmdPath.slice(0, -4) + '.png' : mmdPath + '.png';
-  const r = spawnSync(bin, ['-i', mmdPath, '-o', pngPath, '-b', 'transparent', '--quiet'], {
-    encoding: 'utf8',
-    stdio: ['ignore', 'pipe', 'pipe'],
-    windowsHide: true,
-  });
+  const r = spawnSync(
+    bin,
+    [
+      '-i',
+      mmdPath,
+      '-o',
+      pngPath,
+      // White background, not transparent — DAG node fills (greens,
+      // yellows, greys) need a known light surface for contrast. On a
+      // transparent PNG these wash out against dark IDE/browser themes.
+      '-b',
+      'white',
+      '--width',
+      String(PNG_WIDTH),
+      '--height',
+      String(PNG_HEIGHT),
+      '--scale',
+      String(PNG_SCALE),
+      '--quiet',
+    ],
+    {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
+    },
+  );
   if (r.status !== 0) {
     const message = (r.stderr || r.stdout || 'mmdc exited non-zero').trim();
     return { written: false, reason: 'render-failed', message };
