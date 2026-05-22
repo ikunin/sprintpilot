@@ -1,5 +1,14 @@
 # Changelog
 
+## [2.3.10] - 2026-05-22
+
+### Added
+
+- **Heartbeats during long autopilot phases.** Long phases like `dev_green` and `code_review` often ran 30–60+ minutes silently between state transitions; from the operator's perspective the session was indistinguishable from a crash. Two-part fix:
+  - New CLI subcommand `node _Sprintpilot/bin/autopilot.js heartbeat --message "<one-line status>"`. Appends a `story_step_progress` ledger entry tagged with current story + step + timestamp + message.
+  - `workflow.orchestrator.md` now mandates a heartbeat at least every 10 minutes during long phases (`dev_red`, `dev_green`, `code_review`, `patch_apply`, `patch_retest`), with examples of useful vs useless messages.
+- **`autopilot progress` now surfaces last-activity freshness.** New `Last activity: <age>` line plus the verbatim heartbeat message. Goes stale (⚠ warning) when no activity for 15+ minutes. JSON envelope adds `last_activity: { ts, age_seconds, stale, message }` for monitors and IDE extensions.
+
 ## [2.3.9] - 2026-05-22
 
 ### Fixed

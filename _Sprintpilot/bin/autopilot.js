@@ -49,7 +49,7 @@ const {
 
 const { STATES } = stateMachine;
 
-const SUBCOMMANDS = ['start', 'next', 'record', 'state', 'report', 'validate-config', 'status', 'progress'];
+const SUBCOMMANDS = ['start', 'next', 'record', 'state', 'report', 'validate-config', 'status', 'progress', 'heartbeat'];
 
 function help() {
   log.out(
@@ -2271,6 +2271,43 @@ function cmdStatus(opts) {
   return 0;
 }
 
+// v2.3.10 — `autopilot heartbeat --message "<text>"` appends a
+// `story_step_progress` ledger entry so external observers (operators,
+// `autopilot progress`, ledger tails, monitoring dashboards) can see the
+// session is actively making progress inside a long phase rather than
+// frozen. Phases like `dev_green` and `code_review` can run 30–60+
+// minutes silently between state transitions; without periodic
+// heartbeats there is no signal distinguishing "LLM is working" from
+// "session crashed." The wrapper skill MUST emit one of these at least
+// every 10 minutes during long-running phases (see workflow.orchestrator.md).
+function cmdHeartbeat(opts) {
+  const projectRoot = resolveProjectRoot(opts);
+  const message = opts.message || opts.m || '';
+  if (!message || typeof message !== 'string') {
+    log.error('heartbeat: --message "<text>" required (1 sentence describing current work)');
+    return 2;
+  }
+  const persisted = loadState(projectRoot);
+  const story = persisted.current_story || null;
+  const step = persisted.current_bmad_step || null;
+  ledger.append(
+    {
+      kind: 'story_step_progress',
+      detail: {
+        story_key: story,
+        step_name: step,
+        message: String(message).slice(0, 500),
+        ts: new Date().toISOString(),
+      },
+    },
+    { projectRoot },
+  );
+  process.stdout.write(
+    `${JSON.stringify({ ok: true, story, step, message: String(message).slice(0, 500) })}\n`,
+  );
+  return 0;
+}
+
 // v2.3.0 Phase 4.5 — `autopilot progress` CLI subcommand. Reads
 // sprint-plan.yaml + the recent ledger tail to produce a snapshot of
 // "what's running right now and what's done". Modes:
@@ -2296,6 +2333,29 @@ function cmdProgress(opts) {
       e.kind === 'story_step_progress' ||
       e.kind === 'story_step_completed',
   );
+
+  // v2.3.10 — "last activity" detector. The most recent step event's
+  // timestamp tells operators whether the session is making progress
+  // inside a long phase or has gone silent. Surfaced as a relative-age
+  // string + raw ISO; consumers (UI, monitors) can decide what to render.
+  const lastActivityEntry = stepEvents.length > 0 ? stepEvents[stepEvents.length - 1] : null;
+  const lastActivityTs = lastActivityEntry ? lastActivityEntry.ts : null;
+  let lastActivityAgeSec = null;
+  let lastActivityStale = false;
+  if (lastActivityTs) {
+    const ageMs = Date.now() - new Date(lastActivityTs).getTime();
+    if (Number.isFinite(ageMs)) {
+      lastActivityAgeSec = Math.max(0, Math.round(ageMs / 1000));
+      // Stale threshold: 15 minutes. Heartbeats are required every 10
+      // minutes per workflow.orchestrator.md; 15 gives a margin before
+      // raising the "session may be stuck" flag.
+      lastActivityStale = lastActivityAgeSec > 15 * 60;
+    }
+  }
+  const lastActivityMessage =
+    lastActivityEntry && lastActivityEntry.detail && lastActivityEntry.detail.message
+      ? String(lastActivityEntry.detail.message)
+      : null;
 
   // Build a story_key → issue_id lookup once so we can enrich every
   // reference (current story, recent events, etc.) without re-scanning
@@ -2341,6 +2401,14 @@ function cmdProgress(opts) {
     current_issue_id: currentIssueId,
     sprint_progress: stats,
     issue_tracking: issueTracking,
+    last_activity: lastActivityTs
+      ? {
+          ts: lastActivityTs,
+          age_seconds: lastActivityAgeSec,
+          stale: lastActivityStale,
+          message: lastActivityMessage,
+        }
+      : null,
     recent_events: stepEvents.slice(-3).map((e) => {
       const storyKey = e.detail?.story_key || null;
       return {
@@ -2407,6 +2475,22 @@ function cmdProgress(opts) {
     );
   } else {
     lines.push('Current story: (none — between stories or idle)');
+  }
+  // v2.3.10 — visibility: surface "last activity" so operators can tell
+  // a live long-phase from a hung session at a glance.
+  if (out.last_activity) {
+    const ageSec = out.last_activity.age_seconds;
+    let ageLabel = '?';
+    if (typeof ageSec === 'number') {
+      if (ageSec < 90) ageLabel = `${ageSec}s ago`;
+      else if (ageSec < 3600) ageLabel = `${Math.round(ageSec / 60)}m ago`;
+      else ageLabel = `${(ageSec / 3600).toFixed(1)}h ago`;
+    }
+    const staleFlag = out.last_activity.stale ? ' ⚠ STALE — exceeds 15-min heartbeat threshold' : '';
+    lines.push(`Last activity: ${ageLabel}${staleFlag}`);
+    if (out.last_activity.message) {
+      lines.push(`  "${out.last_activity.message}"`);
+    }
   }
   if (out.recent_events.length > 0) {
     lines.push('Recent step events:');
@@ -2545,6 +2629,8 @@ function main(argv) {
         return cmdStatus(opts);
       case 'progress':
         return cmdProgress(opts);
+      case 'heartbeat':
+        return cmdHeartbeat(opts);
       default:
         return 2;
     }

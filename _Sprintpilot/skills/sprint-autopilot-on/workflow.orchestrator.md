@@ -85,6 +85,33 @@ Wrap everything in `{ "status": "...", ... }` and pass to
 | `user_input`          | `commands: UserCommand[]` (validated server-side; see user-commands.js). Kinds: `skip_story`, `abort_sprint`, `force_continue`, `override_decision`, `change_profile`, `pause` (cleanly halts THIS session; next `/sprint-autopilot-on` resumes), `accept_alternative` (dispatches the stored `pending_alternative`), `trigger_retrospective` (force-routes to RETROSPECTIVE for the current epic regardless of `remaining_stories_in_epic`; use when the user explicitly says "close out epic N with retro" while non-terminal stories remain). **NEVER send `pause` on your own initiative** — see "Pause is human-only" below. |
 | `verify_override`     | `evidence: { decision_log_ref?, explanation, expected_paths? }` — used when verify.js is wrong   |
 
+## Visibility — emit heartbeats during long phases
+
+Long-running phases (`dev_red`, `dev_green`, `code_review`, `patch_apply`, `patch_retest`) often run **30–60+ minutes** of silent implementation work between state transitions. From the operator's perspective — `autopilot progress`, external monitors, the ledger tail — a healthy long phase is **indistinguishable from a crashed session** unless you emit periodic activity markers.
+
+**You MUST emit a heartbeat at least every 10 minutes while inside a long phase**, more often when crossing meaningful sub-step boundaries (file written, test run completed, finding triaged). The heartbeat is one shell call:
+
+```
+node _Sprintpilot/bin/autopilot.js heartbeat --message "<one-line status>"
+```
+
+The message is a brief, factual present-tense progress note — not a plan. Good examples:
+
+- `"writing failing test for AC#3 (auth-rejection path)"`
+- `"running pnpm test packages/gateway/src/auth — 22/49 passed"`
+- `"reviewing diff against AC checklist — 7 of 12 ACs verified"`
+- `"applying patch #2 of 4 (rename embedder.ts→embedder/index.ts)"`
+
+Bad examples (these defeat the purpose):
+
+- `"working"` (no information)
+- `"will start implementing soon"` (future intent, not actual progress)
+- `"this story is hard"` (commentary, not status)
+
+The heartbeat appends a `story_step_progress` ledger entry. Monitors and `autopilot progress` use these to render "last activity 3 min ago" and detect stale sessions. Skip heartbeats and operators have no way to tell your session apart from a hang — they will (correctly) suspect a bug and intervene unnecessarily.
+
+For short phases (`prepare_story_branch`, `check_readiness`, `epic_boundary_check`, `story_done`, `story_land` once CI passes) — under ~2 minutes — heartbeats are optional. For everything else, treat the 10-minute interval as a hard requirement.
+
 ## Pause is human-only
 
 The autopilot's purpose is to **drive without stopping** until one of:
