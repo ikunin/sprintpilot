@@ -1164,11 +1164,30 @@ function decorateRunScript(action, state, profile, projectRoot) {
       );
       const branch = gitPlan.branchName(profile, state.story_key, state.current_epic, state);
       const platform = profile.platform_provider || 'auto';
+      // Compose the PR title + body from the same templates planCommitAndPush
+      // uses under stacked mode, so the PR auto-opened by STORY_LAND looks
+      // the same as a stacked-mode PR. Build failures are non-fatal — we
+      // fall through to planLand's generic defaults so the step still runs.
+      let prTitle = null;
+      let prBody = null;
+      try {
+        prTitle = gitPlan.buildStoryCommitMessage(state, profile);
+      } catch (_e) {
+        /* fall through to planLand default */
+      }
+      try {
+        prBody = gitPlan.buildPrBody(state, profile, root, []);
+      } catch (_e) {
+        /* fall through to planLand default */
+      }
       const planned = land.planLand(state, profile, {
         scriptsDir,
         snapshotPath,
         branch,
         platform,
+        platformBaseUrl: profile.platform_base_url || null,
+        prTitle,
+        prBody,
         projectRoot: root,
       });
       return { ...action, branch: planned.branch, steps: planned.steps };

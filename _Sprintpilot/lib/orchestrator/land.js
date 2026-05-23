@@ -28,6 +28,12 @@ function escapeRe(s) {
 //   options.snapshotPath             → tmp file path the snapshot will be written to
 //   options.branch                   → resolved branch name (from git-plan.branchName)
 //   options.platform                 → 'github' | 'gitlab' | 'git_only'
+//   options.prTitle / options.prBody → PR metadata for create-pr.js --mode create.
+//                                       Required so STORY_LAND can open its own
+//                                       PR (planCommitAndPush skips PR creation
+//                                       under merge_strategy=land_as_you_go).
+//   options.platformBaseUrl          → optional; forwarded via --base-url for
+//                                       on-prem GitLab/Bitbucket/Gitea.
 function planLand(state, profile, options) {
   if (!state || !state.story_key) {
     throw new Error('planLand: state.story_key required');
@@ -44,12 +50,50 @@ function planLand(state, profile, options) {
   const landWhen = profile.land_when || 'ci_pass';
   const waitMinutes = Number.isFinite(profile.land_wait_minutes) ? profile.land_wait_minutes : 30;
   const squash = !!profile.squash_on_merge;
+  const platform = profile.platform_provider || options.platform || 'auto';
+  const baseUrl = profile.platform_base_url || options.platformBaseUrl || null;
 
   const stackSnapshot = path.join(options.scriptsDir, 'stack-snapshot.js');
   const landThisPr = path.join(options.scriptsDir, 'land-this-pr.js');
   const createPr = path.join(options.scriptsDir, 'create-pr.js');
 
   const steps = [];
+
+  // Step 0: open the PR if it doesn't exist yet. Under
+  // merge_strategy=land_as_you_go, planCommitAndPush deliberately skips
+  // PR creation (its createPr gate requires merge_strategy=stacked),
+  // leaving STORY_LAND as the place to open the PR. Without this step,
+  // the `--mode checks` polling below has no PR to poll against and
+  // exits non-zero — the symptom users hit was "branches push, PRs
+  // never open, autopilot needs to be unstuck". create-pr.js is
+  // idempotent (gh pr list --head short-circuits when a PR exists), so
+  // this step is safe to always run. tolerate_exit_codes [0, 2] matches
+  // the stacked-mode path so a missing platform CLI degrades to a SKIP
+  // rather than halting the land sequence.
+  const prTitle = options.prTitle || `${state.story_key}`;
+  const prBody = options.prBody || `Auto-opened by Sprintpilot STORY_LAND for ${state.story_key}.`;
+  const createPrArgs = [
+    'node',
+    createPr,
+    '--mode',
+    'create',
+    '--platform',
+    platform,
+    '--branch',
+    branch,
+    '--base',
+    baseBranch,
+    '--title',
+    prTitle,
+    '--body',
+    prBody,
+  ];
+  if (baseUrl) createPrArgs.push('--base-url', baseUrl);
+  steps.push({
+    args: createPrArgs,
+    description: `open PR for ${branch} → ${baseBranch} (idempotent — exits 0 if PR already exists)`,
+    tolerate_exit_codes: [0, 2],
+  });
 
   // Step 1: capture the current stack snapshot so land-this-pr can reason
   // about the active PR + remaining branches.
@@ -75,7 +119,6 @@ function planLand(state, profile, options) {
   // git.platform.provider (forwarded via --platform) so non-github
   // providers route to the correct CLI / API path inside create-pr.js.
   if (landWhen === 'ci_pass' || landWhen === 'ci_and_review') {
-    const platform = (profile.platform_provider || options.platform || 'auto');
     const checkArgs = [
       'node',
       createPr,
@@ -90,8 +133,8 @@ function planLand(state, profile, options) {
       '--wait-minutes',
       String(waitMinutes),
     ];
-    if (profile.platform_base_url) {
-      checkArgs.push('--base-url', profile.platform_base_url);
+    if (baseUrl) {
+      checkArgs.push('--base-url', baseUrl);
     }
     if (landWhen === 'ci_and_review') {
       checkArgs.push('--require-approved-review');

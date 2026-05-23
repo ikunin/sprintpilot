@@ -765,5 +765,10 @@ module.exports = {
   plan,
   branchName,
   sanitizeStoryKey,
+  // Exported for land.js / decorateRunScript so STORY_LAND can derive a
+  // consistent commit-style title and PR body without re-implementing the
+  // template logic that planCommitAndPush already uses.
+  buildStoryCommitMessage,
+  buildPrBody,
   STATES,
 };
