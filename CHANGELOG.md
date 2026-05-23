@@ -1,5 +1,11 @@
 # Changelog
 
+## [2.3.17] - 2026-05-24
+
+### Fixed
+
+- **Windows CI green for the first time since at least v2.3.11.** Two classes of long-standing Windows-only test failures resolved. (1) `node -e` template-string path embedding: tests in `v23-e2e-flow.test.ts` and `v23-round1-fixes.test.ts` interpolated `${SP}` / `${tmpRoot}` paths into `node -e` script strings, but Windows `path.join` returns backslashes that re-interpret as escape sequences when parsed as a JS string literal (`D:\a\sprintpilot\…` → `D:asprintpilotsp…`). Child processes failed with `Cannot find module 'D:asprintpilotsp…'`, cascading into "expected 1 to be +0", "expected 'pending' to be 'done'", array-reorder mismatches, and JSON-parse failures. Fixed with a small `sx()` helper that normalizes separators to forward slashes (which Node accepts on Windows) before interpolation. (2) Path-string assertions: `sprint-plan.test.ts` (`planPath` / `lockPath` / `PLAN_FILE_REL`) and the `.archive/...` assertions in `sprint-plan-mutators.test.ts` / `sprint-plan-integration.test.ts` compared OS-native paths against literal POSIX strings — now normalize separators or match against a `[\\/]` regex.
+
 ## [2.3.16] - 2026-05-23
 
 ### Fixed
