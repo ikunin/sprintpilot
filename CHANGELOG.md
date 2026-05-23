@@ -1,5 +1,11 @@
 # Changelog
 
+## [2.3.16] - 2026-05-23
+
+### Fixed
+
+- **Reconciliation probe respects `git.enabled: false` and `reuse_user_branch: true`.** v2.3.14's unpushed-work probe over-fired in two configurations: (1) `git.enabled: false` — no commits/pushes happen at all, so probing origin is meaningless; (2) `reuse_user_branch: true` — every story commits to the same long-lived branch, so the branch's presence on origin tells us nothing about whether a specific story's commit shipped. In both modes the probe would return false for every legitimate "external completion" clear, leaving `current_story` set indefinitely. The probe is now only attached when `git.enabled !== false && !reuse_user_branch`. CI green.
+
 ## [2.3.15] - 2026-05-23
 
 ### Fixed
