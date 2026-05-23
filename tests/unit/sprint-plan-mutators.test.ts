@@ -555,7 +555,7 @@ describe('archive', () => {
     const planBefore = readBack();
     const r = archive(planBefore.plan_id, { projectRoot: tmpRoot });
     expect(r.archived).toBe(true);
-    expect(r.file).toContain('.archive/sprint-plan-');
+    expect(r.file as string).toMatch(/[\\/]\.archive[\\/]sprint-plan-/);
     expect(existsSync(r.file as string)).toBe(true);
     expect(existsSync(planPath(tmpRoot))).toBe(false);
   });

@@ -428,7 +428,7 @@ describe('infer-dependencies migrate', () => {
     expect(parsed.stories_imported).toBe(1);
     expect(parsed.overrides_imported).toBe(1);
     expect(parsed.epics_block_dropped).toBe(true);
-    expect(parsed.archived).toContain('.archive/dependencies.yaml.migrated');
+    expect(parsed.archived).toMatch(/[\\/]\.archive[\\/]dependencies\.yaml\.migrated$/);
     expect(existsSync(parsed.archived)).toBe(true);
     expect(existsSync(join(tmpRoot, '_Sprintpilot', 'sprints', 'dependencies.yaml'))).toBe(false);
   });

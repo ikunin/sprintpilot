@@ -25,6 +25,15 @@ const INFER = join(REPO_ROOT, '_Sprintpilot', 'scripts', 'infer-dependencies.js'
 const DAG = join(REPO_ROOT, '_Sprintpilot', 'scripts', 'resolve-dag.js');
 const AUTOPILOT = join(REPO_ROOT, '_Sprintpilot', 'bin', 'autopilot.js');
 
+// posix path for safe embedding in `node -e` template strings.
+// Windows `path.join` returns backslashes; embedded inside a JS string
+// literal those re-interpret as escape sequences ("D:\a\sprintpilot" →
+// "D:asprintpilotsp"), so the spawned node process gets a corrupted path
+// and fails with "Cannot find module 'D:asprintpilotsp…'". Node accepts
+// forward slashes on Windows, so the simplest fix is to swap separators
+// before interpolation.
+const sx = (p: string) => p.replace(/\\/g, '/');
+
 let tmpRoot = '';
 
 function seedSprintStatus(content: string): void {
@@ -128,7 +137,7 @@ describe('plan-aware lifecycle', () => {
     // 3. markDone via the script CLI on the first story.
     spawnSync(
       'node',
-      ['-e', `require('${SP}').markDone('1-1-a', { projectRoot: '${tmpRoot}' })`],
+      ['-e', `require('${sx(SP)}').markDone('1-1-a', { projectRoot: '${sx(tmpRoot)}' })`],
       { encoding: 'utf8' },
     );
     const after = readPlanFromDisk();
@@ -141,12 +150,12 @@ describe('plan-aware lifecycle', () => {
     // 4. markDone the remaining two.
     spawnSync(
       'node',
-      ['-e', `require('${SP}').markDone('1-2-b', { projectRoot: '${tmpRoot}' })`],
+      ['-e', `require('${sx(SP)}').markDone('1-2-b', { projectRoot: '${sx(tmpRoot)}' })`],
       { encoding: 'utf8' },
     );
     spawnSync(
       'node',
-      ['-e', `require('${SP}').markDone('1-3-c', { projectRoot: '${tmpRoot}' })`],
+      ['-e', `require('${sx(SP)}').markDone('1-3-c', { projectRoot: '${sx(tmpRoot)}' })`],
       { encoding: 'utf8' },
     );
 
@@ -161,7 +170,7 @@ describe('plan-aware lifecycle', () => {
     // 6. Archive the plan (simulating what cmdStart does on
     // plan_exhausted). After archive, live plan is gone but the
     // archive file is present.
-    spawnSync('node', ['-e', `require('${SP}').archive('${planId}', { projectRoot: '${tmpRoot}' })`], {
+    spawnSync('node', ['-e', `require('${sx(SP)}').archive('${planId}', { projectRoot: '${sx(tmpRoot)}' })`], {
       encoding: 'utf8',
     });
     expect(
@@ -189,7 +198,7 @@ describe('mid-flight mutations via script CLI', () => {
     // reorder
     spawnSync(
       'node',
-      ['-e', `require('${SP}').reorder(['c', 'a', 'b'], { projectRoot: '${tmpRoot}' })`],
+      ['-e', `require('${sx(SP)}').reorder(['c', 'a', 'b'], { projectRoot: '${sx(tmpRoot)}' })`],
       { encoding: 'utf8' },
     );
     let p = readPlanFromDisk();
@@ -200,7 +209,7 @@ describe('mid-flight mutations via script CLI', () => {
       'node',
       [
         '-e',
-        `require('${SP}').addStories([{key:'d', plan_status:'pending'}], { projectRoot: '${tmpRoot}', position: 'end' })`,
+        `require('${sx(SP)}').addStories([{key:'d', plan_status:'pending'}], { projectRoot: '${sx(tmpRoot)}', position: 'end' })`,
       ],
       { encoding: 'utf8' },
     );
@@ -212,7 +221,7 @@ describe('mid-flight mutations via script CLI', () => {
       'node',
       [
         '-e',
-        `require('${SP}').removeStories(['a'], { projectRoot: '${tmpRoot}', status: 'skipped' })`,
+        `require('${sx(SP)}').removeStories(['a'], { projectRoot: '${sx(tmpRoot)}', status: 'skipped' })`,
       ],
       { encoding: 'utf8' },
     );
@@ -234,7 +243,7 @@ describe('mid-flight mutations via script CLI', () => {
       'node',
       [
         '-e',
-        `try { require('${SP}').reorder(['a', 'b'], { projectRoot: '${tmpRoot}' }); process.exit(0); } catch (e) { console.error(e.message); process.exit(1); }`,
+        `try { require('${sx(SP)}').reorder(['a', 'b'], { projectRoot: '${sx(tmpRoot)}' }); process.exit(0); } catch (e) { console.error(e.message); process.exit(1); }`,
       ],
       { encoding: 'utf8' },
     );
@@ -438,8 +447,8 @@ describe('cmdStart plan-aware flows (Round 4 coverage)', () => {
       'node',
       [
         '-e',
-        `const m = require('${join(REPO_ROOT, '_Sprintpilot/lib/orchestrator/sprint-plan.js')}');
-         console.log(JSON.stringify(m.planExhausted({ projectRoot: '${tmpRoot}' })));`,
+        `const m = require('${sx(join(REPO_ROOT, '_Sprintpilot/lib/orchestrator/sprint-plan.js'))}');
+         console.log(JSON.stringify(m.planExhausted({ projectRoot: '${sx(tmpRoot)}' })));`,
       ],
       { encoding: 'utf8' },
     );
@@ -458,9 +467,9 @@ describe('cmdStart plan-aware flows (Round 4 coverage)', () => {
       'node',
       [
         '-e',
-        `const m = require('${join(REPO_ROOT, '_Sprintpilot/lib/orchestrator/sprint-plan.js')}');
+        `const m = require('${sx(join(REPO_ROOT, '_Sprintpilot/lib/orchestrator/sprint-plan.js'))}');
          console.log(JSON.stringify(m.shouldAutoDerive({
-           projectRoot: '${tmpRoot}',
+           projectRoot: '${sx(tmpRoot)}',
            profile: { auto_plan_on_start: false },
            opts: {},
          })));`,
@@ -477,9 +486,9 @@ describe('cmdStart plan-aware flows (Round 4 coverage)', () => {
       'node',
       [
         '-e',
-        `const m = require('${join(REPO_ROOT, '_Sprintpilot/lib/orchestrator/sprint-plan.js')}');
+        `const m = require('${sx(join(REPO_ROOT, '_Sprintpilot/lib/orchestrator/sprint-plan.js'))}');
          console.log(JSON.stringify(m.shouldAutoDerive({
-           projectRoot: '${tmpRoot}',
+           projectRoot: '${sx(tmpRoot)}',
            profile: { auto_plan_on_start: true },
            opts: {},
          })));`,
@@ -495,9 +504,9 @@ describe('cmdStart plan-aware flows (Round 4 coverage)', () => {
       'node',
       [
         '-e',
-        `const m = require('${join(REPO_ROOT, '_Sprintpilot/lib/orchestrator/sprint-plan.js')}');
+        `const m = require('${sx(join(REPO_ROOT, '_Sprintpilot/lib/orchestrator/sprint-plan.js'))}');
          console.log(JSON.stringify(m.shouldAutoDerive({
-           projectRoot: '${tmpRoot}',
+           projectRoot: '${sx(tmpRoot)}',
            profile: { auto_plan_on_start: true },
            opts: { 'no-auto-plan': true },
          })));`,
@@ -531,8 +540,8 @@ describe('cmdStart plan-aware flows (Round 4 coverage)', () => {
       'node',
       [
         '-e',
-        `const m = require('${join(REPO_ROOT, '_Sprintpilot/lib/orchestrator/sprint-plan.js')}');
-         console.log(JSON.stringify(m.bootstrapMigrationIfNeeded({ projectRoot: '${tmpRoot}' })));`,
+        `const m = require('${sx(join(REPO_ROOT, '_Sprintpilot/lib/orchestrator/sprint-plan.js'))}');
+         console.log(JSON.stringify(m.bootstrapMigrationIfNeeded({ projectRoot: '${sx(tmpRoot)}' })));`,
       ],
       { encoding: 'utf8' },
     );
@@ -553,8 +562,8 @@ describe('cmdStart plan-aware flows (Round 4 coverage)', () => {
       'node',
       [
         '-e',
-        `const m = require('${join(REPO_ROOT, '_Sprintpilot/lib/orchestrator/sprint-plan.js')}');
-         console.log(JSON.stringify(m.bootstrapMigrationIfNeeded({ projectRoot: '${tmpRoot}' })));`,
+        `const m = require('${sx(join(REPO_ROOT, '_Sprintpilot/lib/orchestrator/sprint-plan.js'))}');
+         console.log(JSON.stringify(m.bootstrapMigrationIfNeeded({ projectRoot: '${sx(tmpRoot)}' })));`,
       ],
       { encoding: 'utf8' },
     );

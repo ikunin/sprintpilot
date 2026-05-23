@@ -87,15 +87,22 @@ describe('constants and path helpers', () => {
   });
 
   it('planPath roots at _bmad-output/implementation-artifacts', () => {
-    expect(planPath('/tmp/proj')).toBe('/tmp/proj/_bmad-output/implementation-artifacts/sprint-plan.yaml');
+    // Normalize separators so the assertion passes on Windows (path.join
+    // returns backslashes there). The semantic check is on the structure,
+    // not the OS-specific separator character.
+    expect(planPath('/tmp/proj').replace(/\\/g, '/')).toBe(
+      '/tmp/proj/_bmad-output/implementation-artifacts/sprint-plan.yaml',
+    );
   });
 
   it('lockPath roots at .sprintpilot/plan.lock', () => {
-    expect(lockPath('/tmp/proj')).toBe('/tmp/proj/.sprintpilot/plan.lock');
+    expect(lockPath('/tmp/proj').replace(/\\/g, '/')).toBe('/tmp/proj/.sprintpilot/plan.lock');
   });
 
   it('PLAN_FILE_REL is the relative path under projectRoot', () => {
-    expect(PLAN_FILE_REL).toBe('_bmad-output/implementation-artifacts/sprint-plan.yaml');
+    expect(PLAN_FILE_REL.replace(/\\/g, '/')).toBe(
+      '_bmad-output/implementation-artifacts/sprint-plan.yaml',
+    );
   });
 });
 
