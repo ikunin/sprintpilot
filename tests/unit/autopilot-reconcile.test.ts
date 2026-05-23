@@ -17,16 +17,23 @@ type Persisted = {
 type ReconcileAction =
   | { kind: 'clear_completed_story'; story: string }
   | { kind: 'clear_unknown_story'; story: string }
-  | { kind: 'prune_completed_from_queue'; removed: string[] };
+  | { kind: 'prune_completed_from_queue'; removed: string[] }
+  | { kind: 'skip_clear_unpushed'; story: string; branch: string; reason: string };
 
 type ReconcileResult =
   | { ok: true; actions: ReconcileAction[] }
   | { ok: false; reason: string; details?: string };
 
+type GitProbe = {
+  branchForStory: (storyKey: string) => string | null;
+  remoteBranchExists: (branch: string) => boolean;
+};
+
 const { reconcileWithSprintStatus } = autopilot as {
   reconcileWithSprintStatus: (input: {
     projectRoot: string;
     persisted: Persisted;
+    gitProbe?: GitProbe;
   }) => ReconcileResult;
 };
 
@@ -193,5 +200,117 @@ describe('reconcileWithSprintStatus', () => {
     expect(r.ok).toBe(true);
     expect(p.current_story).toBeNull();
     expect(p.story_queue).toEqual([]);
+  });
+
+  // Regression: sprint-status was marked `done` by the LLM during a
+  // pre-push phase (e.g. STORY_DONE) but the commit never reached origin
+  // because the session got interrupted between the status edit and
+  // `git push`. Pre-fix, the reconciler trusted sprint-status and silently
+  // cleared current_story, so the next boot moved on to the next backlog
+  // story and the unpushed work was forgotten. With the probe in place,
+  // a missing origin/<branch> blocks the clear and emits skip_clear_unpushed.
+  it('skips clearing current_story when sprint-status=done but origin/<branch> is missing', () => {
+    writeSprintStatus(
+      projectRoot,
+      'development_status:\n  14-1-foo: done\n  14-2-bar: backlog\n',
+    );
+    const p = persisted({
+      current_story: '14-1-foo',
+      story_file_path: '_bmad-output/stories/14-1-foo.md',
+      current_epic: '14',
+      current_bmad_step: 'story_done',
+    });
+    const r = reconcileWithSprintStatus({
+      projectRoot,
+      persisted: p,
+      gitProbe: {
+        branchForStory: () => 'story/14-1-foo',
+        remoteBranchExists: () => false,
+      },
+    });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.actions).toEqual([
+        {
+          kind: 'skip_clear_unpushed',
+          story: '14-1-foo',
+          branch: 'story/14-1-foo',
+          reason: 'remote_branch_missing',
+        },
+      ]);
+    }
+    // Persisted state intact — STORY_DONE can re-fire its git_op.
+    expect(p.current_story).toBe('14-1-foo');
+    expect(p.story_file_path).toBe('_bmad-output/stories/14-1-foo.md');
+    expect(p.current_epic).toBe('14');
+    expect(p.current_bmad_step).toBe('story_done');
+  });
+
+  it('clears current_story when sprint-status=done AND origin/<branch> exists (work was pushed)', () => {
+    writeSprintStatus(projectRoot, 'development_status:\n  14-1-foo: done\n');
+    const p = persisted({
+      current_story: '14-1-foo',
+      story_file_path: '_bmad-output/stories/14-1-foo.md',
+      current_epic: '14',
+      current_bmad_step: 'story_done',
+    });
+    const r = reconcileWithSprintStatus({
+      projectRoot,
+      persisted: p,
+      gitProbe: {
+        branchForStory: () => 'story/14-1-foo',
+        remoteBranchExists: () => true,
+      },
+    });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.actions).toEqual([{ kind: 'clear_completed_story', story: '14-1-foo' }]);
+    }
+    expect(p.current_story).toBeNull();
+  });
+
+  it('does not probe post-push phases (story_land, epic_boundary_check) — clears as before', () => {
+    writeSprintStatus(projectRoot, 'development_status:\n  14-1-foo: done\n');
+    const p = persisted({
+      current_story: '14-1-foo',
+      current_bmad_step: 'story_land',
+    });
+    // Probe would say "branch gone" (e.g. squash-merged + deleted) but we
+    // should still clear because the phase is post-push.
+    const probeCalls: string[] = [];
+    const r = reconcileWithSprintStatus({
+      projectRoot,
+      persisted: p,
+      gitProbe: {
+        branchForStory: (k) => {
+          probeCalls.push(`branchFor:${k}`);
+          return 'story/14-1-foo';
+        },
+        remoteBranchExists: (b) => {
+          probeCalls.push(`exists:${b}`);
+          return false;
+        },
+      },
+    });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.actions).toEqual([{ kind: 'clear_completed_story', story: '14-1-foo' }]);
+    }
+    expect(p.current_story).toBeNull();
+    expect(probeCalls).toEqual([]); // probe not consulted for post-push phases
+  });
+
+  it('falls back to clearing when no gitProbe is supplied (back-compat)', () => {
+    writeSprintStatus(projectRoot, 'development_status:\n  14-1-foo: done\n');
+    const p = persisted({
+      current_story: '14-1-foo',
+      current_bmad_step: 'story_done',
+    });
+    const r = reconcileWithSprintStatus({ projectRoot, persisted: p });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.actions).toEqual([{ kind: 'clear_completed_story', story: '14-1-foo' }]);
+    }
+    expect(p.current_story).toBeNull();
   });
 });

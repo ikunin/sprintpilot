@@ -480,11 +480,40 @@ function readSprintStatuses(projectRoot) {
 //   { kind: 'clear_completed_story',    story }
 //   { kind: 'clear_unknown_story',      story }
 //   { kind: 'prune_completed_from_queue', removed: string[] }
+//   { kind: 'skip_clear_unpushed',       story, branch, reason }
 //
 // Pure-ish: reads sprint-status.yaml, mutates `persisted` fields, and
 // returns a diff. No ledger writes, no fingerprint writes — caller owns
 // those so reconciliation can be unit-tested without I/O fixtures.
-function reconcileWithSprintStatus({ projectRoot, persisted }) {
+//
+// `gitProbe` (optional): { branchForStory(storyKey) => string|null,
+// remoteBranchExists(branch) => boolean }. When supplied AND the current
+// story's persisted phase is pre-push (i.e., the STORY_DONE / NANO_QUICK_DEV
+// commit-and-push hasn't completed yet), this guards the "sprint-status says
+// done → clear" path against the regression where the LLM updated
+// sprint-status.yaml=done in working tree but the commit was never pushed
+// (session interrupted between status edit and `git push`). Without the
+// probe, the reconciler silently clears `current_story` and the autopilot
+// moves on; the unpushed work is forgotten.
+//
+// When the probe blocks a clear, emits `skip_clear_unpushed` and leaves
+// `persisted.current_story` intact. The caller falls through to the legacy
+// fingerprint-divergence path, which will halt the user when sprint-status
+// drift can't be auto-acked (or re-fire the STORY_DONE git_op if it can).
+const PRE_PUSH_PHASES_FOR_RECONCILE = new Set([
+  'prepare_story_branch',
+  'create_story',
+  'check_readiness',
+  'dev_red',
+  'dev_green',
+  'code_review',
+  'patch_apply',
+  'patch_retest',
+  'story_done',
+  'nano_quick_dev',
+]);
+
+function reconcileWithSprintStatus({ projectRoot, persisted, gitProbe }) {
   if (!persisted || typeof persisted !== 'object') {
     return { ok: false, reason: 'no_persisted_state' };
   }
@@ -509,11 +538,34 @@ function reconcileWithSprintStatus({ projectRoot, persisted }) {
   if (persisted.current_story && typeof persisted.current_story === 'string') {
     const s = statusOf(persisted.current_story);
     if (s === 'done') {
-      actions.push({ kind: 'clear_completed_story', story: persisted.current_story });
-      persisted.current_story = null;
-      persisted.story_file_path = null;
-      persisted.current_epic = null;
-      persisted.current_bmad_step = null;
+      // Unpushed-work guard: if the persisted phase is pre-push AND the
+      // story branch isn't on origin, the LLM marked sprint-status=done
+      // without finishing commit/push. Skip the clear so STORY_DONE
+      // can re-fire its git_op.
+      const phase = persisted.current_bmad_step || null;
+      const isPrePush = phase && PRE_PUSH_PHASES_FOR_RECONCILE.has(phase);
+      let blocked = null;
+      if (isPrePush && gitProbe && typeof gitProbe.branchForStory === 'function' &&
+          typeof gitProbe.remoteBranchExists === 'function') {
+        const branch = gitProbe.branchForStory(persisted.current_story);
+        if (branch && !gitProbe.remoteBranchExists(branch)) {
+          blocked = { branch, reason: 'remote_branch_missing' };
+        }
+      }
+      if (blocked) {
+        actions.push({
+          kind: 'skip_clear_unpushed',
+          story: persisted.current_story,
+          branch: blocked.branch,
+          reason: blocked.reason,
+        });
+      } else {
+        actions.push({ kind: 'clear_completed_story', story: persisted.current_story });
+        persisted.current_story = null;
+        persisted.story_file_path = null;
+        persisted.current_epic = null;
+        persisted.current_bmad_step = null;
+      }
     } else if (s === null) {
       actions.push({ kind: 'clear_unknown_story', story: persisted.current_story });
       persisted.current_story = null;
@@ -965,6 +1017,28 @@ function detectCurrentBranch(projectRoot) {
     }).trim();
   } catch (_e) {
     return null;
+  }
+}
+
+// Probe `git ls-remote --heads origin <branch>` and return true iff the
+// branch exists on origin. Used by reconcileWithSprintStatus to detect
+// the "sprint-status marked done but commit never pushed" regression
+// before silently clearing current_story. Returns false on any error
+// (no origin, network failure, etc.) so the guard fails closed: when
+// we can't prove the branch is on origin, we don't clear.
+function probeRemoteBranchExists(projectRoot, branch) {
+  if (!branch || typeof branch !== 'string') return false;
+  try {
+    const { execFileSync } = require('node:child_process');
+    const out = execFileSync(
+      'git',
+      ['-C', projectRoot, 'ls-remote', '--heads', 'origin', branch],
+      { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 5_000 },
+    );
+    // ls-remote prints "<sha>\trefs/heads/<branch>\n" when present, empty otherwise.
+    return typeof out === 'string' && out.trim().length > 0;
+  } catch (_e) {
+    return false;
   }
 }
 
@@ -1748,26 +1822,55 @@ function cmdStart(opts) {
   // `ok: false` and we fall through to the legacy fingerprint divergence
   // path — which produces a clearer "sprint-status missing" error.
   let reconciledThisBoot = false;
-  const reconcileResult = reconcileWithSprintStatus({ projectRoot, persisted });
+  const reconcileResult = reconcileWithSprintStatus({
+    projectRoot,
+    persisted,
+    gitProbe: {
+      branchForStory: (storyKey) => {
+        try {
+          return gitPlan.branchName(
+            profile,
+            storyKey,
+            deriveEpicFromStoryKey(storyKey),
+            persisted,
+          );
+        } catch (_e) {
+          return null;
+        }
+      },
+      remoteBranchExists: (branch) => probeRemoteBranchExists(projectRoot, branch),
+    },
+  });
   if (reconcileResult.ok && reconcileResult.actions.length > 0) {
     ledger.append(
       { kind: 'state_reconciled', detail: { actions: reconcileResult.actions } },
       { projectRoot },
     );
-    // Fresh fingerprint = new baseline. Computed AFTER the state_reconciled
-    // and resume appends below to keep the bmadTree hash stable for the
-    // next boot. (Computing before would let the very next append shift
-    // the tree out from under the stamp.)
-    const reconcileFp = divergence.fingerprint({ projectRoot });
-    ledger.append(
-      {
-        kind: 'resume',
-        divergence: { kind: 'state_reconciled', actions: reconcileResult.actions },
-        fingerprint: reconcileFp,
-      },
-      { projectRoot },
+    // `skip_clear_unpushed` records an audit decision but mutates nothing,
+    // so it must NOT count as a real reconciliation. If it did, the
+    // re-baseline below would mask the very drift we want the legacy
+    // divergence detector to catch (sprint-status changed under us while
+    // the work wasn't pushed). Only count actions that actually mutated
+    // persisted state.
+    const mutatedActions = reconcileResult.actions.filter(
+      (a) => a && a.kind !== 'skip_clear_unpushed',
     );
-    reconciledThisBoot = true;
+    if (mutatedActions.length > 0) {
+      // Fresh fingerprint = new baseline. Computed AFTER the state_reconciled
+      // and resume appends below to keep the bmadTree hash stable for the
+      // next boot. (Computing before would let the very next append shift
+      // the tree out from under the stamp.)
+      const reconcileFp = divergence.fingerprint({ projectRoot });
+      ledger.append(
+        {
+          kind: 'resume',
+          divergence: { kind: 'state_reconciled', actions: mutatedActions },
+          fingerprint: reconcileFp,
+        },
+        { projectRoot },
+      );
+      reconciledThisBoot = true;
+    }
   }
 
   // Most-recent ledger entry that carries a fingerprint — either the last
