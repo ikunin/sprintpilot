@@ -1,5 +1,11 @@
 # Changelog
 
+## [2.3.15] - 2026-05-23
+
+### Fixed
+
+- **STORY_LAND now opens the PR under `merge_strategy: land_as_you_go`.** `planCommitAndPush` deliberately skips PR creation when `merge_strategy=land_as_you_go` (its `createPr` gate requires `stacked`), and `planLand` was running `create-pr.js --mode checks` to poll an existing PR — but no PR existed, so `gh pr checks <branch>` exited non-zero and STORY_LAND failed silently. Symptom in the wild: "branches get pushed but PRs never open; autopilot needs to be stacked manually." `planLand` now prepends a `create-pr.js --mode create` step (idempotent via `gh pr list --head` short-circuit) before the snapshot/checks/land steps. Title and body come from the same `buildStoryCommitMessage` + `buildPrBody` helpers used by stacked mode, so the auto-opened PR is indistinguishable from a stacked-mode PR. Missing-CLI degradation (`tolerate_exit_codes: [0, 2]`) matches the stacked-mode behavior.
+
 ## [2.3.14] - 2026-05-23
 
 ### Fixed
