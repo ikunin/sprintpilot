@@ -33,6 +33,12 @@ const REPO_ROOT = join(__dirname, '..', '..');
 const SP_SCRIPT = join(REPO_ROOT, '_Sprintpilot', 'scripts', 'sprint-plan.js');
 const INFER_SCRIPT = join(REPO_ROOT, '_Sprintpilot', 'scripts', 'infer-dependencies.js');
 
+// See v23-e2e-flow.test.ts for the rationale. tl;dr: Windows path.join
+// returns backslashes that re-interpret as escape sequences when embedded
+// in a `node -e` template string, so the spawned process gets a corrupted
+// path. Node accepts forward slashes on Windows.
+const sx = (p: string) => p.replace(/\\/g, '/');
+
 const { emptyPlan, write: writePlan, read: readPlan, planPath, lockPath, reorder, archive, setIssueId } =
   sprintPlanMod as {
     emptyPlan: (o?: { source?: string }) => Record<string, unknown>;
@@ -105,15 +111,15 @@ describe('H1 — plan.lock serializes concurrent writers', () => {
     // keeping both writes consistent.
     const { spawn } = await import('node:child_process');
     const scriptA = `
-      const m = require('${SP_SCRIPT}');
+      const m = require('${sx(SP_SCRIPT)}');
       // Sleep briefly inside the mutate path to force contention.
       const start = Date.now();
-      m.setIssueId('a', 'PROJ-1', { projectRoot: '${tmpRoot}' });
+      m.setIssueId('a', 'PROJ-1', { projectRoot: '${sx(tmpRoot)}' });
     `;
     const scriptB = `
-      const m = require('${SP_SCRIPT}');
+      const m = require('${sx(SP_SCRIPT)}');
       const start = Date.now();
-      m.setIssueId('b', 'PROJ-2', { projectRoot: '${tmpRoot}' });
+      m.setIssueId('b', 'PROJ-2', { projectRoot: '${sx(tmpRoot)}' });
     `;
     const runChild = (script: string): Promise<{ status: number; stderr: string }> =>
       new Promise((resolve) => {
