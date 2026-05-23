@@ -1,5 +1,11 @@
 # Changelog
 
+## [2.3.14] - 2026-05-23
+
+### Fixed
+
+- **Boot reconciliation no longer forgets unpushed work.** When the LLM updated `sprint-status.yaml` to `done` during the STORY_DONE phase but the session was interrupted before `git push` completed, `reconcileWithSprintStatus` would silently clear `current_story` on the next boot and the autopilot would advance to the next backlog story — leaving the just-completed story unlanded. Symptom in the wild: "autopilot pre-marked 14-1 as done before the git_op could execute, then advanced to the next backlog story." The reconciler now probes `git ls-remote --heads origin <story-branch>` when `current_bmad_step` is a pre-push phase (`story_done`, `nano_quick_dev`, `dev_*`, `code_review`, `patch_*`); a missing remote branch blocks the clear, emits a `skip_clear_unpushed` action, and the legacy fingerprint-divergence path runs (which will either auto-ack a real external completion or halt the user). Post-push phases (`story_land`, `epic_boundary_check`) skip the probe so legitimately-squashed-and-deleted branches still clear cleanly.
+
 ## [2.3.13] - 2026-05-22
 
 ### Changed
