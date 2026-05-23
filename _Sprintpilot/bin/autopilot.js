@@ -1841,24 +1841,36 @@ function cmdStart(opts) {
   // `ok: false` and we fall through to the legacy fingerprint divergence
   // path — which produces a clearer "sprint-status missing" error.
   let reconciledThisBoot = false;
+  // Only attach the unpushed-work probe when git is actually enabled.
+  // Under `git.enabled: false` no commits/pushes happen, so the
+  // "verify origin has the branch" check is meaningless and would
+  // misfire (no origin → probe returns false → every legitimate clear
+  // becomes skip_clear_unpushed). Same logic for reuse_user_branch,
+  // where every story commits to the same long-lived user branch and
+  // the branch's presence on origin tells us nothing about whether the
+  // specific story's commit was pushed.
+  const gitProbeEnabled =
+    profile && profile.enabled !== false && !profile.reuse_user_branch;
   const reconcileResult = reconcileWithSprintStatus({
     projectRoot,
     persisted,
-    gitProbe: {
-      branchForStory: (storyKey) => {
-        try {
-          return gitPlan.branchName(
-            profile,
-            storyKey,
-            deriveEpicFromStoryKey(storyKey),
-            persisted,
-          );
-        } catch (_e) {
-          return null;
+    gitProbe: gitProbeEnabled
+      ? {
+          branchForStory: (storyKey) => {
+            try {
+              return gitPlan.branchName(
+                profile,
+                storyKey,
+                deriveEpicFromStoryKey(storyKey),
+                persisted,
+              );
+            } catch (_e) {
+              return null;
+            }
+          },
+          remoteBranchExists: (branch) => probeRemoteBranchExists(projectRoot, branch),
         }
-      },
-      remoteBranchExists: (branch) => probeRemoteBranchExists(projectRoot, branch),
-    },
+      : undefined,
   });
   if (reconcileResult.ok && reconcileResult.actions.length > 0) {
     ledger.append(
