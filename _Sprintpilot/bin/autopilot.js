@@ -1002,6 +1002,17 @@ function composeRuntimeState(persisted, profile, projectRoot) {
       persisted.current_bmad_step === phase
         ? persisted.phase_started_at
         : new Date().toISOString(),
+    // v2.4.1 — diagnostic mode state. Restored only when the phase
+    // matches; a phase reset clears it (the new phase gets a fresh
+    // chance at its own diagnostic insertion).
+    diagnostic_pending:
+      persisted.current_bmad_step === phase && persisted.diagnostic_pending === true,
+    diagnostic_completed:
+      persisted.current_bmad_step === phase && persisted.diagnostic_completed === true,
+    diagnostic_trace:
+      persisted.current_bmad_step === phase && typeof persisted.diagnostic_trace === 'string'
+        ? persisted.diagnostic_trace
+        : null,
     // .autopilot.lock holder ID, persisted so subsequent cmdStart calls
     // recognize their own lock and refresh in place. Cleared by
     // sprint-autopilot-off (which calls `lock.js release`).
@@ -1038,6 +1049,12 @@ function persistRuntimeState(runtime, profile, projectRoot) {
     lock_session_id: runtime.lock_session_id || null,
     // v2.4.0 — phase wall-clock tracking. See composeRuntimeState comment.
     phase_started_at: runtime.phase_started_at || null,
+    // v2.4.1 — diagnostic mode state. Cleared on phase advance by
+    // adapt.advanceState. Persisted so a resume mid-cycle doesn't lose
+    // the one-shot trigger and re-run the diagnostic on every retry.
+    diagnostic_pending: runtime.diagnostic_pending === true,
+    diagnostic_completed: runtime.diagnostic_completed === true,
+    diagnostic_trace: runtime.diagnostic_trace || null,
   };
   return persistState(updates, profile, projectRoot, runtime.story_key || 'sprint');
 }
@@ -1374,6 +1391,10 @@ function decorateTestScope(action, state, profile, projectRoot) {
       baseBranch: profile.base_branch || 'main',
       phase: state.phase,
       excludeTestIds: quarantinedTests,
+      // v2.4.1 — diagnostic mode flips verbose flags on the recommended
+      // command. adapt.js sets state.diagnostic_pending=true between
+      // the last retry and user_prompt escalation for test phases.
+      verbose: state.diagnostic_pending === true,
     });
   } catch (e) {
     log.warn(`testingScope.resolveTestScope failed: ${e.message}`);

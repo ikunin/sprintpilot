@@ -159,6 +159,12 @@ function buildTemplateSlots(state, profile, extra = {}) {
     test_files_hint: null,
     test_scope_decision_summary: null,
     test_scope_hint_guidance: null,
+    // v2.4.1 — diagnostic mode. When `diagnostic_mode: true`, the
+    // recommended_test_command runs with adapter-specific verbose
+    // flags. The LLM is expected to capture the verbose output and
+    // return it as `output.diagnostic_trace` in its signal.
+    diagnostic_mode: state.diagnostic_pending === true,
+    diagnostic_trace: state.diagnostic_trace || null,
     ...extra,
   };
 }

@@ -302,3 +302,51 @@ describe('adapter.buildExcludeFlags — v2.4.0 quarantine', () => {
     });
   });
 });
+
+describe('adapter.buildCmd verbose flag — v2.4.1 diagnostic mode', () => {
+  const vitestAdapter = vitest as Adapter;
+  const jestAdapter = jest as Adapter;
+  const pytestAdapter = pytest as Adapter;
+
+  it('vitest appends --reporter=verbose when verbose is set', () => {
+    const cmd = vitestAdapter.buildCmd({ scope: 'full', profile: {}, verbose: true });
+    expect(cmd).toContain('--reporter=verbose');
+  });
+
+  it('vitest omits verbose flag by default', () => {
+    const cmd = vitestAdapter.buildCmd({ scope: 'full', profile: {} });
+    expect(cmd).not.toContain('--reporter=verbose');
+  });
+
+  it('jest appends --verbose when verbose is set', () => {
+    const cmd = jestAdapter.buildCmd({
+      scope: 'affected',
+      changedFiles: ['src/a.ts'],
+      testFiles: [],
+      profile: {},
+      verbose: true,
+    });
+    expect(cmd).toContain('--verbose');
+  });
+
+  it('pytest appends -v --tb=long when verbose is set', () => {
+    const cmd = pytestAdapter.buildCmd({
+      scope: 'full',
+      profile: {},
+      verbose: true,
+    });
+    expect(cmd).toContain('-v');
+    expect(cmd).toContain('--tb=long');
+  });
+
+  it('verbose combines with exclude flags', () => {
+    const cmd = vitestAdapter.buildCmd({
+      scope: 'full',
+      profile: {},
+      verbose: true,
+      excludeTestIds: ['tests/flaky.test.ts'],
+    });
+    expect(cmd).toContain('--reporter=verbose');
+    expect(cmd).toContain('--exclude tests/flaky.test.ts');
+  });
+});

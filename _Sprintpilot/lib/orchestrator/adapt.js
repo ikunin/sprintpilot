@@ -10,7 +10,7 @@
 
 'use strict';
 
-const { STATES, nextAction, nextStateAfterSuccess, nextStoryStart } = require('./state-machine');
+const { STATES, nextAction, nextStateAfterSuccess, nextStoryStart, isTestPhase } = require('./state-machine');
 const { classifyImpact } = require('./impact-classifier');
 const { escalateOnFailure } = require('./profile-rules');
 const userCommandApplier = require('./user-command-applier');
@@ -271,7 +271,82 @@ function handleFailure(state, signal, profile, sideEffects) {
   // template gets it via `{{prior_diagnosis}}`.
   const carriedDiagnosis = signal.diagnosis || null;
 
+  // v2.4.1 — diagnostic insertion. If the LLM ran a diagnostic
+  // (verbose-flag) attempt in response to our previous emission's
+  // `diagnostic_mode: true` slot, the signal carries
+  // `output.diagnostic_trace`. Stash the trace and escalate to
+  // user_prompt with it surfaced as `prior_diagnosis` (richer than the
+  // signal's own diagnosis string). The diagnostic does NOT consume a
+  // retry slot — it's an observation pass — so we keep retryCount as
+  // the pre-diagnostic value when exiting via this path.
+  if (state.diagnostic_pending && signal.output && signal.output.diagnostic_trace) {
+    const trace = signal.output.diagnostic_trace;
+    sideEffects.push({
+      kind: 'log_diagnostic_captured',
+      phase: state.phase,
+      trace_excerpt: typeof trace === 'string' ? trace.slice(0, 200) : null,
+    });
+    return {
+      newState: {
+        ...state,
+        retry_count_this_phase: 0,
+        diagnostic_pending: false,
+        diagnostic_completed: true,
+        diagnostic_trace: trace,
+        prior_diagnosis: trace,
+      },
+      newProfile: profile,
+      nextAction: {
+        type: 'user_prompt',
+        phase: state.phase,
+        reason: 'retry_budget_exhausted_with_diagnostic',
+        prompt:
+          signal.reason ||
+          'Tests still failing after the diagnostic verbose re-run; manual review required. ' +
+            'The captured trace is attached as `diagnosis` for the next session.',
+        diagnosis: trace,
+        diagnostic_trace_attached: true,
+      },
+      sideEffects,
+      verdict: 'prompted',
+    };
+  }
+
   if (!recoverable || exhausted) {
+    // v2.4.1 — between failure 2 and 3, insert a diagnostic verbose-run
+    // pass for test phases. The orchestrator emits the same phase
+    // again with `diagnostic_mode: true` so the adapter switches to
+    // verbose flags; the LLM runs the verbose command, reports the
+    // trace via `output.diagnostic_trace`, and that trace becomes the
+    // `prior_diagnosis` for the user_prompt. One-shot per phase entry —
+    // `diagnostic_completed` blocks repeat insertions.
+    //
+    // Only fires on `exhausted` (retry budget hit); non-recoverable
+    // failures bypass diagnostic — by definition another attempt
+    // would be pointless. The LLM's signal says "don't retry this."
+    if (
+      exhausted &&
+      recoverable &&
+      isTestPhase(state.phase) &&
+      !state.diagnostic_pending &&
+      !state.diagnostic_completed
+    ) {
+      const newState = {
+        ...state,
+        // Don't increment the retry counter — diagnostic is an inserted
+        // observation pass, not a fix attempt.
+        retry_count_this_phase: state.retry_count_this_phase || 0,
+        diagnostic_pending: true,
+        prior_diagnosis: carriedDiagnosis,
+      };
+      return {
+        newState,
+        newProfile: profile,
+        nextAction: nextAction(newState, profile),
+        sideEffects,
+        verdict: 'retry',
+      };
+    }
     return {
       newState: {
         ...state,
@@ -609,6 +684,11 @@ function advanceState(state, profile, newPhase, signal) {
     // phase could artificially inflate identicalCount on the next reject.
     last_verify_issues_signature: null,
     consecutive_identical_rejections: 0,
+    // v2.4.1 — diagnostic state is per-phase-entry. Each new phase
+    // gets one diagnostic chance; success or escalation clears it.
+    diagnostic_pending: false,
+    diagnostic_completed: false,
+    diagnostic_trace: null,
   };
   // Advancing forward clears the prior diagnosis (the LLM resolved it).
   next.prior_diagnosis = null;

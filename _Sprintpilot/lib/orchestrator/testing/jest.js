@@ -32,11 +32,12 @@ function detect(projectRoot) {
   }
 }
 
-function buildCmd({ scope, changedFiles, testFiles, profile, excludeTestIds }) {
+function buildCmd({ scope, changedFiles, testFiles, profile, excludeTestIds, verbose }) {
   const userCmd = userOverride(profile, scope);
-  if (userCmd) return userCmd;
+  if (userCmd) return verbose ? `${userCmd} --verbose` : userCmd;
   const excludeArg = buildExcludeFlags(excludeTestIds);
-  const append = (cmd) => (excludeArg ? `${cmd} ${excludeArg}` : cmd);
+  const verboseArg = verbose ? '--verbose' : '';
+  const append = (cmd) => [cmd, verboseArg, excludeArg].filter((s) => s).join(' ');
   if (scope === 'full') return append('npx jest');
   // affected
   const changed = Array.isArray(changedFiles)

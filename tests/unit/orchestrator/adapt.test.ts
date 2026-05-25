@@ -391,8 +391,15 @@ describe('failure', () => {
     });
   });
 
-  it('escalates to user_prompt after budget exhausted', () => {
-    const state = st(STATES.DEV_GREEN, { retry_count_this_phase: 2 }); // medium budget is 2 → next try is the 3rd → exhausted
+  it('escalates to user_prompt after budget exhausted (post-diagnostic)', () => {
+    // v2.4.1 — test phases insert one diagnostic verbose-run between
+    // the last retry and user_prompt. Setting `diagnostic_completed:
+    // true` simulates the post-diagnostic state so we still exercise
+    // the bare budget-exhausted escalation path.
+    const state = st(STATES.DEV_GREEN, {
+      retry_count_this_phase: 2,
+      diagnostic_completed: true,
+    });
     const r = interpretSignal(
       state,
       { status: 'failure', reason: 'x', diagnosis: 'y', recoverable: true },
@@ -954,6 +961,99 @@ describe('advanceState — session_stories_completed counter', () => {
       medium(),
     );
     expect(r.newState.session_stories_completed).toBe(2);
+  });
+});
+
+describe('diagnostic mode insertion (v2.4.1)', () => {
+  it('inserts a diagnostic re-run between budget-exhausted and user_prompt for test phases', () => {
+    const r = interpretSignal(
+      st(STATES.DEV_GREEN, { retry_count_this_phase: 2 }),
+      { status: 'failure', reason: 'x', diagnosis: 'y', recoverable: true },
+      medium(),
+    );
+    expect(r.verdict).toBe('retry');
+    expect(r.newState.diagnostic_pending).toBe(true);
+    expect(r.newState.diagnostic_completed).toBeFalsy();
+    // Retry counter NOT incremented — diagnostic is an observation pass.
+    expect(r.newState.retry_count_this_phase).toBe(2);
+  });
+
+  it('skips diagnostic when state.diagnostic_completed is already true', () => {
+    const r = interpretSignal(
+      st(STATES.DEV_GREEN, { retry_count_this_phase: 2, diagnostic_completed: true }),
+      { status: 'failure', reason: 'x', diagnosis: 'y', recoverable: true },
+      medium(),
+    );
+    expect(r.verdict).toBe('prompted');
+    expect((r.nextAction as Record<string, unknown>).reason).toBe('retry_budget_exhausted');
+  });
+
+  it('skips diagnostic for non-test phases', () => {
+    const r = interpretSignal(
+      st(STATES.CODE_REVIEW, { retry_count_this_phase: 2 }),
+      { status: 'failure', reason: 'x', diagnosis: 'y', recoverable: true },
+      medium(),
+    );
+    expect(r.verdict).toBe('prompted');
+    expect(r.newState.diagnostic_pending).toBeFalsy();
+  });
+
+  it('skips diagnostic on non-recoverable failure (not yet at budget)', () => {
+    // retry_count_this_phase=0, so the budget is not exhausted. The
+    // !recoverable branch hits user_prompt with reason='failure_not_recoverable'
+    // and no diagnostic insertion happens.
+    const r = interpretSignal(
+      st(STATES.DEV_GREEN, { retry_count_this_phase: 0 }),
+      { status: 'failure', reason: 'fatal', diagnosis: 'x', recoverable: false },
+      medium(),
+    );
+    expect(r.verdict).toBe('prompted');
+    expect((r.nextAction as Record<string, unknown>).reason).toBe('failure_not_recoverable');
+    expect(r.newState.diagnostic_pending).toBeFalsy();
+  });
+
+  it('captures diagnostic_trace and escalates with rich prior_diagnosis on diagnostic response', () => {
+    const trace = 'FAIL tests/foo.test.ts > expected 1 to be 2\n  at line 42';
+    const r = interpretSignal(
+      st(STATES.DEV_GREEN, {
+        retry_count_this_phase: 2,
+        diagnostic_pending: true,
+      }),
+      {
+        status: 'failure',
+        reason: 'still failing',
+        diagnosis: null,
+        recoverable: true,
+        output: { diagnostic_trace: trace },
+      },
+      medium(),
+    );
+    expect(r.verdict).toBe('prompted');
+    expect((r.nextAction as Record<string, unknown>).reason).toBe(
+      'retry_budget_exhausted_with_diagnostic',
+    );
+    expect((r.nextAction as Record<string, unknown>).diagnosis).toBe(trace);
+    expect(r.newState.diagnostic_trace).toBe(trace);
+    expect(r.newState.diagnostic_completed).toBe(true);
+    expect(r.newState.diagnostic_pending).toBe(false);
+    // Side effect logged.
+    expect(r.sideEffects.find((e) => e.kind === 'log_diagnostic_captured')).toBeDefined();
+  });
+
+  it('clears diagnostic state on phase advance', () => {
+    const r = interpretSignal(
+      st(STATES.DEV_GREEN, {
+        diagnostic_pending: true,
+        diagnostic_completed: true,
+        diagnostic_trace: 'old trace',
+      }),
+      { status: 'success' },
+      medium(),
+    );
+    expect(r.newState.phase).toBe(STATES.CODE_REVIEW);
+    expect(r.newState.diagnostic_pending).toBe(false);
+    expect(r.newState.diagnostic_completed).toBe(false);
+    expect(r.newState.diagnostic_trace).toBeNull();
   });
 });
 
