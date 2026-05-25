@@ -79,6 +79,31 @@ function interpretSignal(state, signal, profile, verifyResult) {
     sideEffects.push({ kind: 'append_decisions', decisions: signal.decisions, phase: state.phase });
   }
 
+  // v2.4.0 — flaky-test quarantine signal. The LLM/adapter detects a
+  // test that failed then passed on the auto-replay without a code
+  // change between runs and surfaces it here as `output.flaky_tests`
+  // (string[]). The orchestrator records each occurrence; after
+  // N=3 flips of the same test ID across stories, it auto-quarantines
+  // and appends an audit entry to decisions[]. See
+  // lib/orchestrator/flaky-quarantine.js for the persistence shape.
+  if (
+    signal.output &&
+    Array.isArray(signal.output.flaky_tests) &&
+    signal.output.flaky_tests.length > 0
+  ) {
+    const tests = signal.output.flaky_tests.filter(
+      (t) => typeof t === 'string' && t.length > 0,
+    );
+    if (tests.length > 0) {
+      sideEffects.push({
+        kind: 'record_flaky_tests',
+        phase: state.phase,
+        tests,
+        story_key: state.story_key || null,
+      });
+    }
+  }
+
   switch (signal.status) {
     case 'success':
       return handleSuccess(state, signal, profile, verifyResult, sideEffects);
@@ -565,11 +590,20 @@ function handleVerifyOverride(state, signal, profile, verifyResult, sideEffects)
 // clears patch_findings when leaving step 6; resets per-story counters when
 // starting a new story.
 function advanceState(state, profile, newPhase, signal) {
+  // v2.4.0 — phase_started_at stamps the wall-clock entry into newPhase
+  // so state-machine.checkPhaseTimeout can detect hangs. Tests inject
+  // `signal._now` (ISO string) for deterministic timing assertions; live
+  // sessions use the wall clock. Only refreshed when the phase actually
+  // changes — staying in the same phase across a retry keeps the
+  // original timestamp so the budget tracks total time, not per-attempt.
+  const nowIso =
+    (signal && signal._now) || (state && state._now) || new Date().toISOString();
   const next = {
     ...state,
     phase: newPhase,
     retry_count_this_phase: 0,
     verify_reject_count: 0,
+    phase_started_at: newPhase !== state.phase ? nowIso : state.phase_started_at || nowIso,
     // v2.3.0 — phase transition clears verify-loop trackers so the next
     // phase starts fresh. Without this a stale signature from the prior
     // phase could artificially inflate identicalCount on the next reject.

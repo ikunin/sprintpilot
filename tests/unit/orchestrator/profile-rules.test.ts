@@ -380,3 +380,72 @@ describe('escalateOnFailure', () => {
     expect(escalateOnFailure(next, { tests_failed: 5 })).toBe(next);
   });
 });
+
+describe('phase_timeout_minutes — v2.4.0', () => {
+  it('seeds medium defaults', () => {
+    const p = flatToProfile({}, 'medium') as { phase_timeout_minutes: Record<string, number> };
+    expect(p.phase_timeout_minutes).toMatchObject({
+      dev_red: 15,
+      dev_green: 30,
+      code_review: 15,
+      patch_apply: 15,
+      patch_retest: 15,
+    });
+  });
+
+  it('seeds nano with quick_dev budget', () => {
+    const p = flatToProfile({}, 'nano') as { phase_timeout_minutes: Record<string, number> };
+    expect(p.phase_timeout_minutes).toMatchObject({ nano_quick_dev: 15 });
+  });
+
+  it('seeds large with generous budgets', () => {
+    const p = flatToProfile({}, 'large') as { phase_timeout_minutes: Record<string, number> };
+    expect(p.phase_timeout_minutes.dev_green).toBe(60);
+  });
+
+  it('legacy disables phase timeouts entirely (null)', () => {
+    const p = flatToProfile({}, 'legacy') as { phase_timeout_minutes: unknown };
+    expect(p.phase_timeout_minutes).toBeNull();
+  });
+
+  it('user override null disables all timeouts', () => {
+    const p = flatToProfile(
+      { autopilot: { phase_timeout_minutes: null } },
+      'medium',
+    ) as { phase_timeout_minutes: unknown };
+    expect(p.phase_timeout_minutes).toBeNull();
+  });
+
+  it('user override per-phase null disables that one phase', () => {
+    const p = flatToProfile(
+      { autopilot: { phase_timeout_minutes: { dev_green: null } } },
+      'medium',
+    ) as { phase_timeout_minutes: Record<string, number> };
+    expect(p.phase_timeout_minutes.dev_green).toBeUndefined();
+    // Other defaults still present.
+    expect(p.phase_timeout_minutes.dev_red).toBe(15);
+  });
+
+  it('user override per-phase value wins over default', () => {
+    const p = flatToProfile(
+      { autopilot: { phase_timeout_minutes: { dev_green: 45 } } },
+      'medium',
+    ) as { phase_timeout_minutes: Record<string, number> };
+    expect(p.phase_timeout_minutes.dev_green).toBe(45);
+  });
+
+  it('drops non-numeric and non-positive values silently', () => {
+    const p = flatToProfile(
+      {
+        autopilot: {
+          phase_timeout_minutes: { dev_green: 'oops', dev_red: -5, code_review: 0 },
+        },
+      },
+      'medium',
+    ) as { phase_timeout_minutes: Record<string, number> };
+    // Invalid values fall back to defaults.
+    expect(p.phase_timeout_minutes.dev_green).toBe(30);
+    expect(p.phase_timeout_minutes.dev_red).toBe(15);
+    expect(p.phase_timeout_minutes.code_review).toBe(15);
+  });
+});

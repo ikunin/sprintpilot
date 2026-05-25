@@ -58,3 +58,33 @@ autopilot:
   # which exhausts the token/memory budget. That's why "auto" generates
   # the artifact inline instead of invoking the external skill.
   retrospective_mode: auto
+
+  # v2.4.0 — Per-phase wall-clock budgets.
+  #
+  # The state machine timestamps phase entry (state.phase_started_at) and
+  # halts cleanly with `reason: 'phase_timeout_exceeded'` when the active
+  # phase has been running longer than its budget. Catches the "I started
+  # a sprint, walked away, came back to a multi-hour DEV_GREEN hang" case
+  # v2.3.x had no recourse for.
+  #
+  # Keys must match orchestrator phases (dev_red, dev_green, code_review,
+  # patch_apply, patch_retest, nano_quick_dev, create_story,
+  # check_readiness). Phases not in the map are unbudgeted.
+  #
+  # Defaults scale with complexity_profile:
+  #   nano   — short (15min nano_quick_dev)
+  #   small  — pragmatic (20min dev_green)
+  #   medium — default (30min dev_green)
+  #   large  — generous (60min dev_green)
+  #   legacy — disabled (preserves v1.0.5 semantics byte-for-byte)
+  #
+  # Override examples (uncomment and customize):
+  #   phase_timeout_minutes: null      # disable all timeouts
+  #   phase_timeout_minutes: {}        # disable all timeouts
+  #   phase_timeout_minutes:
+  #     dev_green: 45                  # raise one budget
+  #     dev_red: null                  # disable one phase
+  #
+  # The halts are deliberately user_prompts (recoverable) so the LLM can
+  # be re-prompted with extra context; the next session continues from
+  # the same phase. Leave the key unset to inherit profile defaults.

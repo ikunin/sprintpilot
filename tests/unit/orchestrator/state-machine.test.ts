@@ -8,9 +8,17 @@ type Profile = Record<string, unknown>;
 type State = Record<string, unknown>;
 type Action = Record<string, unknown>;
 
-const { STATES, nextAction, nextStateAfterSuccess, nextStoryStart, HINT_TO_PHASE } = sm as {
+const {
+  STATES,
+  nextAction,
+  nextStateAfterSuccess,
+  nextStoryStart,
+  HINT_TO_PHASE,
+  checkPhaseTimeout,
+  elapsedMinutesSince,
+} = sm as {
   STATES: Record<string, string>;
-  nextAction: (state: State, profile: Profile) => Action;
+  nextAction: (state: State, profile: Profile, now?: string | number) => Action;
   nextStateAfterSuccess: (
     state: State,
     profile: Profile,
@@ -18,6 +26,12 @@ const { STATES, nextAction, nextStateAfterSuccess, nextStoryStart, HINT_TO_PHASE
   ) => string | null;
   nextStoryStart: (profile: Profile) => string;
   HINT_TO_PHASE: Record<string, string>;
+  checkPhaseTimeout: (
+    state: State,
+    profile: Profile,
+    now?: string | number,
+  ) => { budget_minutes: number; elapsed_minutes: number } | null;
+  elapsedMinutesSince: (startedAt: string | null, now?: string | number) => number | null;
 };
 
 const { flatToProfile } = profileRules as {
@@ -593,5 +607,117 @@ describe('template slots — LLM intelligence channel', () => {
     const state = baseState(STATES.PATCH_APPLY, { patch_findings: findings });
     const a = nextAction(state, medium());
     expect(a.template_slots).toMatchObject({ patch_findings: findings });
+  });
+});
+
+describe('per-phase wall-clock budget — v2.4.0', () => {
+  // Fixed "now" that's far enough from any test's phase_started_at to drive
+  // deterministic minute math. All timestamps are explicit so the assertions
+  // don't drift with the real clock.
+  const T_NOW = '2026-06-01T12:00:00.000Z';
+  const at = (minutesAgo: number) =>
+    new Date(Date.parse(T_NOW) - minutesAgo * 60_000).toISOString();
+
+  describe('elapsedMinutesSince', () => {
+    it('computes positive elapsed minutes', () => {
+      expect(elapsedMinutesSince(at(5), T_NOW)).toBeCloseTo(5, 5);
+      expect(elapsedMinutesSince(at(60), T_NOW)).toBeCloseTo(60, 5);
+    });
+    it('returns null for missing / invalid timestamps', () => {
+      expect(elapsedMinutesSince(null as unknown as string, T_NOW)).toBeNull();
+      expect(elapsedMinutesSince('', T_NOW)).toBeNull();
+      expect(elapsedMinutesSince('not-a-date', T_NOW)).toBeNull();
+    });
+  });
+
+  describe('checkPhaseTimeout', () => {
+    it('returns null when phase_started_at is missing', () => {
+      const state = baseState(STATES.DEV_GREEN);
+      expect(checkPhaseTimeout(state, medium(), T_NOW)).toBeNull();
+    });
+    it('returns null when profile has no phase_timeout_minutes map', () => {
+      const state = baseState(STATES.DEV_GREEN, { phase_started_at: at(60) });
+      const legacy = flatToProfile({}, 'legacy'); // legacy disables timeouts
+      expect(checkPhaseTimeout(state, legacy, T_NOW)).toBeNull();
+    });
+    it('returns null when the phase is not in the budget map', () => {
+      const state = baseState(STATES.STORY_DONE, { phase_started_at: at(120) });
+      // story_done is intentionally unbudgeted (routing state).
+      expect(checkPhaseTimeout(state, medium(), T_NOW)).toBeNull();
+    });
+    it('returns null when elapsed is within budget', () => {
+      // medium dev_green budget = 30min.
+      const state = baseState(STATES.DEV_GREEN, { phase_started_at: at(25) });
+      expect(checkPhaseTimeout(state, medium(), T_NOW)).toBeNull();
+    });
+    it('returns budget + elapsed when exceeded', () => {
+      const state = baseState(STATES.DEV_GREEN, { phase_started_at: at(45) });
+      const r = checkPhaseTimeout(state, medium(), T_NOW);
+      expect(r).not.toBeNull();
+      expect(r!.budget_minutes).toBe(30);
+      expect(r!.elapsed_minutes).toBeCloseTo(45, 1);
+    });
+    it('user override null disables a single phase', () => {
+      const profile = flatToProfile(
+        { autopilot: { phase_timeout_minutes: { dev_green: null } } },
+        'medium',
+      );
+      const state = baseState(STATES.DEV_GREEN, { phase_started_at: at(120) });
+      expect(checkPhaseTimeout(state, profile, T_NOW)).toBeNull();
+    });
+    it('user override null at root disables all phases', () => {
+      const profile = flatToProfile(
+        { autopilot: { phase_timeout_minutes: null } },
+        'medium',
+      );
+      const state = baseState(STATES.DEV_GREEN, { phase_started_at: at(120) });
+      expect(checkPhaseTimeout(state, profile, T_NOW)).toBeNull();
+    });
+    it('user override raises a single phase budget', () => {
+      const profile = flatToProfile(
+        { autopilot: { phase_timeout_minutes: { dev_green: 60 } } },
+        'medium',
+      );
+      const state = baseState(STATES.DEV_GREEN, { phase_started_at: at(45) });
+      expect(checkPhaseTimeout(state, profile, T_NOW)).toBeNull(); // within 60
+    });
+  });
+
+  describe('nextAction phase_timeout_exceeded halt', () => {
+    it('emits user_prompt with structured fields when exceeded', () => {
+      const state = baseState(STATES.DEV_GREEN, { phase_started_at: at(45) });
+      const a = nextAction(state, medium(), T_NOW);
+      expect(a.type).toBe('user_prompt');
+      expect(a.reason).toBe('phase_timeout_exceeded');
+      expect(a.budget_minutes).toBe(30);
+      expect(a.elapsed_minutes).toBeCloseTo(45, 1);
+      expect(a.phase).toBe(STATES.DEV_GREEN);
+      expect(a.phase_started_at).toBe(at(45));
+    });
+    it('falls through to the normal action when within budget', () => {
+      const state = baseState(STATES.DEV_GREEN, { phase_started_at: at(10) });
+      const a = nextAction(state, medium(), T_NOW);
+      expect(a.type).toBe('invoke_skill');
+      expect(a.skill).toBe('bmad-dev-story');
+    });
+    it('does not fire on routing states even when stamped long ago', () => {
+      // story_done is unbudgeted (routing state); it should emit its git_op.
+      const state = baseState(STATES.STORY_DONE, { phase_started_at: at(180) });
+      const a = nextAction(state, medium(), T_NOW);
+      expect(a.type).toBe('git_op');
+      expect(a.op).toBe('commit_and_push_story');
+    });
+    it('legacy profile does not budget any phase', () => {
+      const state = baseState(STATES.DEV_GREEN, { phase_started_at: at(600) });
+      const a = nextAction(state, flatToProfile({}, 'legacy'), T_NOW);
+      expect(a.reason).not.toBe('phase_timeout_exceeded');
+    });
+    it('nano profile budgets nano_quick_dev', () => {
+      const state = baseState(STATES.NANO_QUICK_DEV, { phase_started_at: at(20) });
+      // nano nano_quick_dev budget = 15min, elapsed 20min → halt.
+      const a = nextAction(state, nano(), T_NOW);
+      expect(a.reason).toBe('phase_timeout_exceeded');
+      expect(a.budget_minutes).toBe(15);
+    });
   });
 });

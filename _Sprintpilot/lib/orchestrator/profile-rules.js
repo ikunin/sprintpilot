@@ -37,6 +37,55 @@ const ORCHESTRATOR_DEFAULTS_BY_PROFILE = {
   legacy: { retry_budget_per_action: 2, verify_reject_budget: 3 },
 };
 
+// Per-phase wall-clock budgets (in minutes). When state.phase_started_at
+// + budget < now, nextAction emits a user_prompt with
+// reason='phase_timeout_exceeded' carrying { phase, elapsed_minutes,
+// budget_minutes }. v2.4.0.
+//
+// Keys must match STATES.* values from state-machine.js. Unknown phases
+// (e.g. epic_boundary_check, story_done) are intentionally unbudgeted —
+// they're transient routing states, not work states.
+//
+// `legacy` is `null` (disabled) to preserve v1.0.5 behavior byte-for-byte.
+// User overrides via `autopilot.phase_timeout_minutes` always win; set
+// to `null` to disable timeouts entirely, or set a per-phase value to
+// override a single phase budget.
+const PHASE_TIMEOUT_DEFAULTS_BY_PROFILE = {
+  nano: {
+    nano_quick_dev: 15,
+    create_story: 5,
+    check_readiness: 5,
+  },
+  small: {
+    create_story: 5,
+    check_readiness: 5,
+    dev_red: 10,
+    dev_green: 20,
+    code_review: 10,
+    patch_apply: 10,
+    patch_retest: 10,
+  },
+  medium: {
+    create_story: 5,
+    check_readiness: 5,
+    dev_red: 15,
+    dev_green: 30,
+    code_review: 15,
+    patch_apply: 15,
+    patch_retest: 15,
+  },
+  large: {
+    create_story: 10,
+    check_readiness: 10,
+    dev_red: 30,
+    dev_green: 60,
+    code_review: 30,
+    patch_apply: 30,
+    patch_retest: 30,
+  },
+  legacy: null,
+};
+
 function get(obj, dottedKey) {
   if (obj === null || obj === undefined) return undefined;
   const parts = dottedKey.split('.');
@@ -64,6 +113,31 @@ function coerceInt(v, fallback) {
 function coerceEnum(v, allowed, fallback) {
   if (typeof v === 'string' && allowed.includes(v)) return v;
   return fallback;
+}
+
+// Coerce a per-phase timeout map. Accepts:
+//   - null / undefined → use defaults
+//   - explicit null in YAML → disable all timeouts (returns null)
+//   - {} → disable all timeouts (returns {})
+//   - object of {phase: minutes} → merge into defaults, user keys win
+// Values must be positive finite numbers; invalid entries are dropped.
+function coercePhaseTimeouts(v, defaults) {
+  if (v === null) return null;
+  if (v === undefined) return defaults ? { ...defaults } : null;
+  if (typeof v !== 'object' || Array.isArray(v)) {
+    return defaults ? { ...defaults } : null;
+  }
+  const base = defaults ? { ...defaults } : {};
+  for (const [k, raw] of Object.entries(v)) {
+    if (raw === null) {
+      // Explicit null disables that phase's timeout.
+      delete base[k];
+      continue;
+    }
+    const num = typeof raw === 'number' ? raw : Number.parseFloat(raw);
+    if (Number.isFinite(num) && num > 0) base[k] = num;
+  }
+  return base;
 }
 
 // Compute land_wait_minutes (default 30) and epic_merge_wait_minutes
@@ -224,6 +298,34 @@ function flatToProfile(resolved, profileName) {
     retry_budget_per_action: orch.retry_budget_per_action,
     verify_reject_budget: orch.verify_reject_budget,
 
+    // autopilot.phase_timeout_minutes — v2.4.0 trust bundle.
+    //
+    // Wall-clock budget per phase. The state machine compares
+    // `state.phase_started_at` to `now` on every action emission and
+    // halts with `reason: 'phase_timeout_exceeded'` when the active
+    // phase has been running longer than its budget. Catches silent
+    // multi-hour DEV_GREEN hangs that v2.3.x had no recourse for.
+    //
+    // Keys match STATES.* values (dev_red, dev_green, code_review,
+    // patch_apply, patch_retest, nano_quick_dev, create_story,
+    // check_readiness). Phases not in the map are unbudgeted.
+    //
+    // Defaults scale with profile: nano short (15min quick-dev),
+    // medium pragmatic (30min dev_green), large generous (60min
+    // dev_green). Legacy keeps timeouts disabled to preserve v1.0.5
+    // semantics byte-for-byte.
+    //
+    // YAML examples:
+    //   autopilot.phase_timeout_minutes: null      # disable all timeouts
+    //   autopilot.phase_timeout_minutes: {}        # disable all timeouts
+    //   autopilot.phase_timeout_minutes:
+    //     dev_green: 45                            # override one phase
+    //     dev_red: null                            # disable one phase
+    phase_timeout_minutes: coercePhaseTimeouts(
+      get(resolved, 'autopilot.phase_timeout_minutes'),
+      PHASE_TIMEOUT_DEFAULTS_BY_PROFILE[name],
+    ),
+
     // testing.* — tiered test scope (v2.3.18+).
     //
     // The autopilot computes a recommended test command per DEV_RED /
@@ -322,6 +424,7 @@ module.exports = {
   DEFAULT_COMMIT_TEMPLATE_STORY,
   DEFAULT_COMMIT_TEMPLATE_PATCH,
   ORCHESTRATOR_DEFAULTS_BY_PROFILE,
+  PHASE_TIMEOUT_DEFAULTS_BY_PROFILE,
   flatToProfile,
   escalateOnFailure,
 };

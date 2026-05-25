@@ -218,3 +218,87 @@ describe('pickAdapter registry', () => {
 
 // Touch sx() so the helper isn't dead code when imported by other CI-flake-prone test specs.
 void sx;
+
+describe('adapter.buildExcludeFlags — v2.4.0 quarantine', () => {
+  const vitestAdapter = vitest as Adapter & { buildExcludeFlags: (ids: string[]) => string };
+  const jestAdapter = jest as Adapter & { buildExcludeFlags: (ids: string[]) => string };
+  const pytestAdapter = pytest as Adapter & { buildExcludeFlags: (ids: string[]) => string };
+  const genericAdapter = generic as Adapter & { buildExcludeFlags: (ids: string[]) => string };
+
+  describe('vitest', () => {
+    it('returns "" for no IDs', () => {
+      expect(vitestAdapter.buildExcludeFlags([])).toBe('');
+    });
+    it('emits one --exclude per path-shaped ID', () => {
+      const r = vitestAdapter.buildExcludeFlags([
+        'tests/flaky.test.ts',
+        'src/integration/foo.spec.ts',
+      ]);
+      expect(r).toContain('--exclude tests/flaky.test.ts');
+      expect(r).toContain('--exclude src/integration/foo.spec.ts');
+    });
+    it('drops name-shaped IDs', () => {
+      expect(vitestAdapter.buildExcludeFlags(['some flaky describe > it'])).toBe('');
+    });
+  });
+
+  describe('jest', () => {
+    it('returns "" for no IDs', () => {
+      expect(jestAdapter.buildExcludeFlags([])).toBe('');
+    });
+    it('OR-joins path IDs into a single --testPathIgnorePatterns', () => {
+      const r = jestAdapter.buildExcludeFlags([
+        'tests/flaky.test.ts',
+        'tests/other.test.ts',
+      ]);
+      expect(r.startsWith('--testPathIgnorePatterns ')).toBe(true);
+      // Both paths appear in the OR-joined regex (escaped dots).
+      expect(r).toContain('tests/flaky\\.test\\.ts');
+      expect(r).toContain('tests/other\\.test\\.ts');
+      expect(r).toContain('|');
+    });
+  });
+
+  describe('pytest', () => {
+    it('uses --deselect for node IDs and --ignore= for plain paths', () => {
+      const r = pytestAdapter.buildExcludeFlags([
+        'tests/flaky.py::test_x',
+        'tests/legacy.py',
+      ]);
+      expect(r).toContain('--deselect tests/flaky.py::test_x');
+      expect(r).toContain('--ignore=tests/legacy.py');
+    });
+    it('drops non-path non-nodeid IDs', () => {
+      expect(pytestAdapter.buildExcludeFlags(['just a string'])).toBe('');
+    });
+  });
+
+  describe('generic', () => {
+    it('returns "" for everything (no portable exclusion)', () => {
+      expect(genericAdapter.buildExcludeFlags(['tests/flaky.test.ts'])).toBe('');
+    });
+  });
+
+  describe('buildCmd integration', () => {
+    it('vitest appends exclude flags to the full command', () => {
+      const cmd = vitestAdapter.buildCmd({
+        scope: 'full',
+        profile: {},
+        excludeTestIds: ['tests/flaky.test.ts'],
+      });
+      expect(cmd).toContain('npx vitest run');
+      expect(cmd).toContain('--exclude tests/flaky.test.ts');
+    });
+    it('jest appends exclude flags to the affected command', () => {
+      const cmd = jestAdapter.buildCmd({
+        scope: 'affected',
+        changedFiles: ['src/foo.ts'],
+        testFiles: [],
+        profile: {},
+        excludeTestIds: ['tests/flaky.test.ts'],
+      });
+      expect(cmd).toContain('--findRelatedTests');
+      expect(cmd).toContain('--testPathIgnorePatterns');
+    });
+  });
+});

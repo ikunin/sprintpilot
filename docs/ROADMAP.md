@@ -5,11 +5,20 @@ one-feature-per-release. Each entry has a rough effort estimate, the
 symptom it kills, and any dependencies on prior bundles.
 
 This doc is a living artifact — re-shuffled as priorities shift or
-real usage reveals new pain points. Last updated: v2.3.18.
+real usage reveals new pain points. Last updated: v2.4.0.
 
 ## Currently shipped
 
-- **v2.3.18** *(latest)* — tiered, change-aware test scope per phase.
+- **v2.4.0** *(latest)* — trust & predictability bundle. Per-phase
+  wall-clock budgets (catches silent DEV_GREEN hangs); self-explaining
+  halts (every user_prompt carries last 3 actions, failed verifier
+  check, elapsed time, similar-halt pointer); background full-suite
+  runner (`testing.full_suite_on_story_land: background` now wired
+  end-to-end; closes the v2.3.18 silent caveat for teams without CI);
+  flaky-test quarantine (auto-records flips, quarantines after N=3
+  across stories, audited in decision-log, `autopilot quarantine`
+  CLI).
+- **v2.3.18** — tiered, change-aware test scope per phase.
   Affected-only inner loop (Vitest `--changed`, Jest
   `--findRelatedTests`, pytest `--testmon`, generic shell-out
   adapter); CI gates the full suite via `gh pr checks` on `STORY_LAND`.
@@ -21,22 +30,6 @@ real usage reveals new pain points. Last updated: v2.3.18.
   `merge_strategy: land_as_you_go`.
 - **v2.3.14** — reconciliation guards against unpushed work.
 - **v2.3.13** — boot-time auto-reconcile with BMAD's sprint-status.
-
-## v2.4.0 — Trust & predictability bundle
-
-The biggest open wound: "I started a sprint, walked away, came back
-to an unexplained halt." Closes that with four independently-
-correct changes shipped together.
-
-| Component | Effort | Kills |
-|---|---|---|
-| Background full-suite runner (`testing.full_suite_on_story_land: background`) | ~2 days | Silent v2.3.18 caveat; teams without CI have no full-suite gate |
-| Self-explaining halts — last 3 LLM actions, the failed verifier check, elapsed time, similar-halt pointer | ~1 day | "verify_rejected: test_files…" cryptic halts; UX-per-LOC champion |
-| Per-phase time budgets — `profile.phase_timeout_minutes: { dev_green: 20, … }` | ~half day | Silent multi-hour hangs in DEV_GREEN |
-| Flaky-test quarantine — auto-replay 1×, auto-quarantine after N failures across stories, audited in `decisions[]` | ~3 days | "The autopilot stopped overnight for no reason" incidents (probably 30-50% of them) |
-
-**Total: ~6-7 days.** Single PR + release. Minor bump because
-quarantine changes verify semantics in user-visible ways.
 
 ## v2.4.1 — Speed-beyond-tests bundle
 

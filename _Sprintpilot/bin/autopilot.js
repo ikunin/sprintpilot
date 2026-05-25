@@ -34,6 +34,9 @@ const profileRules = require('../lib/orchestrator/profile-rules');
 const verifyMod = require('../lib/orchestrator/verify');
 const stateStore = require('../lib/orchestrator/state-store');
 const ledger = require('../lib/orchestrator/action-ledger');
+const backgroundSuite = require('../lib/orchestrator/background-suite');
+const flakyQuarantine = require('../lib/orchestrator/flaky-quarantine');
+const haltExplainer = require('../lib/orchestrator/halt-explainer');
 const decisionLog = require('../lib/orchestrator/decision-log');
 const userCommands = require('../lib/orchestrator/user-commands');
 const divergence = require('../lib/orchestrator/divergence');
@@ -50,7 +53,7 @@ const {
 
 const { STATES } = stateMachine;
 
-const SUBCOMMANDS = ['start', 'next', 'record', 'state', 'report', 'validate-config', 'status', 'progress', 'heartbeat', 'tasks'];
+const SUBCOMMANDS = ['start', 'next', 'record', 'state', 'report', 'validate-config', 'status', 'progress', 'heartbeat', 'tasks', 'quarantine'];
 
 // v2.3.12 — canonical per-story task list (the BMad 7-step cycle,
 // collapsed into operator-visible labels). Used by `autopilot tasks` to
@@ -107,6 +110,8 @@ function help() {
       '  autopilot report             Session report (markdown)',
       '  autopilot validate-config    Resolve + print active profile',
       '  autopilot status             One-line status',
+      '  autopilot quarantine list|add <id>|eject <id>',
+      '                               Inspect/manage flaky-test quarantine',
       '',
       'Global flags:',
       '  --project-root <path>        Default: CWD',
@@ -981,6 +986,21 @@ function composeRuntimeState(persisted, profile, projectRoot) {
     // not lifetime). Persisted across in-session resumes so a `pause` mid-flow
     // doesn't reset progress against the limit.
     session_stories_completed: persisted.session_stories_completed || 0,
+    // v2.4.0 — per-phase wall-clock budget tracking. Stamped by
+    // adapt.advanceState on every phase advance; consumed by
+    // state-machine.checkPhaseTimeout on each emission. Backfilled here
+    // when:
+    //   (a) the persisted YAML predates v2.4.0 and has no stamp, OR
+    //   (b) composeRuntimeState changed `phase` from the persisted value
+    //       (e.g. a phase reset for missing story_key, or a fresh-session
+    //       flow start) — the old stamp would track the wrong phase.
+    // Either way, we treat "now" as the entry into the resolved phase so
+    // the first emission isn't immediately budget-exhausted.
+    phase_started_at:
+      typeof persisted.phase_started_at === 'string' &&
+      persisted.current_bmad_step === phase
+        ? persisted.phase_started_at
+        : new Date().toISOString(),
     // .autopilot.lock holder ID, persisted so subsequent cmdStart calls
     // recognize their own lock and refresh in place. Cleared by
     // sprint-autopilot-off (which calls `lock.js release`).
@@ -1015,6 +1035,8 @@ function persistRuntimeState(runtime, profile, projectRoot) {
     pending_alternative: runtime.pending_alternative || null,
     session_stories_completed: runtime.session_stories_completed || 0,
     lock_session_id: runtime.lock_session_id || null,
+    // v2.4.0 — phase wall-clock tracking. See composeRuntimeState comment.
+    phase_started_at: runtime.phase_started_at || null,
   };
   return persistState(updates, profile, projectRoot, runtime.story_key || 'sprint');
 }
@@ -1103,6 +1125,27 @@ function logSkillTiming(projectRoot, event, story, skillName, profile) {
 // Inline the planned argv steps from git-plan.js so the LLM doesn't have
 // to interpret the op — it just executes `action.steps` in order.
 // Without this, live-LLM sessions silently skip `git push` after STORY_DONE.
+// v2.4.0 — Self-explaining halts. When the orchestrator emits a
+// user_prompt action (verify_rejected, retry_budget_exhausted,
+// phase_timeout_exceeded, etc.), thread in a `context` object carrying:
+//   - recent_actions: last 3 invoke_skill/git_op/run_script entries
+//   - verifier_check: most recent failed verify_result (when applicable)
+//   - elapsed_in_phase: state.phase_started_at vs now
+//   - similar_halt: prior halt with the same (phase, reason)
+// Replaces the v2.3.x cryptic "verify_rejected: test_files…" prompts
+// that forced the user to spelunk the ledger to diagnose anything.
+// Falls back to the bare action on any read failure — pure additive.
+function decorateHaltContext(action, state, projectRoot) {
+  if (!action || action.type !== 'user_prompt') return action;
+  try {
+    const entries = ledger.read({ projectRoot });
+    return haltExplainer.enrich(action, { ledgerEntries: entries, state });
+  } catch (e) {
+    log.warn(`halt-explainer failed (${e.message}); emitting bare prompt`);
+    return action;
+  }
+}
+
 function decorateGitOp(action, state, profile, projectRoot) {
   if (!action || action.type !== 'git_op') return action;
   // git.enabled: false — emit the git_op with an empty step list so the
@@ -1247,6 +1290,16 @@ function decorateTestScope(action, state, profile, projectRoot) {
   const effectiveProfile = override
     ? { ...profile, testing_scope: override }
     : profile;
+  // v2.4.0 — load the flaky-test quarantine list once per emission so
+  // the adapter can append exclude flags and the template can surface
+  // the skipped IDs to the LLM. Failure (missing file, parse error)
+  // degrades silently to "no quarantine."
+  let quarantinedTests = [];
+  try {
+    quarantinedTests = flakyQuarantine.listQuarantined(flakyQuarantine.read(projectRoot));
+  } catch (_e) {
+    quarantinedTests = [];
+  }
   let decision;
   try {
     decision = testingScope.resolveTestScope({
@@ -1255,6 +1308,7 @@ function decorateTestScope(action, state, profile, projectRoot) {
       projectRoot,
       baseBranch: profile.base_branch || 'main',
       phase: state.phase,
+      excludeTestIds: quarantinedTests,
     });
   } catch (e) {
     log.warn(`testingScope.resolveTestScope failed: ${e.message}`);
@@ -1271,6 +1325,10 @@ function decorateTestScope(action, state, profile, projectRoot) {
       : null,
     test_scope_decision_summary: summary,
     test_scope_hint_guidance: TEST_SCOPE_HINT_GUIDANCE,
+    // v2.4.0 — tests currently skipped due to flaky-quarantine. Empty
+    // array (not null) when none; templates can render
+    // `{{quarantined_tests.length}}` cleanly.
+    quarantined_tests: Array.isArray(decision.excluded_tests) ? decision.excluded_tests : [],
   };
   // Audit trail. Wrap append in try/catch so a ledger I/O hiccup never
   // blocks the action emission — the slots are still threaded.
@@ -1529,6 +1587,69 @@ function applySideEffects(sideEffects, runtime, profile, projectRoot) {
         // ledger entry — re-applying here would double-mutate state.
         // BMad-owned mutations (e.g. skip_story → sprint-status) still
         // live elsewhere; this CLI never touches sprint-status directly.
+        break;
+      }
+      case 'record_flaky_tests': {
+        // v2.4.0 — persist flip counts; auto-quarantine + emit decisions
+        // for any tests crossing the threshold this iteration.
+        try {
+          const before = flakyQuarantine.read(projectRoot);
+          let stateNow = before;
+          const newlyQuarantined = [];
+          for (const testId of eff.tests || []) {
+            stateNow = flakyQuarantine.recordFlip(stateNow, {
+              testId,
+              storyKey: eff.story_key,
+            });
+            const promoted = flakyQuarantine.promoteToQuarantineMaybe(stateNow, { testId });
+            stateNow = promoted.state;
+            if (promoted.quarantined) newlyQuarantined.push(testId);
+          }
+          flakyQuarantine.write(projectRoot, stateNow);
+          ledger.append(
+            {
+              kind: 'state_transition',
+              detail: {
+                flaky_recorded: eff.tests || [],
+                newly_quarantined: newlyQuarantined,
+                story_key: eff.story_key,
+                phase: eff.phase,
+              },
+            },
+            { projectRoot },
+          );
+          // Audit each new quarantine in decisions[] per roadmap.
+          if (newlyQuarantined.length > 0) {
+            const decisionPath = path.join(
+              projectRoot,
+              '_bmad-output',
+              'implementation-artifacts',
+              'decision-log.yaml',
+            );
+            const decisions = newlyQuarantined.map((testId) => ({
+              decision: `Auto-quarantined flaky test \`${testId}\``,
+              rationale:
+                'Flip count crossed the default threshold (3 failure→pass replays across stories). ' +
+                'Test is excluded from the recommended command via the adapter; review and either fix or eject via ' +
+                '`autopilot quarantine eject <test_id>`.',
+              category: 'testing',
+              source: 'sprintpilot.flaky-quarantine.v1',
+            }));
+            try {
+              const validated = decisionLog.validateMany(decisions);
+              const valid = validated.ok ? validated.decisions : validated.valid;
+              if (valid && valid.length > 0) {
+                decisionLog.append(decisionPath, valid, {
+                  story: eff.story_key || 'sprint',
+                });
+              }
+            } catch (e) {
+              log.warn(`flaky-quarantine decision append failed: ${e.message}`);
+            }
+          }
+        } catch (e) {
+          log.warn(`record_flaky_tests failed: ${e.message}`);
+        }
         break;
       }
       case 'profile_escalated':
@@ -2096,15 +2217,20 @@ function cmdStart(opts) {
   // run `sprint-autopilot-off` in the other session.
   const lockOutcome = acquireAutopilotLock(persisted, profile, projectRoot);
   if (!lockOutcome.acquired) {
-    const haltAction = {
-      type: 'user_prompt',
-      reason: 'autopilot_lock_held',
-      prompt:
-        `Another autopilot session holds .autopilot.lock (session ${lockOutcome.holder}, age ${lockOutcome.ageMin}m). ` +
-        `Wait for it to finish, run \`/sprint-autopilot-off\` in the other session, or delete .autopilot.lock if you're sure the holder crashed.`,
-      holder: lockOutcome.holder,
-      age_minutes: lockOutcome.ageMin,
-    };
+    const haltAction = decorateHaltContext(
+      {
+        type: 'user_prompt',
+        phase: persisted.current_bmad_step || null,
+        reason: 'autopilot_lock_held',
+        prompt:
+          `Another autopilot session holds .autopilot.lock (session ${lockOutcome.holder}, age ${lockOutcome.ageMin}m). ` +
+          `Wait for it to finish, run \`/sprint-autopilot-off\` in the other session, or delete .autopilot.lock if you're sure the holder crashed.`,
+        holder: lockOutcome.holder,
+        age_minutes: lockOutcome.ageMin,
+      },
+      { phase: persisted.current_bmad_step || null, phase_started_at: persisted.phase_started_at || null },
+      projectRoot,
+    );
     ledger.append(
       { kind: 'action_emitted', phase: persisted.current_bmad_step || null, action: haltAction },
       { projectRoot },
@@ -2130,6 +2256,69 @@ function cmdStart(opts) {
         },
       },
       { projectRoot },
+    );
+  }
+
+  // v2.4.0 — background full-suite gate.
+  //
+  // If the previous session spawned a background full-suite run and it
+  // failed (and hasn't been acknowledged), halt this session before any
+  // story work begins. The user must investigate the failure and either
+  // fix the test or acknowledge the sidecar manually before proceeding.
+  // CLI override: `--ack-background-suite` to mark + skip past the halt.
+  const ackBackground = !!(opts && opts['ack-background-suite']);
+  const prior = backgroundSuite.checkPriorRun(projectRoot, profile);
+  if (prior && !ackBackground) {
+    const sidecar = prior.sidecar;
+    const haltAction = decorateHaltContext(
+      {
+        type: 'user_prompt',
+        phase: persisted.current_bmad_step || null,
+        reason: 'background_full_suite_failed',
+        prompt:
+          `Background full-suite run for story ${sidecar.story_key} exited ` +
+          `${sidecar.exit_code} (started ${sidecar.started_at}, completed ${sidecar.completed_at}). ` +
+          `Command: ${sidecar.command}\n\n` +
+          `Investigate the failing tests, fix or skip them, then re-run \`autopilot start\` ` +
+          `(or pass \`--ack-background-suite\` to suppress this halt and continue anyway). ` +
+          `Log tail follows:\n\n${prior.log_tail || '(empty)'}`,
+        story_key: sidecar.story_key,
+        exit_code: sidecar.exit_code,
+        command: sidecar.command,
+        sidecar_path: sidecar.sidecar_path,
+        log_path: sidecar.log_path,
+      },
+      { phase: persisted.current_bmad_step || null, phase_started_at: persisted.phase_started_at || null },
+      projectRoot,
+    );
+    ledger.append(
+      {
+        kind: 'action_emitted',
+        phase: persisted.current_bmad_step || null,
+        action: haltAction,
+      },
+      { projectRoot },
+    );
+    process.stdout.write(
+      `${JSON.stringify({ action: haltAction, phase: persisted.current_bmad_step || null }, null, 2)}\n`,
+    );
+    return 0;
+  }
+  if (prior && ackBackground) {
+    backgroundSuite.acknowledgeSidecar(prior.sidecar.sidecar_path);
+    ledger.append(
+      {
+        kind: 'state_transition',
+        detail: {
+          background_full_suite: 'acknowledged',
+          story_key: prior.sidecar.story_key,
+          exit_code: prior.sidecar.exit_code,
+        },
+      },
+      { projectRoot },
+    );
+    log.info(
+      `Background full-suite failure for ${prior.sidecar.story_key} acknowledged; continuing.`,
     );
   }
 
@@ -2186,13 +2375,18 @@ function cmdStart(opts) {
     { projectRoot },
   );
   if (!healthOutcome.ok) {
-    const haltAction = {
-      type: 'user_prompt',
-      reason: 'worktree_orphans_detected',
-      prompt: healthOutcome.prompt,
-      orphans: healthOutcome.orphans,
-      summary: healthOutcome.summary,
-    };
+    const haltAction = decorateHaltContext(
+      {
+        type: 'user_prompt',
+        phase: persisted.current_bmad_step || null,
+        reason: 'worktree_orphans_detected',
+        prompt: healthOutcome.prompt,
+        orphans: healthOutcome.orphans,
+        summary: healthOutcome.summary,
+      },
+      { phase: persisted.current_bmad_step || null, phase_started_at: persisted.phase_started_at || null },
+      projectRoot,
+    );
     ledger.append(
       { kind: 'action_emitted', phase: persisted.current_bmad_step || null, action: haltAction },
       { projectRoot },
@@ -2309,19 +2503,24 @@ function cmdStart(opts) {
           { projectRoot },
         );
       }
-      const haltAction = {
-        type: 'user_prompt',
-        reason: 'plan_exhausted',
-        prompt:
-          `Sprint plan complete. All ${exhausted.total} planned stories are done ` +
-          `(${exhausted.terminal_counts.done} done, ${exhausted.terminal_counts.skipped} skipped, ` +
-          `${exhausted.terminal_counts.excluded} excluded). ` +
-          'Run /sprintpilot-plan-sprint to build a new plan from remaining sprint-status stories, ' +
-          'or run `autopilot start --no-auto-plan` to continue in sprint-status order.',
-        plan_id: exhausted.plan_id,
-        terminal_counts: exhausted.terminal_counts,
-        archived,
-      };
+      const haltAction = decorateHaltContext(
+        {
+          type: 'user_prompt',
+          phase: persisted.current_bmad_step || null,
+          reason: 'plan_exhausted',
+          prompt:
+            `Sprint plan complete. All ${exhausted.total} planned stories are done ` +
+            `(${exhausted.terminal_counts.done} done, ${exhausted.terminal_counts.skipped} skipped, ` +
+            `${exhausted.terminal_counts.excluded} excluded). ` +
+            'Run /sprintpilot-plan-sprint to build a new plan from remaining sprint-status stories, ' +
+            'or run `autopilot start --no-auto-plan` to continue in sprint-status order.',
+          plan_id: exhausted.plan_id,
+          terminal_counts: exhausted.terminal_counts,
+          archived,
+        },
+        { phase: persisted.current_bmad_step || null, phase_started_at: persisted.phase_started_at || null },
+        projectRoot,
+      );
       ledger.append(
         { kind: 'plan_exhausted', detail: { ...exhausted, archived } },
         { projectRoot },
@@ -2403,25 +2602,30 @@ function cmdStart(opts) {
 
   const lockResult = lockUserBranchIfNeeded(runtime, profile, projectRoot);
   if (lockResult && lockResult.halt) {
+    const halt = decorateHaltContext(lockResult.halt, runtime, projectRoot);
     ledger.append(
-      { kind: 'action_emitted', phase: runtime.phase, action: lockResult.halt },
+      { kind: 'action_emitted', phase: runtime.phase, action: halt },
       { projectRoot },
     );
     process.stdout.write(
-      `${JSON.stringify({ action: lockResult.halt, phase: runtime.phase }, null, 2)}\n`,
+      `${JSON.stringify({ action: halt, phase: runtime.phase }, null, 2)}\n`,
     );
     return 0;
   }
 
-  const action = decorateTestScope(
-    decorateRunScript(
-      decorateGitOp(stateMachine.nextAction(runtime, profile), runtime, profile, projectRoot),
+  const action = decorateHaltContext(
+    decorateTestScope(
+      decorateRunScript(
+        decorateGitOp(stateMachine.nextAction(runtime, profile), runtime, profile, projectRoot),
+        runtime,
+        profile,
+        projectRoot,
+      ),
       runtime,
       profile,
       projectRoot,
     ),
     runtime,
-    profile,
     projectRoot,
   );
   ledger.append({ kind: 'action_emitted', phase: runtime.phase, action }, { projectRoot });
@@ -2454,25 +2658,30 @@ function cmdNext(opts) {
   // enforcement here so a missed `start` doesn't bypass it.
   const lockResult = lockUserBranchIfNeeded(runtime, profile, projectRoot);
   if (lockResult && lockResult.halt) {
+    const halt = decorateHaltContext(lockResult.halt, runtime, projectRoot);
     ledger.append(
-      { kind: 'action_emitted', phase: runtime.phase, action: lockResult.halt },
+      { kind: 'action_emitted', phase: runtime.phase, action: halt },
       { projectRoot },
     );
     process.stdout.write(
-      `${JSON.stringify({ action: lockResult.halt, phase: runtime.phase }, null, 2)}\n`,
+      `${JSON.stringify({ action: halt, phase: runtime.phase }, null, 2)}\n`,
     );
     return 0;
   }
 
-  const action = decorateTestScope(
-    decorateRunScript(
-      decorateGitOp(stateMachine.nextAction(runtime, profile), runtime, profile, projectRoot),
+  const action = decorateHaltContext(
+    decorateTestScope(
+      decorateRunScript(
+        decorateGitOp(stateMachine.nextAction(runtime, profile), runtime, profile, projectRoot),
+        runtime,
+        profile,
+        projectRoot,
+      ),
       runtime,
       profile,
       projectRoot,
     ),
     runtime,
-    profile,
     projectRoot,
   );
   ledger.append({ kind: 'action_emitted', phase: runtime.phase, action }, { projectRoot });
@@ -2559,13 +2768,17 @@ function cmdRecord(opts) {
   // remediate. Without this the autopilot silently moves on and the
   // user wonders why their reorder/add/remove "did nothing".
   if (planFailure) {
-    const haltAction = {
-      type: 'user_prompt',
-      phase: result.newState.phase,
-      reason: planFailure.kind,
-      prompt: planFailure.prompt,
-      details: planFailure.details || null,
-    };
+    const haltAction = decorateHaltContext(
+      {
+        type: 'user_prompt',
+        phase: result.newState.phase,
+        reason: planFailure.kind,
+        prompt: planFailure.prompt,
+        details: planFailure.details || null,
+      },
+      result.newState,
+      projectRoot,
+    );
     ledger.append(
       { kind: 'action_emitted', phase: result.newState.phase, action: haltAction },
       { projectRoot },
@@ -2649,30 +2862,76 @@ function cmdRecord(opts) {
     }
   }
 
-  // v2.3.18 — background full-suite hook.
+  // v2.4.0 — background full-suite runner.
   //
-  // When profile.testing_full_suite_on_story_land === 'background' AND the
-  // newly-entered phase is STORY_DONE, the autopilot would normally spawn
-  // the configured full-suite command detached so the next story can
-  // proceed in parallel; on cmdStart we'd then halt if the prior run
-  // exited non-zero.
-  //
-  // The detached-spawn + exit-file tracking + boot-time halt-on-fail logic
-  // is non-trivial subprocess work and lands in v2.3.19. For now, we
-  // honor 'ci' (no-op; CI gates STORY_LAND) and 'skip' (no-op) cleanly,
-  // and warn loudly on 'background' so users with that knob set know it's
-  // not yet wired.
+  // When profile.testing_full_suite_on_story_land === 'background' AND
+  // the just-completed phase advanced into STORY_DONE, spawn the full
+  // test suite as a detached subprocess. The next session's cmdStart
+  // reads the resulting sidecar; non-zero exit halts before the next
+  // story. CI users keep 'ci' (default no-op here); 'skip' is no-op
+  // too. Closes the v2.3.18 silent caveat for teams without CI.
   if (
     result.newState.phase === STATES.STORY_DONE &&
     result.newProfile.testing_full_suite_on_story_land === 'background'
   ) {
-    log.warn(
-      'testing.full_suite_on_story_land=background is configured but the ' +
-        'background runner is deferred to v2.3.19. CI remains the only ' +
-        'active full-suite gate this release. Set the knob to "ci" (default) ' +
-        'to suppress this warning, or "skip" if you intentionally have no ' +
-        'full-suite gate.',
-    );
+    const storyForRun = result.newState.story_key || runtime.story_key || 'sprint';
+    const command = backgroundSuite.resolveFullSuiteCommand(result.newProfile, projectRoot);
+    if (!command) {
+      log.warn(
+        'testing.full_suite_on_story_land=background but no full-suite command resolves. ' +
+          'Set testing.commands.full in your profile or install a supported adapter. Skipping spawn.',
+      );
+      ledger.append(
+        {
+          kind: 'state_transition',
+          detail: {
+            background_full_suite: 'no_command',
+            story_key: storyForRun,
+          },
+        },
+        { projectRoot },
+      );
+    } else {
+      const spawn = backgroundSuite.spawnBackground({
+        command,
+        projectRoot,
+        storyKey: storyForRun,
+      });
+      if (spawn && spawn.pid) {
+        ledger.append(
+          {
+            kind: 'state_transition',
+            detail: {
+              background_full_suite: 'spawned',
+              story_key: storyForRun,
+              pid: spawn.pid,
+              command,
+              sidecar_path: spawn.sidecar_path,
+              log_path: spawn.log_path,
+            },
+          },
+          { projectRoot },
+        );
+        log.info(
+          `Background full-suite running for ${storyForRun} (pid ${spawn.pid}); ` +
+            `result will gate the next session's cmdStart.`,
+        );
+      } else {
+        const errMsg = (spawn && spawn.error) || 'unknown';
+        log.warn(`Background full-suite spawn failed: ${errMsg}. Continuing without gate.`);
+        ledger.append(
+          {
+            kind: 'state_transition',
+            detail: {
+              background_full_suite: 'spawn_failed',
+              story_key: storyForRun,
+              error: errMsg,
+            },
+          },
+          { projectRoot },
+        );
+      }
+    }
   }
 
   // Story-boundary or halt → flush coalesce buffer if enabled.
@@ -2883,6 +3142,60 @@ function cmdTasks(opts) {
   }
   process.stdout.write(`${JSON.stringify({ story, current_phase: currentPhase, halt_active: haltActive, tasks }, null, 2)}\n`);
   return 0;
+}
+
+// v2.4.0 — flaky-quarantine inspection / manual edits.
+//
+// Subcommands:
+//   autopilot quarantine list         — print quarantined tests + flip counters
+//   autopilot quarantine add <id>     — manually quarantine a test
+//   autopilot quarantine eject <id>   — manually remove from quarantine
+//
+// The auto-quarantine path (signal.output.flaky_tests → record_flaky_tests
+// side-effect) is the primary entry point; this CLI is for review and
+// manual overrides.
+function cmdQuarantine(opts, args) {
+  const projectRoot = resolveProjectRoot(opts);
+  const action = (args && args[0]) || 'list';
+  if (action === 'list') {
+    const state = flakyQuarantine.read(projectRoot);
+    const payload = {
+      quarantined: flakyQuarantine.listQuarantined(state),
+      quarantined_detail: state.quarantined || [],
+      flips: flakyQuarantine.listFlips(state),
+      flip_threshold: flakyQuarantine.DEFAULT_FLIP_THRESHOLD,
+    };
+    process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`);
+    return 0;
+  }
+  if (action === 'add' || action === 'eject') {
+    const testId = args && args[1];
+    if (!testId) {
+      log.error(`autopilot quarantine ${action}: missing <test_id>`);
+      return 2;
+    }
+    let state = flakyQuarantine.read(projectRoot);
+    if (action === 'add') {
+      state = flakyQuarantine.quarantineManually(state, { testId });
+    } else {
+      state = flakyQuarantine.ejectFromQuarantine(state, { testId });
+    }
+    flakyQuarantine.write(projectRoot, state);
+    ledger.append(
+      {
+        kind: 'state_transition',
+        detail: {
+          quarantine_action: action,
+          test_id: testId,
+        },
+      },
+      { projectRoot },
+    );
+    process.stdout.write(`${JSON.stringify({ ok: true, action, test_id: testId }, null, 2)}\n`);
+    return 0;
+  }
+  log.error(`autopilot quarantine: unknown action '${action}' (expected list|add|eject)`);
+  return 2;
 }
 
 function cmdHeartbeat(opts) {
@@ -3199,7 +3512,18 @@ function renderProgressBar(done, total) {
 
 function main(argv) {
   const { opts, positional } = parseArgs(argv, {
-    booleanFlags: ['help', 'force', 'accept-divergence', 'no-auto-plan', 'json', 'once'],
+    booleanFlags: [
+      'help',
+      'force',
+      'accept-divergence',
+      'no-auto-plan',
+      'json',
+      'once',
+      // v2.4.0 — skip the background_full_suite_failed halt and ack
+      // the latest sidecar. Used after the user has investigated the
+      // failure and decided to proceed anyway.
+      'ack-background-suite',
+    ],
   });
   if (opts.help) {
     help();
@@ -3238,6 +3562,8 @@ function main(argv) {
         return cmdHeartbeat(opts);
       case 'tasks':
         return cmdTasks(opts);
+      case 'quarantine':
+        return cmdQuarantine(opts, positional.slice(1));
       default:
         return 2;
     }
