@@ -34,6 +34,7 @@ const profileRules = require('../lib/orchestrator/profile-rules');
 const verifyMod = require('../lib/orchestrator/verify');
 const stateStore = require('../lib/orchestrator/state-store');
 const ledger = require('../lib/orchestrator/action-ledger');
+const haltExplainer = require('../lib/orchestrator/halt-explainer');
 const decisionLog = require('../lib/orchestrator/decision-log');
 const userCommands = require('../lib/orchestrator/user-commands');
 const divergence = require('../lib/orchestrator/divergence');
@@ -1120,6 +1121,27 @@ function logSkillTiming(projectRoot, event, story, skillName, profile) {
 // Inline the planned argv steps from git-plan.js so the LLM doesn't have
 // to interpret the op — it just executes `action.steps` in order.
 // Without this, live-LLM sessions silently skip `git push` after STORY_DONE.
+// v2.4.0 — Self-explaining halts. When the orchestrator emits a
+// user_prompt action (verify_rejected, retry_budget_exhausted,
+// phase_timeout_exceeded, etc.), thread in a `context` object carrying:
+//   - recent_actions: last 3 invoke_skill/git_op/run_script entries
+//   - verifier_check: most recent failed verify_result (when applicable)
+//   - elapsed_in_phase: state.phase_started_at vs now
+//   - similar_halt: prior halt with the same (phase, reason)
+// Replaces the v2.3.x cryptic "verify_rejected: test_files…" prompts
+// that forced the user to spelunk the ledger to diagnose anything.
+// Falls back to the bare action on any read failure — pure additive.
+function decorateHaltContext(action, state, projectRoot) {
+  if (!action || action.type !== 'user_prompt') return action;
+  try {
+    const entries = ledger.read({ projectRoot });
+    return haltExplainer.enrich(action, { ledgerEntries: entries, state });
+  } catch (e) {
+    log.warn(`halt-explainer failed (${e.message}); emitting bare prompt`);
+    return action;
+  }
+}
+
 function decorateGitOp(action, state, profile, projectRoot) {
   if (!action || action.type !== 'git_op') return action;
   // git.enabled: false — emit the git_op with an empty step list so the
@@ -2113,15 +2135,20 @@ function cmdStart(opts) {
   // run `sprint-autopilot-off` in the other session.
   const lockOutcome = acquireAutopilotLock(persisted, profile, projectRoot);
   if (!lockOutcome.acquired) {
-    const haltAction = {
-      type: 'user_prompt',
-      reason: 'autopilot_lock_held',
-      prompt:
-        `Another autopilot session holds .autopilot.lock (session ${lockOutcome.holder}, age ${lockOutcome.ageMin}m). ` +
-        `Wait for it to finish, run \`/sprint-autopilot-off\` in the other session, or delete .autopilot.lock if you're sure the holder crashed.`,
-      holder: lockOutcome.holder,
-      age_minutes: lockOutcome.ageMin,
-    };
+    const haltAction = decorateHaltContext(
+      {
+        type: 'user_prompt',
+        phase: persisted.current_bmad_step || null,
+        reason: 'autopilot_lock_held',
+        prompt:
+          `Another autopilot session holds .autopilot.lock (session ${lockOutcome.holder}, age ${lockOutcome.ageMin}m). ` +
+          `Wait for it to finish, run \`/sprint-autopilot-off\` in the other session, or delete .autopilot.lock if you're sure the holder crashed.`,
+        holder: lockOutcome.holder,
+        age_minutes: lockOutcome.ageMin,
+      },
+      { phase: persisted.current_bmad_step || null, phase_started_at: persisted.phase_started_at || null },
+      projectRoot,
+    );
     ledger.append(
       { kind: 'action_emitted', phase: persisted.current_bmad_step || null, action: haltAction },
       { projectRoot },
@@ -2203,13 +2230,18 @@ function cmdStart(opts) {
     { projectRoot },
   );
   if (!healthOutcome.ok) {
-    const haltAction = {
-      type: 'user_prompt',
-      reason: 'worktree_orphans_detected',
-      prompt: healthOutcome.prompt,
-      orphans: healthOutcome.orphans,
-      summary: healthOutcome.summary,
-    };
+    const haltAction = decorateHaltContext(
+      {
+        type: 'user_prompt',
+        phase: persisted.current_bmad_step || null,
+        reason: 'worktree_orphans_detected',
+        prompt: healthOutcome.prompt,
+        orphans: healthOutcome.orphans,
+        summary: healthOutcome.summary,
+      },
+      { phase: persisted.current_bmad_step || null, phase_started_at: persisted.phase_started_at || null },
+      projectRoot,
+    );
     ledger.append(
       { kind: 'action_emitted', phase: persisted.current_bmad_step || null, action: haltAction },
       { projectRoot },
@@ -2326,19 +2358,24 @@ function cmdStart(opts) {
           { projectRoot },
         );
       }
-      const haltAction = {
-        type: 'user_prompt',
-        reason: 'plan_exhausted',
-        prompt:
-          `Sprint plan complete. All ${exhausted.total} planned stories are done ` +
-          `(${exhausted.terminal_counts.done} done, ${exhausted.terminal_counts.skipped} skipped, ` +
-          `${exhausted.terminal_counts.excluded} excluded). ` +
-          'Run /sprintpilot-plan-sprint to build a new plan from remaining sprint-status stories, ' +
-          'or run `autopilot start --no-auto-plan` to continue in sprint-status order.',
-        plan_id: exhausted.plan_id,
-        terminal_counts: exhausted.terminal_counts,
-        archived,
-      };
+      const haltAction = decorateHaltContext(
+        {
+          type: 'user_prompt',
+          phase: persisted.current_bmad_step || null,
+          reason: 'plan_exhausted',
+          prompt:
+            `Sprint plan complete. All ${exhausted.total} planned stories are done ` +
+            `(${exhausted.terminal_counts.done} done, ${exhausted.terminal_counts.skipped} skipped, ` +
+            `${exhausted.terminal_counts.excluded} excluded). ` +
+            'Run /sprintpilot-plan-sprint to build a new plan from remaining sprint-status stories, ' +
+            'or run `autopilot start --no-auto-plan` to continue in sprint-status order.',
+          plan_id: exhausted.plan_id,
+          terminal_counts: exhausted.terminal_counts,
+          archived,
+        },
+        { phase: persisted.current_bmad_step || null, phase_started_at: persisted.phase_started_at || null },
+        projectRoot,
+      );
       ledger.append(
         { kind: 'plan_exhausted', detail: { ...exhausted, archived } },
         { projectRoot },
@@ -2420,25 +2457,30 @@ function cmdStart(opts) {
 
   const lockResult = lockUserBranchIfNeeded(runtime, profile, projectRoot);
   if (lockResult && lockResult.halt) {
+    const halt = decorateHaltContext(lockResult.halt, runtime, projectRoot);
     ledger.append(
-      { kind: 'action_emitted', phase: runtime.phase, action: lockResult.halt },
+      { kind: 'action_emitted', phase: runtime.phase, action: halt },
       { projectRoot },
     );
     process.stdout.write(
-      `${JSON.stringify({ action: lockResult.halt, phase: runtime.phase }, null, 2)}\n`,
+      `${JSON.stringify({ action: halt, phase: runtime.phase }, null, 2)}\n`,
     );
     return 0;
   }
 
-  const action = decorateTestScope(
-    decorateRunScript(
-      decorateGitOp(stateMachine.nextAction(runtime, profile), runtime, profile, projectRoot),
+  const action = decorateHaltContext(
+    decorateTestScope(
+      decorateRunScript(
+        decorateGitOp(stateMachine.nextAction(runtime, profile), runtime, profile, projectRoot),
+        runtime,
+        profile,
+        projectRoot,
+      ),
       runtime,
       profile,
       projectRoot,
     ),
     runtime,
-    profile,
     projectRoot,
   );
   ledger.append({ kind: 'action_emitted', phase: runtime.phase, action }, { projectRoot });
@@ -2471,25 +2513,30 @@ function cmdNext(opts) {
   // enforcement here so a missed `start` doesn't bypass it.
   const lockResult = lockUserBranchIfNeeded(runtime, profile, projectRoot);
   if (lockResult && lockResult.halt) {
+    const halt = decorateHaltContext(lockResult.halt, runtime, projectRoot);
     ledger.append(
-      { kind: 'action_emitted', phase: runtime.phase, action: lockResult.halt },
+      { kind: 'action_emitted', phase: runtime.phase, action: halt },
       { projectRoot },
     );
     process.stdout.write(
-      `${JSON.stringify({ action: lockResult.halt, phase: runtime.phase }, null, 2)}\n`,
+      `${JSON.stringify({ action: halt, phase: runtime.phase }, null, 2)}\n`,
     );
     return 0;
   }
 
-  const action = decorateTestScope(
-    decorateRunScript(
-      decorateGitOp(stateMachine.nextAction(runtime, profile), runtime, profile, projectRoot),
+  const action = decorateHaltContext(
+    decorateTestScope(
+      decorateRunScript(
+        decorateGitOp(stateMachine.nextAction(runtime, profile), runtime, profile, projectRoot),
+        runtime,
+        profile,
+        projectRoot,
+      ),
       runtime,
       profile,
       projectRoot,
     ),
     runtime,
-    profile,
     projectRoot,
   );
   ledger.append({ kind: 'action_emitted', phase: runtime.phase, action }, { projectRoot });
@@ -2576,13 +2623,17 @@ function cmdRecord(opts) {
   // remediate. Without this the autopilot silently moves on and the
   // user wonders why their reorder/add/remove "did nothing".
   if (planFailure) {
-    const haltAction = {
-      type: 'user_prompt',
-      phase: result.newState.phase,
-      reason: planFailure.kind,
-      prompt: planFailure.prompt,
-      details: planFailure.details || null,
-    };
+    const haltAction = decorateHaltContext(
+      {
+        type: 'user_prompt',
+        phase: result.newState.phase,
+        reason: planFailure.kind,
+        prompt: planFailure.prompt,
+        details: planFailure.details || null,
+      },
+      result.newState,
+      projectRoot,
+    );
     ledger.append(
       { kind: 'action_emitted', phase: result.newState.phase, action: haltAction },
       { projectRoot },
