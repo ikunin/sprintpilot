@@ -94,6 +94,13 @@ const VALID_KINDS = [
   // analysis (and the runtime UI) can see which adapter ran, what the
   // recommended command was, and whether fallback fired.
   'test_scope_decision',
+  // v2.4.1 — change-size-scaled review depth. Emitted per CODE_REVIEW
+  // emission when the orchestrator classifies the change (LOC, files,
+  // structural signals) and threads `review_depth` into the skill's
+  // template slots. Distinct from `state_transition` so e2e tests that
+  // filter on phase transitions don't accidentally treat the decision
+  // entry as a phase change.
+  'review_depth_decision',
 ];
 
 function isPlainObject(v) {
