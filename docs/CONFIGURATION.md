@@ -95,6 +95,34 @@ CLI:
 
 Auto-quarantine triggers when a `dev-story` / `quick-dev` signal carries `output.flaky_tests: [test_id, ...]` and the 3rd flip is recorded for a given test ID. Each newly-quarantined test gets an audit entry in `_bmad-output/implementation-artifacts/decision-log.yaml`. The scope resolver threads the quarantine list through the adapter (`vitest --exclude`, `jest --testPathIgnorePatterns`, `pytest --ignore=` / `--deselect`) so the recommended command skips them automatically.
 
+### Change-size-scaled review depth (v2.4.1)
+
+No configuration knobs. The orchestrator's `decorateReviewDepth` runs `git diff --numstat` + `git diff --name-status` against the base branch on every CODE_REVIEW emission, classifies the change, and threads slots into `bmad-code-review`:
+
+| Slot | Type | Description |
+|---|---|---|
+| `review_depth` | `'trivial' \| 'normal' \| 'structural'` | The classification. |
+| `recommended_reviewer_count` | int | 1 / 3 / 3 respectively. |
+| `recommended_review_layers` | string[] | `['blind_hunter']` / `[blind, edge, auditor]`. |
+| `extended_edge_case_hunter` | boolean | `true` for structural. |
+| `review_depth_notes` | string | Human-readable explanation. |
+| `change_size_summary` | object | `{ size, loc_added, loc_removed, files_touched, reason, structural_signals }`. |
+
+Triggers for `structural`: any dep manifest with a version-pinning edit, any file under `migrations/`, `schema/`, `*.sql`, or `prisma/schema.prisma`, any `index.{js,jsx,ts,tsx,mjs,cjs}` (barrel), any `git diff` rename row, >500 total LOC, or >20 files. Trivial gates: ≤2 files AND ≤10 LOC AND no structural signals. Otherwise normal.
+
+Audit trail: every emission writes a `review_depth_decision` entry to the ledger with the full classification.
+
+### Diagnostic mode on consecutive failures (v2.4.1)
+
+No configuration knobs. When a test phase (DEV_RED / DEV_GREEN / PATCH_APPLY / PATCH_RETEST / NANO_QUICK_DEV) is one failure away from `user_prompt` escalation, the orchestrator inserts a verbose-flag observation pass before giving up:
+
+1. Attempt 1 fails → retry with `prior_diagnosis`.
+2. Attempt 2 fails → retry budget would exhaust → orchestrator sets `state.diagnostic_pending = true` and re-emits the same phase.
+3. Attempt 3 (diagnostic) sees `template_slots.diagnostic_mode = true` and `recommended_test_command` carrying adapter-specific verbose flags (`--reporter=verbose` / `--verbose` / `-v --tb=long`). The LLM runs it and returns the trace as `output.diagnostic_trace`.
+4. Orchestrator stores the trace, escalates to `user_prompt` with `reason: 'retry_budget_exhausted_with_diagnostic'` and `diagnosis: <trace>`.
+
+Skip conditions: non-test phases, non-recoverable failures (`signal.recoverable === false`), already-completed-this-phase (`state.diagnostic_completed`). One-shot per phase entry — phase advance clears the diagnostic state.
+
 ### V2 Optimization Layers
 
 Every layer can be disabled in isolation. `legacy` profile pins all of these to `false` for v1.0.5 byte-for-byte behavior.
