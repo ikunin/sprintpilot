@@ -28,6 +28,73 @@ Profile resolution happens at boot via `_Sprintpilot/scripts/resolve-profile.js`
 | `autopilot.retrospective_mode` | `auto` | `auto` (deterministic artifact, continue) / `stop` (pause for `/bmad-retrospective`) / `skip` (no artifact). |
 | `autopilot.implementation_flow` | `full` (nano: `quick`) | `full` runs the 7-step BMad cycle (create-story → check-readiness → dev-RED → dev-GREEN → code-review → patch → retrospective). `quick` routes every story through `bmad-quick-dev` and boots fresh sessions directly at `NANO_QUICK_DEV`. |
 
+### Per-phase wall-clock budgets (v2.4.0)
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `autopilot.phase_timeout_minutes` | profile-scaled (see below) | Map of phase → minutes. The state machine stamps `state.phase_started_at` on every phase advance and halts cleanly with `reason: 'phase_timeout_exceeded'` when the active phase has been running longer than its budget. Catches silent multi-hour DEV_GREEN hangs. |
+
+Profile defaults:
+
+| Profile | dev_red | dev_green | code_review | patch_apply | patch_retest | nano_quick_dev | create_story | check_readiness |
+|---|---|---|---|---|---|---|---|---|
+| `nano` | — | — | — | — | — | 15 | 5 | 5 |
+| `small` | 10 | 20 | 10 | 10 | 10 | — | 5 | 5 |
+| `medium` | 15 | 30 | 15 | 15 | 15 | — | 5 | 5 |
+| `large` | 30 | 60 | 30 | 30 | 30 | — | 10 | 10 |
+| `legacy` | disabled (preserves v1.0.5 behavior) |
+
+Overrides:
+```yaml
+autopilot:
+  phase_timeout_minutes: null              # disable all timeouts
+  # or
+  phase_timeout_minutes:
+    dev_green: 45                          # raise one phase budget
+    dev_red: null                          # disable one phase
+```
+
+The halts are recoverable `user_prompt`s — the next session resumes from the same phase, and the LLM can be re-prompted with the auto-attached context (see "Self-explaining halts" below).
+
+### Self-explaining halts (v2.4.0)
+
+No configuration knobs. Every `user_prompt` action emitted by the orchestrator now carries a `context` object:
+
+```json
+{
+  "type": "user_prompt",
+  "reason": "verify_reject_budget_exceeded",
+  "prompt": "...",
+  "context": {
+    "recent_actions": [{ "seq": 42, "phase": "dev_green", "skill": "bmad-dev-story" }, ...],
+    "verifier_check": { "issues": [...], "exit_code": 1, "command": "..." },
+    "elapsed_in_phase": { "phase": "dev_green", "minutes": 27.4 },
+    "similar_halt": { "seq": 18, "ts": "...", "phase": "dev_green", "reason": "..." }
+  }
+}
+```
+
+`verifier_check` is only populated when the halt reason is verify-related. `similar_halt` is null when no prior matching halt exists outside the current session.
+
+### Background full-suite runner (v2.4.0)
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `testing.full_suite_on_story_land` | `ci` | `ci` (no-op; CI gates STORY_LAND) / `background` (detached worker after STORY_DONE; result gates next session's `autopilot start`) / `skip` (no full-suite gate). |
+
+Sidecars live at `_bmad-output/implementation-artifacts/.background-suite/<story_key>.json` with a sibling `.log` file capturing stdout/stderr. CLI escape hatch: `autopilot start --ack-background-suite` skips the failure halt and acknowledges the latest sidecar.
+
+### Flaky-test quarantine (v2.4.0)
+
+No configuration knobs (threshold defaults to 3 flips across stories). Persistence at `_bmad-output/implementation-artifacts/flaky-quarantine.yaml`.
+
+CLI:
+- `autopilot quarantine list` — show quarantined tests + flip counters
+- `autopilot quarantine add <test_id>` — manual quarantine
+- `autopilot quarantine eject <test_id>` — manual removal
+
+Auto-quarantine triggers when a `dev-story` / `quick-dev` signal carries `output.flaky_tests: [test_id, ...]` and the 3rd flip is recorded for a given test ID. Each newly-quarantined test gets an audit entry in `_bmad-output/implementation-artifacts/decision-log.yaml`. The scope resolver threads the quarantine list through the adapter (`vitest --exclude`, `jest --testPathIgnorePatterns`, `pytest --ignore=` / `--deselect`) so the recommended command skips them automatically.
+
 ### V2 Optimization Layers
 
 Every layer can be disabled in isolation. `legacy` profile pins all of these to `false` for v1.0.5 byte-for-byte behavior.

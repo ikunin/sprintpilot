@@ -1,5 +1,37 @@
 # Changelog
 
+## [2.4.0] - 2026-05-25
+
+### Added — Trust & predictability bundle
+
+The biggest open wound in v2.3.x: "I started a sprint, walked away, came back to an unexplained halt." Closes it with four independently-correct changes shipped together.
+
+- **Per-phase wall-clock budgets.** `autopilot.phase_timeout_minutes` (per-profile defaults) — the state machine stamps `state.phase_started_at` on every phase advance and halts cleanly with `reason: 'phase_timeout_exceeded'` carrying `elapsed_minutes` + `budget_minutes` when the active phase exceeds its budget. Catches silent multi-hour DEV_GREEN hangs. Defaults: nano 15min quick-dev, medium 30min dev_green, large 60min dev_green; legacy disabled (preserves v1.0.5). Override:
+  - `phase_timeout_minutes: null` → disable all
+  - `phase_timeout_minutes: { dev_green: 45 }` → raise one
+  - `phase_timeout_minutes: { dev_red: null }` → disable one phase
+- **Self-explaining halts.** Every `user_prompt` action now carries a `context` bundle: last 3 LLM/skill actions from the ledger; most recent failed verify_result (when the halt reason is verify-related); elapsed-in-phase; pointer to a prior similar halt (same phase + reason, from a previous session). Replaces the v2.3.x cryptic "verify_rejected: test_files…" prompts that forced the user to spelunk the ledger. New module: `_Sprintpilot/lib/orchestrator/halt-explainer.js`.
+- **Background full-suite runner.** `testing.full_suite_on_story_land: background` wired end-to-end. After STORY_DONE the orchestrator spawns a detached worker (`_Sprintpilot/scripts/background-suite-worker.js`) that runs the full test command, writes a JSON sidecar on exit, and logs to a per-story log file. The next `autopilot start` reads the prior sidecar; non-zero exit emits a `background_full_suite_failed` halt with the command, exit code, and log tail. Acknowledge + continue via `--ack-background-suite`. Closes the v2.3.18 caveat for teams without CI. Sidecars at `_bmad-output/implementation-artifacts/.background-suite/`.
+- **Flaky-test quarantine.** When a signal carries `output.flaky_tests: string[]` (the LLM/adapter detects that a test that failed on first run passed on the auto-replay without code changes between runs), the orchestrator records each occurrence; after 3 flips across stories of the same test ID, it auto-promotes to `quarantined[]` and appends an audit entry to `decision-log.yaml`. Each adapter gains `buildExcludeFlags(testIds)` so the recommended test command emits the right shell exclusion: vitest `--exclude`, jest `--testPathIgnorePatterns`, pytest `--ignore=` / `--deselect`. New CLI: `autopilot quarantine list|add <id>|eject <id>`. Persistence: `_bmad-output/implementation-artifacts/flaky-quarantine.yaml`.
+
+### CLI
+
+- `autopilot start --ack-background-suite` — skip the background_full_suite_failed halt and mark the sidecar acknowledged. Use after investigating the failure.
+- `autopilot quarantine list` — print quarantined test IDs + flip counters as JSON.
+- `autopilot quarantine add <test_id>` — manually quarantine a test (uses reason='manual').
+- `autopilot quarantine eject <test_id>` — remove a test from quarantine.
+
+### New ledger event kinds
+
+- `state_transition` detail records for `background_full_suite` (spawned/spawn_failed/no_command/acknowledged), `flaky_recorded` + `newly_quarantined`, `quarantine_action`.
+- Existing `action_emitted` entries for `user_prompt` now include the `context` enrichment field.
+
+### Migration notes
+
+- Per-phase budgets and halt enrichment are pure additions; existing sessions resume cleanly. `phase_started_at` backfills on first emission so prior in-flight runs don't immediately trip the budget.
+- `background` mode is opt-in (default is still `ci`). No change for CI-gated users.
+- Flaky quarantine kicks in only when the LLM/adapter surfaces `output.flaky_tests` — the existing dev-story templates haven't been changed to emit it; that comes in v2.4.1 along with the adapter-side replay detection. Manual quarantine via CLI is fully functional today.
+
 ## [2.3.18] - 2026-05-25
 
 ### Added
