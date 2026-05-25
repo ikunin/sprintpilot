@@ -182,9 +182,42 @@ function profileNotes(profile) {
   return null;
 }
 
-// nextAction(state, profile) → Action
+// Compute elapsed minutes between two ISO timestamps. Returns null on
+// any parse failure so callers can treat "unknown" the same as "no budget."
+function elapsedMinutesSince(startedAtIso, nowIso) {
+  if (typeof startedAtIso !== 'string' || !startedAtIso) return null;
+  const started = Date.parse(startedAtIso);
+  if (!Number.isFinite(started)) return null;
+  const nowParsed = typeof nowIso === 'string' ? Date.parse(nowIso) : Number(nowIso);
+  const now = Number.isFinite(nowParsed) ? nowParsed : Date.now();
+  return (now - started) / 60_000;
+}
+
+// Pure check: does the current phase exceed its wall-clock budget?
+// Returns { budget_minutes, elapsed_minutes } when exceeded, or null.
+// Honors `profile.phase_timeout_minutes` (null/{} = disabled). Returns
+// null when state.phase_started_at is missing — that's the post-upgrade
+// transition where existing in-flight sessions are grandfathered until
+// the next phase advance writes a fresh timestamp.
+function checkPhaseTimeout(state, profile, now) {
+  if (!state || !state.phase || !state.phase_started_at) return null;
+  const map = profile && profile.phase_timeout_minutes;
+  if (!map || typeof map !== 'object') return null;
+  const budget = map[state.phase];
+  if (typeof budget !== 'number' || !(budget > 0)) return null;
+  const elapsed = elapsedMinutesSince(state.phase_started_at, now);
+  if (elapsed === null || elapsed <= budget) return null;
+  return {
+    budget_minutes: budget,
+    elapsed_minutes: Math.round(elapsed * 10) / 10,
+  };
+}
+
+// nextAction(state, profile, now?) → Action
 //   Returns the canonical action for the current `state.phase`.
-function nextAction(state, profile) {
+//   `now` is an optional ISO string or epoch-ms used by checkPhaseTimeout;
+//   defaults to wall clock at call time. Tests inject a fixed value.
+function nextAction(state, profile, now) {
   if (!state || !state.phase) {
     throw new Error('nextAction: state.phase required');
   }
@@ -193,6 +226,29 @@ function nextAction(state, profile) {
       type: 'halt',
       reason: 'sprint_complete',
       handoff: 'sprint_finalize_pending',
+    };
+  }
+
+  // Per-phase wall-clock budget — v2.4.0. Halts cleanly with a structured
+  // user_prompt when the active phase has been running longer than
+  // `profile.phase_timeout_minutes[phase]`. Catches silent multi-hour
+  // DEV_GREEN hangs. Skipped on terminal/routing states (sprint_finalize_pending,
+  // epic_boundary_check, story_done, story_land, merge_epic,
+  // prepare_story_branch) which aren't budgeted.
+  const timeoutInfo = checkPhaseTimeout(state, profile, now);
+  if (timeoutInfo !== null) {
+    return {
+      type: 'user_prompt',
+      phase: state.phase,
+      reason: 'phase_timeout_exceeded',
+      prompt:
+        `Phase ${state.phase} has been running ${timeoutInfo.elapsed_minutes} min ` +
+        `(budget ${timeoutInfo.budget_minutes} min). Set ` +
+        `autopilot.phase_timeout_minutes.${state.phase}: null to disable, ` +
+        `raise the budget, or investigate the hang (check ledger for last action).`,
+      budget_minutes: timeoutInfo.budget_minutes,
+      elapsed_minutes: timeoutInfo.elapsed_minutes,
+      phase_started_at: state.phase_started_at,
     };
   }
   // session_story_limit: when this session has completed >= limit
@@ -637,4 +693,7 @@ module.exports = {
   // Exposed for autopilot.js#decorateTestScope to know which phases
   // get the test-scope slot population.
   isTestPhase,
+  // Exposed for adapt.js + tests.
+  checkPhaseTimeout,
+  elapsedMinutesSince,
 };

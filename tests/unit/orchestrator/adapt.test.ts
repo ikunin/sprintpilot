@@ -956,3 +956,59 @@ describe('advanceState — session_stories_completed counter', () => {
     expect(r.newState.session_stories_completed).toBe(2);
   });
 });
+
+describe('advanceState — phase_started_at stamping (v2.4.0)', () => {
+  const T = '2026-06-01T12:00:00.000Z';
+
+  it('stamps phase_started_at on phase advance', () => {
+    const r = interpretSignal(
+      st(STATES.DEV_RED, { phase_started_at: '2026-06-01T11:00:00.000Z' }),
+      { status: 'success', _now: T },
+      medium(),
+    );
+    expect(r.newState.phase).toBe(STATES.DEV_GREEN);
+    expect(r.newState.phase_started_at).toBe(T);
+  });
+
+  it('preserves phase_started_at when the phase does not change (retry path)', () => {
+    const prior = '2026-06-01T11:50:00.000Z';
+    const r = interpretSignal(
+      st(STATES.DEV_GREEN, {
+        phase_started_at: prior,
+      }),
+      {
+        // failure with recoverable=true (default) keeps the phase, doesn't
+        // advance. The nextAction path in handleFailure re-emits the
+        // same-phase action.
+        status: 'failure',
+        reason: 'tests failed',
+        recoverable: true,
+        _now: T,
+      },
+      medium(),
+    );
+    // Retry path — phase unchanged, phase_started_at unchanged.
+    expect(r.verdict).toBe('retry');
+    expect(r.newState.phase).toBe(STATES.DEV_GREEN);
+    expect(r.newState.phase_started_at).toBe(prior);
+  });
+
+  it('backfills phase_started_at when missing on phase advance', () => {
+    const r = interpretSignal(
+      st(STATES.CHECK_READINESS), // no phase_started_at
+      { status: 'success', _now: T },
+      medium(),
+    );
+    expect(r.newState.phase).toBe(STATES.DEV_RED);
+    expect(r.newState.phase_started_at).toBe(T);
+  });
+
+  it('uses signal._now for deterministic stamping in tests', () => {
+    const r = interpretSignal(
+      st(STATES.CREATE_STORY),
+      { status: 'success', _now: T },
+      medium(),
+    );
+    expect(r.newState.phase_started_at).toBe(T);
+  });
+});

@@ -565,11 +565,20 @@ function handleVerifyOverride(state, signal, profile, verifyResult, sideEffects)
 // clears patch_findings when leaving step 6; resets per-story counters when
 // starting a new story.
 function advanceState(state, profile, newPhase, signal) {
+  // v2.4.0 — phase_started_at stamps the wall-clock entry into newPhase
+  // so state-machine.checkPhaseTimeout can detect hangs. Tests inject
+  // `signal._now` (ISO string) for deterministic timing assertions; live
+  // sessions use the wall clock. Only refreshed when the phase actually
+  // changes — staying in the same phase across a retry keeps the
+  // original timestamp so the budget tracks total time, not per-attempt.
+  const nowIso =
+    (signal && signal._now) || (state && state._now) || new Date().toISOString();
   const next = {
     ...state,
     phase: newPhase,
     retry_count_this_phase: 0,
     verify_reject_count: 0,
+    phase_started_at: newPhase !== state.phase ? nowIso : state.phase_started_at || nowIso,
     // v2.3.0 — phase transition clears verify-loop trackers so the next
     // phase starts fresh. Without this a stale signature from the prior
     // phase could artificially inflate identicalCount on the next reject.

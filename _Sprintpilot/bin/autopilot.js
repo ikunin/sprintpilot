@@ -981,6 +981,21 @@ function composeRuntimeState(persisted, profile, projectRoot) {
     // not lifetime). Persisted across in-session resumes so a `pause` mid-flow
     // doesn't reset progress against the limit.
     session_stories_completed: persisted.session_stories_completed || 0,
+    // v2.4.0 — per-phase wall-clock budget tracking. Stamped by
+    // adapt.advanceState on every phase advance; consumed by
+    // state-machine.checkPhaseTimeout on each emission. Backfilled here
+    // when:
+    //   (a) the persisted YAML predates v2.4.0 and has no stamp, OR
+    //   (b) composeRuntimeState changed `phase` from the persisted value
+    //       (e.g. a phase reset for missing story_key, or a fresh-session
+    //       flow start) — the old stamp would track the wrong phase.
+    // Either way, we treat "now" as the entry into the resolved phase so
+    // the first emission isn't immediately budget-exhausted.
+    phase_started_at:
+      typeof persisted.phase_started_at === 'string' &&
+      persisted.current_bmad_step === phase
+        ? persisted.phase_started_at
+        : new Date().toISOString(),
     // .autopilot.lock holder ID, persisted so subsequent cmdStart calls
     // recognize their own lock and refresh in place. Cleared by
     // sprint-autopilot-off (which calls `lock.js release`).
@@ -1015,6 +1030,8 @@ function persistRuntimeState(runtime, profile, projectRoot) {
     pending_alternative: runtime.pending_alternative || null,
     session_stories_completed: runtime.session_stories_completed || 0,
     lock_session_id: runtime.lock_session_id || null,
+    // v2.4.0 — phase wall-clock tracking. See composeRuntimeState comment.
+    phase_started_at: runtime.phase_started_at || null,
   };
   return persistState(updates, profile, projectRoot, runtime.story_key || 'sprint');
 }
