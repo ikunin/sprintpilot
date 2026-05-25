@@ -35,6 +35,7 @@ const verifyMod = require('../lib/orchestrator/verify');
 const stateStore = require('../lib/orchestrator/state-store');
 const ledger = require('../lib/orchestrator/action-ledger');
 const backgroundSuite = require('../lib/orchestrator/background-suite');
+const changeSizeClassifier = require('../lib/orchestrator/change-size-classifier');
 const flakyQuarantine = require('../lib/orchestrator/flaky-quarantine');
 const haltExplainer = require('../lib/orchestrator/halt-explainer');
 const decisionLog = require('../lib/orchestrator/decision-log');
@@ -1001,6 +1002,17 @@ function composeRuntimeState(persisted, profile, projectRoot) {
       persisted.current_bmad_step === phase
         ? persisted.phase_started_at
         : new Date().toISOString(),
+    // v2.4.1 — diagnostic mode state. Restored only when the phase
+    // matches; a phase reset clears it (the new phase gets a fresh
+    // chance at its own diagnostic insertion).
+    diagnostic_pending:
+      persisted.current_bmad_step === phase && persisted.diagnostic_pending === true,
+    diagnostic_completed:
+      persisted.current_bmad_step === phase && persisted.diagnostic_completed === true,
+    diagnostic_trace:
+      persisted.current_bmad_step === phase && typeof persisted.diagnostic_trace === 'string'
+        ? persisted.diagnostic_trace
+        : null,
     // .autopilot.lock holder ID, persisted so subsequent cmdStart calls
     // recognize their own lock and refresh in place. Cleared by
     // sprint-autopilot-off (which calls `lock.js release`).
@@ -1037,6 +1049,12 @@ function persistRuntimeState(runtime, profile, projectRoot) {
     lock_session_id: runtime.lock_session_id || null,
     // v2.4.0 — phase wall-clock tracking. See composeRuntimeState comment.
     phase_started_at: runtime.phase_started_at || null,
+    // v2.4.1 — diagnostic mode state. Cleared on phase advance by
+    // adapt.advanceState. Persisted so a resume mid-cycle doesn't lose
+    // the one-shot trigger and re-run the diagnostic on every retry.
+    diagnostic_pending: runtime.diagnostic_pending === true,
+    diagnostic_completed: runtime.diagnostic_completed === true,
+    diagnostic_trace: runtime.diagnostic_trace || null,
   };
   return persistState(updates, profile, projectRoot, runtime.story_key || 'sprint');
 }
@@ -1269,6 +1287,70 @@ function decorateRunScript(action, state, profile, projectRoot) {
   return action;
 }
 
+// v2.4.1 — decorateReviewDepth. Classifies the current change
+// (LOC delta + files touched + structural signals like dep version
+// bumps, schema/migration paths, barrel-index edits) and threads
+// `review_depth` + `recommended_reviewer_count` + `recommended_layers`
+// into bmad-code-review's template_slots so trivial changes get a
+// single-reviewer pass instead of the full 3-layer suite.
+//
+// Failure mode: any throw leaves the slots absent, which the
+// review skill template interprets as "use the default 3-layer
+// review" — current pre-2.4.1 behavior. Pure additive.
+function decorateReviewDepth(action, state, profile, projectRoot) {
+  if (!action || action.type !== 'invoke_skill') return action;
+  if (action.skill !== 'bmad-code-review') return action;
+  let classification;
+  try {
+    classification = changeSizeClassifier.classifyChange({
+      projectRoot,
+      baseBranch: profile.base_branch || 'main',
+    });
+  } catch (e) {
+    log.warn(`change-size-classifier failed: ${e.message}`);
+    return action;
+  }
+  const routing = changeSizeClassifier.reviewLayersForSize(classification.size);
+  const slots = action.template_slots || {};
+  const updated = {
+    ...slots,
+    review_depth: routing.review_depth,
+    recommended_reviewer_count: routing.recommended_reviewer_count,
+    recommended_review_layers: routing.recommended_layers,
+    review_depth_notes: routing.notes,
+    extended_edge_case_hunter: routing.extended_edge_case_hunter || false,
+    change_size_summary: {
+      size: classification.size,
+      loc_added: classification.loc_added,
+      loc_removed: classification.loc_removed,
+      files_touched: classification.files_touched,
+      reason: classification.reason,
+      structural_signals: classification.structural_signals,
+    },
+  };
+  try {
+    ledger.append(
+      {
+        kind: 'review_depth_decision',
+        phase: state.phase,
+        detail: {
+          size: classification.size,
+          reviewer_count: routing.recommended_reviewer_count,
+          loc_added: classification.loc_added,
+          loc_removed: classification.loc_removed,
+          files_touched: classification.files_touched,
+          structural_signals: classification.structural_signals,
+          reason: classification.reason,
+        },
+      },
+      { projectRoot },
+    );
+  } catch (_e) {
+    /* ledger failure is non-fatal */
+  }
+  return { ...action, template_slots: updated };
+}
+
 // decorateTestScope — fill in the tiered-testing template slots for
 // phases where the LLM is about to run tests (DEV_RED / DEV_GREEN /
 // PATCH_APPLY / PATCH_RETEST / NANO_QUICK_DEV). The state machine
@@ -1309,6 +1391,10 @@ function decorateTestScope(action, state, profile, projectRoot) {
       baseBranch: profile.base_branch || 'main',
       phase: state.phase,
       excludeTestIds: quarantinedTests,
+      // v2.4.1 — diagnostic mode flips verbose flags on the recommended
+      // command. adapt.js sets state.diagnostic_pending=true between
+      // the last retry and user_prompt escalation for test phases.
+      verbose: state.diagnostic_pending === true,
     });
   } catch (e) {
     log.warn(`testingScope.resolveTestScope failed: ${e.message}`);
@@ -2614,9 +2700,14 @@ function cmdStart(opts) {
   }
 
   const action = decorateHaltContext(
-    decorateTestScope(
-      decorateRunScript(
-        decorateGitOp(stateMachine.nextAction(runtime, profile), runtime, profile, projectRoot),
+    decorateReviewDepth(
+      decorateTestScope(
+        decorateRunScript(
+          decorateGitOp(stateMachine.nextAction(runtime, profile), runtime, profile, projectRoot),
+          runtime,
+          profile,
+          projectRoot,
+        ),
         runtime,
         profile,
         projectRoot,
@@ -2670,9 +2761,14 @@ function cmdNext(opts) {
   }
 
   const action = decorateHaltContext(
-    decorateTestScope(
-      decorateRunScript(
-        decorateGitOp(stateMachine.nextAction(runtime, profile), runtime, profile, projectRoot),
+    decorateReviewDepth(
+      decorateTestScope(
+        decorateRunScript(
+          decorateGitOp(stateMachine.nextAction(runtime, profile), runtime, profile, projectRoot),
+          runtime,
+          profile,
+          projectRoot,
+        ),
         runtime,
         profile,
         projectRoot,
@@ -2959,15 +3055,24 @@ function cmdRecord(opts) {
   }
 
   const payload = {
-    action: decorateTestScope(
-      decorateRunScript(
-        decorateGitOp(result.nextAction, result.newState, result.newProfile, projectRoot),
+    action: decorateHaltContext(
+      decorateReviewDepth(
+        decorateTestScope(
+          decorateRunScript(
+            decorateGitOp(result.nextAction, result.newState, result.newProfile, projectRoot),
+            result.newState,
+            result.newProfile,
+            projectRoot,
+          ),
+          result.newState,
+          result.newProfile,
+          projectRoot,
+        ),
         result.newState,
         result.newProfile,
         projectRoot,
       ),
       result.newState,
-      result.newProfile,
       projectRoot,
     ),
     verdict: result.verdict,

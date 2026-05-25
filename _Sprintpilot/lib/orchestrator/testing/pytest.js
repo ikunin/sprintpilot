@@ -44,11 +44,12 @@ function detect(projectRoot) {
   return false;
 }
 
-function buildCmd({ scope, changedFiles, testFiles, profile, projectRoot, excludeTestIds }) {
+function buildCmd({ scope, changedFiles, testFiles, profile, projectRoot, excludeTestIds, verbose }) {
   const userCmd = userOverride(profile, scope);
-  if (userCmd) return userCmd;
+  if (userCmd) return verbose ? `${userCmd} -v --tb=long` : userCmd;
   const excludeArg = buildExcludeFlags(excludeTestIds);
-  const append = (cmd) => (excludeArg ? `${cmd} ${excludeArg}` : cmd);
+  const verboseArg = verbose ? '-v --tb=long' : '';
+  const append = (cmd) => [cmd, verboseArg, excludeArg].filter((s) => s).join(' ');
   if (scope === 'full') return append('pytest');
   // affected — try testmon first (it's stateful and most accurate)
   if (projectRoot && fileExists(path.join(projectRoot, '.testmondata'))) {

@@ -48,6 +48,11 @@ function resolveTestScope({
   // mirrored into the result so the dev-story template can show the
   // LLM which tests are currently skipped.
   excludeTestIds = [],
+  // v2.4.1 — when true, the recommended command appends adapter-specific
+  // verbose / long-traceback flags. Drives diagnostic mode after two
+  // consecutive failures so the third attempt has rich trace output to
+  // feed the next fix attempt's prior_diagnosis.
+  verbose = false,
 }) {
   const hint = (state && state.test_scope_hint) || null;
   const wantFull =
@@ -58,7 +63,7 @@ function resolveTestScope({
     const adapter = registry.pickAdapter(projectRoot);
     const command =
       adapter
-        ? adapter.buildCmd({ scope: 'full', profile, projectRoot, excludeTestIds })
+        ? adapter.buildCmd({ scope: 'full', profile, projectRoot, excludeTestIds, verbose })
         : profile.testing_commands_full || null;
     return {
       scope: 'full',
@@ -102,6 +107,7 @@ function resolveTestScope({
         projectRoot,
         baseRef: baseBranch || profile.base_branch || 'main',
         excludeTestIds,
+        verbose,
       })
     : null;
   if (!command) {

@@ -37,10 +37,11 @@ function detect(projectRoot) {
   }
 }
 
-function buildCmd({ scope, testFiles, profile, baseRef, excludeTestIds }) {
+function buildCmd({ scope, testFiles, profile, baseRef, excludeTestIds, verbose }) {
   const userCmd = userOverride(profile, scope);
-  if (userCmd) return userCmd;
+  if (userCmd) return verbose ? `${userCmd} --reporter=verbose` : userCmd;
   const excludeArg = buildExcludeFlags(excludeTestIds);
+  const verboseArg = verbose ? '--reporter=verbose' : '';
   const base = baseRef || (profile && profile.base_branch) || 'main';
   const files = Array.isArray(testFiles)
     ? testFiles.filter((f) => typeof f === 'string' && f.length > 0)
@@ -51,7 +52,7 @@ function buildCmd({ scope, testFiles, profile, baseRef, excludeTestIds }) {
   const cmd = scope === 'full'
     ? 'npx vitest run'
     : `npx vitest run --changed origin/${base}${filesArg}`;
-  return excludeArg ? `${cmd} ${excludeArg}` : cmd;
+  return [cmd, verboseArg, excludeArg].filter((s) => s).join(' ');
 }
 
 // v2.4.0 — quarantine exclude flags. Vitest accepts repeated `--exclude

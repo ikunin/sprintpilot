@@ -224,7 +224,10 @@ describe('failure × phases × budgets', () => {
     });
 
     it(`${phase}: failure at budget exhausted → user_prompt`, () => {
-      const state = st(phase, { retry_count_this_phase: 2 });
+      // v2.4.1 — test phases insert one diagnostic verbose-run before
+      // user_prompt. `diagnostic_completed: true` skips the insertion so
+      // this assertion still exercises the bare budget-exhaustion path.
+      const state = st(phase, { retry_count_this_phase: 2, diagnostic_completed: true });
       const r = interpretSignal(
         state,
         { status: 'failure', reason: 'x', diagnosis: 'y', recoverable: true },

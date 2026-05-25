@@ -5,11 +5,18 @@ one-feature-per-release. Each entry has a rough effort estimate, the
 symptom it kills, and any dependencies on prior bundles.
 
 This doc is a living artifact — re-shuffled as priorities shift or
-real usage reveals new pain points. Last updated: v2.4.0.
+real usage reveals new pain points. Last updated: v2.4.1.
 
 ## Currently shipped
 
-- **v2.4.0** *(latest)* — trust & predictability bundle. Per-phase
+- **v2.4.1** *(latest)* — speed-beyond-tests bundle. Change-size-
+  scaled review depth (trivial → 1 reviewer, normal → 3, structural
+  → 3 + extended Edge Case Hunter — kills the 40-60% review tax on
+  typo PRs); diagnostic mode on consecutive failures (between the
+  last retry and user_prompt escalation, inserts one verbose-flag
+  observation pass and surfaces the trace as `prior_diagnosis` —
+  replaces "tests failed" with the actual failure context).
+- **v2.4.0** — trust & predictability bundle. Per-phase
   wall-clock budgets (catches silent DEV_GREEN hangs); self-explaining
   halts (every user_prompt carries last 3 actions, failed verifier
   check, elapsed time, similar-halt pointer); background full-suite
@@ -30,18 +37,6 @@ real usage reveals new pain points. Last updated: v2.4.0.
   `merge_strategy: land_as_you_go`.
 - **v2.3.14** — reconciliation guards against unpushed work.
 - **v2.3.13** — boot-time auto-reconcile with BMAD's sprint-status.
-
-## v2.4.1 — Speed-beyond-tests bundle
-
-Once v2.3.18 made the inner test loop fast, the next bottlenecks
-become reviewers and retry loops.
-
-| Component | Effort | Kills |
-|---|---|---|
-| Change-size-scaled review depth — route via `bmad-impact-classifier`: trivial → 1 reviewer, normal → 3, structural → 3 + extended Edge Case Hunter | ~1-2 days | 40-60% review-time on small stories; reviewer overkill on typos |
-| Diagnostic mode on consecutive failures — between failure 2 and 3, orchestrator emits a `diagnostic` action that re-runs with verbose flags and feeds traces into the next attempt | ~2 days | "LLM is fixing the wrong thing" loops that escalate to user_prompt unnecessarily |
-
-**Total: ~3-4 days.** Patch bump.
 
 ## v2.5.0 — Memory bundle
 

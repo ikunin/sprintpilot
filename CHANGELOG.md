@@ -1,5 +1,28 @@
 # Changelog
 
+## [2.4.1] - 2026-05-26
+
+### Added — Speed-beyond-tests bundle
+
+Once v2.3.18 made the inner test loop fast, the next bottlenecks become reviewers and retry loops. This release attacks both.
+
+- **Change-size-scaled review depth.** Classifies the current diff (LOC delta + files touched + structural signals: dep version bumps, schema/migration paths, barrel-index edits, file renames) and threads `review_depth ∈ {trivial, normal, structural}` plus `recommended_reviewer_count` + `recommended_review_layers` into bmad-code-review's template slots. Trivial PRs (≤2 files, ≤10 LOC, no structural signals) get a single-reviewer pass (Blind Hunter only); structural changes get the full 3-layer suite plus an extended Edge Case Hunter. Kills the 40-60% review-time tax on typo / one-line stories. New module: `_Sprintpilot/lib/orchestrator/change-size-classifier.js`. New ledger event: `review_depth_decision`. The bmad-code-review skill (vendored) reads the slot when present and falls through to the default 3-layer behavior when absent — so manual `/bmad-code-review` invocations are unchanged.
+- **Diagnostic mode on consecutive failures.** Between the last retry and `user_prompt` escalation in any test phase (DEV_RED / DEV_GREEN / PATCH_APPLY / PATCH_RETEST / NANO_QUICK_DEV), the orchestrator inserts one observation pass with adapter-specific verbose flags (vitest `--reporter=verbose`, jest `--verbose`, pytest `-v --tb=long`). The LLM runs the verbose command and returns the trace as `output.diagnostic_trace`; the orchestrator surfaces it as `prior_diagnosis` on the user_prompt — replacing the cryptic "tests failed" escalation with the actual failure context. One-shot per phase entry. Non-recoverable failures skip the insertion. New template slots: `diagnostic_mode`, `diagnostic_trace`. New state fields: `diagnostic_pending`, `diagnostic_completed`, `diagnostic_trace`. New side-effect kind: `log_diagnostic_captured`.
+
+### Reviewer routing reference
+
+| Change size | LOC + files | Reviewers | Notes |
+|---|---|---|---|
+| trivial | ≤2 files AND ≤10 LOC, no signals | 1 | Blind Hunter only |
+| normal | everything else (default) | 3 | Blind / Edge Case / Acceptance Auditor |
+| structural | dep bump, schema/migration, barrel, rename, >500 LOC, >20 files | 3 + extended | Edge Case Hunter widened to broader branching/boundary scan |
+
+### Migration notes
+
+- Both changes are pure additions; nothing existing breaks. Skill templates that don't consume the new slots see no behavior change.
+- Two pre-existing tests (`tests/unit/orchestrator/adapt.test.ts` and `tests/scripts/autopilot-harness.test.ts`) added `diagnostic_completed: true` to their seed state to keep asserting the bare budget-exhausted path — useful pattern for downstream callers that want to opt out.
+- `state.diagnostic_*` fields persist across resume — interrupting between attempt 2 and the diagnostic attempt resumes correctly on next `autopilot start`.
+
 ## [2.4.0] - 2026-05-25
 
 ### Added — Trust & predictability bundle
