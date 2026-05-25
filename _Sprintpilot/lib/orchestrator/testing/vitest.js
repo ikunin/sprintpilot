@@ -37,11 +37,10 @@ function detect(projectRoot) {
   }
 }
 
-function buildCmd({ scope, testFiles, profile, baseRef }) {
+function buildCmd({ scope, testFiles, profile, baseRef, excludeTestIds }) {
   const userCmd = userOverride(profile, scope);
   if (userCmd) return userCmd;
-  if (scope === 'full') return 'npx vitest run';
-  // affected
+  const excludeArg = buildExcludeFlags(excludeTestIds);
   const base = baseRef || (profile && profile.base_branch) || 'main';
   const files = Array.isArray(testFiles)
     ? testFiles.filter((f) => typeof f === 'string' && f.length > 0)
@@ -49,7 +48,25 @@ function buildCmd({ scope, testFiles, profile, baseRef }) {
   // `vitest run --changed <ref>` walks the dep graph; appending explicit
   // test file paths pins the new RED/GREEN tests so they always run.
   const filesArg = files.length > 0 ? ` ${files.map(quoteArg).join(' ')}` : '';
-  return `npx vitest run --changed origin/${base}${filesArg}`;
+  const cmd = scope === 'full'
+    ? 'npx vitest run'
+    : `npx vitest run --changed origin/${base}${filesArg}`;
+  return excludeArg ? `${cmd} ${excludeArg}` : cmd;
+}
+
+// v2.4.0 — quarantine exclude flags. Vitest accepts repeated `--exclude
+// <pattern>` flags for path-shaped IDs; non-path IDs (test names) are
+// dropped here and surfaced via the decisions log instead. The user
+// reviewer is the source-of-truth for those cases.
+function buildExcludeFlags(testIds) {
+  if (!Array.isArray(testIds) || testIds.length === 0) return '';
+  const paths = testIds.filter((id) => isLikelyPath(id));
+  if (paths.length === 0) return '';
+  return paths.map((p) => `--exclude ${quoteArg(p)}`).join(' ');
+}
+
+function isLikelyPath(id) {
+  return typeof id === 'string' && (id.includes('/') || /\.(test|spec)\.[tj]sx?$/.test(id));
 }
 
 function userOverride(profile, scope) {
@@ -69,4 +86,4 @@ function quoteArg(a) {
   return /[ \t"'`$\\!?*&|;<>(){}]/.test(a) ? `'${a.replace(/'/g, "'\\''")}'` : a;
 }
 
-module.exports = { NAME, detect, buildCmd };
+module.exports = { NAME, detect, buildCmd, buildExcludeFlags };

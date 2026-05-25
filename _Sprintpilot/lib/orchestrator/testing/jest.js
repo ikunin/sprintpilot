@@ -32,10 +32,12 @@ function detect(projectRoot) {
   }
 }
 
-function buildCmd({ scope, changedFiles, testFiles, profile }) {
+function buildCmd({ scope, changedFiles, testFiles, profile, excludeTestIds }) {
   const userCmd = userOverride(profile, scope);
   if (userCmd) return userCmd;
-  if (scope === 'full') return 'npx jest';
+  const excludeArg = buildExcludeFlags(excludeTestIds);
+  const append = (cmd) => (excludeArg ? `${cmd} ${excludeArg}` : cmd);
+  if (scope === 'full') return append('npx jest');
   // affected
   const changed = Array.isArray(changedFiles)
     ? changedFiles.filter((f) => typeof f === 'string' && f.length > 0)
@@ -52,10 +54,31 @@ function buildCmd({ scope, changedFiles, testFiles, profile }) {
     // Nothing identifiable — fall back to full so we don't silently skip.
     // The scope resolver also catches this case, but adapter-side defense
     // is cheap.
-    return 'npx jest';
+    return append('npx jest');
   }
   const argv = all.map(quoteArg).join(' ');
-  return `npx jest --findRelatedTests ${argv}`;
+  return append(`npx jest --findRelatedTests ${argv}`);
+}
+
+// v2.4.0 — quarantine exclude flags. Jest accepts a single
+// `--testPathIgnorePatterns` argument; we OR-join path-shaped IDs into
+// a single alternation regex so all flagged tests are skipped. Non-path
+// IDs are dropped (the decisions log preserves the original for human
+// review).
+function buildExcludeFlags(testIds) {
+  if (!Array.isArray(testIds) || testIds.length === 0) return '';
+  const paths = testIds.filter((id) => isLikelyPath(id));
+  if (paths.length === 0) return '';
+  const escaped = paths.map(escapeRegex).join('|');
+  return `--testPathIgnorePatterns ${quoteArg(escaped)}`;
+}
+
+function isLikelyPath(id) {
+  return typeof id === 'string' && (id.includes('/') || /\.(test|spec)\.[tj]sx?$/.test(id));
+}
+
+function escapeRegex(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 function userOverride(profile, scope) {
@@ -72,4 +95,4 @@ function quoteArg(a) {
   return /[ \t"'`$\\!?*&|;<>(){}]/.test(a) ? `'${a.replace(/'/g, "'\\''")}'` : a;
 }
 
-module.exports = { NAME, detect, buildCmd };
+module.exports = { NAME, detect, buildCmd, buildExcludeFlags };

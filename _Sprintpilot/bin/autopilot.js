@@ -35,6 +35,7 @@ const verifyMod = require('../lib/orchestrator/verify');
 const stateStore = require('../lib/orchestrator/state-store');
 const ledger = require('../lib/orchestrator/action-ledger');
 const backgroundSuite = require('../lib/orchestrator/background-suite');
+const flakyQuarantine = require('../lib/orchestrator/flaky-quarantine');
 const haltExplainer = require('../lib/orchestrator/halt-explainer');
 const decisionLog = require('../lib/orchestrator/decision-log');
 const userCommands = require('../lib/orchestrator/user-commands');
@@ -52,7 +53,7 @@ const {
 
 const { STATES } = stateMachine;
 
-const SUBCOMMANDS = ['start', 'next', 'record', 'state', 'report', 'validate-config', 'status', 'progress', 'heartbeat', 'tasks'];
+const SUBCOMMANDS = ['start', 'next', 'record', 'state', 'report', 'validate-config', 'status', 'progress', 'heartbeat', 'tasks', 'quarantine'];
 
 // v2.3.12 — canonical per-story task list (the BMad 7-step cycle,
 // collapsed into operator-visible labels). Used by `autopilot tasks` to
@@ -109,6 +110,8 @@ function help() {
       '  autopilot report             Session report (markdown)',
       '  autopilot validate-config    Resolve + print active profile',
       '  autopilot status             One-line status',
+      '  autopilot quarantine list|add <id>|eject <id>',
+      '                               Inspect/manage flaky-test quarantine',
       '',
       'Global flags:',
       '  --project-root <path>        Default: CWD',
@@ -1287,6 +1290,16 @@ function decorateTestScope(action, state, profile, projectRoot) {
   const effectiveProfile = override
     ? { ...profile, testing_scope: override }
     : profile;
+  // v2.4.0 — load the flaky-test quarantine list once per emission so
+  // the adapter can append exclude flags and the template can surface
+  // the skipped IDs to the LLM. Failure (missing file, parse error)
+  // degrades silently to "no quarantine."
+  let quarantinedTests = [];
+  try {
+    quarantinedTests = flakyQuarantine.listQuarantined(flakyQuarantine.read(projectRoot));
+  } catch (_e) {
+    quarantinedTests = [];
+  }
   let decision;
   try {
     decision = testingScope.resolveTestScope({
@@ -1295,6 +1308,7 @@ function decorateTestScope(action, state, profile, projectRoot) {
       projectRoot,
       baseBranch: profile.base_branch || 'main',
       phase: state.phase,
+      excludeTestIds: quarantinedTests,
     });
   } catch (e) {
     log.warn(`testingScope.resolveTestScope failed: ${e.message}`);
@@ -1311,6 +1325,10 @@ function decorateTestScope(action, state, profile, projectRoot) {
       : null,
     test_scope_decision_summary: summary,
     test_scope_hint_guidance: TEST_SCOPE_HINT_GUIDANCE,
+    // v2.4.0 — tests currently skipped due to flaky-quarantine. Empty
+    // array (not null) when none; templates can render
+    // `{{quarantined_tests.length}}` cleanly.
+    quarantined_tests: Array.isArray(decision.excluded_tests) ? decision.excluded_tests : [],
   };
   // Audit trail. Wrap append in try/catch so a ledger I/O hiccup never
   // blocks the action emission — the slots are still threaded.
@@ -1569,6 +1587,69 @@ function applySideEffects(sideEffects, runtime, profile, projectRoot) {
         // ledger entry — re-applying here would double-mutate state.
         // BMad-owned mutations (e.g. skip_story → sprint-status) still
         // live elsewhere; this CLI never touches sprint-status directly.
+        break;
+      }
+      case 'record_flaky_tests': {
+        // v2.4.0 — persist flip counts; auto-quarantine + emit decisions
+        // for any tests crossing the threshold this iteration.
+        try {
+          const before = flakyQuarantine.read(projectRoot);
+          let stateNow = before;
+          const newlyQuarantined = [];
+          for (const testId of eff.tests || []) {
+            stateNow = flakyQuarantine.recordFlip(stateNow, {
+              testId,
+              storyKey: eff.story_key,
+            });
+            const promoted = flakyQuarantine.promoteToQuarantineMaybe(stateNow, { testId });
+            stateNow = promoted.state;
+            if (promoted.quarantined) newlyQuarantined.push(testId);
+          }
+          flakyQuarantine.write(projectRoot, stateNow);
+          ledger.append(
+            {
+              kind: 'state_transition',
+              detail: {
+                flaky_recorded: eff.tests || [],
+                newly_quarantined: newlyQuarantined,
+                story_key: eff.story_key,
+                phase: eff.phase,
+              },
+            },
+            { projectRoot },
+          );
+          // Audit each new quarantine in decisions[] per roadmap.
+          if (newlyQuarantined.length > 0) {
+            const decisionPath = path.join(
+              projectRoot,
+              '_bmad-output',
+              'implementation-artifacts',
+              'decision-log.yaml',
+            );
+            const decisions = newlyQuarantined.map((testId) => ({
+              decision: `Auto-quarantined flaky test \`${testId}\``,
+              rationale:
+                'Flip count crossed the default threshold (3 failure→pass replays across stories). ' +
+                'Test is excluded from the recommended command via the adapter; review and either fix or eject via ' +
+                '`autopilot quarantine eject <test_id>`.',
+              category: 'testing',
+              source: 'sprintpilot.flaky-quarantine.v1',
+            }));
+            try {
+              const validated = decisionLog.validateMany(decisions);
+              const valid = validated.ok ? validated.decisions : validated.valid;
+              if (valid && valid.length > 0) {
+                decisionLog.append(decisionPath, valid, {
+                  story: eff.story_key || 'sprint',
+                });
+              }
+            } catch (e) {
+              log.warn(`flaky-quarantine decision append failed: ${e.message}`);
+            }
+          }
+        } catch (e) {
+          log.warn(`record_flaky_tests failed: ${e.message}`);
+        }
         break;
       }
       case 'profile_escalated':
@@ -3063,6 +3144,60 @@ function cmdTasks(opts) {
   return 0;
 }
 
+// v2.4.0 — flaky-quarantine inspection / manual edits.
+//
+// Subcommands:
+//   autopilot quarantine list         — print quarantined tests + flip counters
+//   autopilot quarantine add <id>     — manually quarantine a test
+//   autopilot quarantine eject <id>   — manually remove from quarantine
+//
+// The auto-quarantine path (signal.output.flaky_tests → record_flaky_tests
+// side-effect) is the primary entry point; this CLI is for review and
+// manual overrides.
+function cmdQuarantine(opts, args) {
+  const projectRoot = resolveProjectRoot(opts);
+  const action = (args && args[0]) || 'list';
+  if (action === 'list') {
+    const state = flakyQuarantine.read(projectRoot);
+    const payload = {
+      quarantined: flakyQuarantine.listQuarantined(state),
+      quarantined_detail: state.quarantined || [],
+      flips: flakyQuarantine.listFlips(state),
+      flip_threshold: flakyQuarantine.DEFAULT_FLIP_THRESHOLD,
+    };
+    process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`);
+    return 0;
+  }
+  if (action === 'add' || action === 'eject') {
+    const testId = args && args[1];
+    if (!testId) {
+      log.error(`autopilot quarantine ${action}: missing <test_id>`);
+      return 2;
+    }
+    let state = flakyQuarantine.read(projectRoot);
+    if (action === 'add') {
+      state = flakyQuarantine.quarantineManually(state, { testId });
+    } else {
+      state = flakyQuarantine.ejectFromQuarantine(state, { testId });
+    }
+    flakyQuarantine.write(projectRoot, state);
+    ledger.append(
+      {
+        kind: 'state_transition',
+        detail: {
+          quarantine_action: action,
+          test_id: testId,
+        },
+      },
+      { projectRoot },
+    );
+    process.stdout.write(`${JSON.stringify({ ok: true, action, test_id: testId }, null, 2)}\n`);
+    return 0;
+  }
+  log.error(`autopilot quarantine: unknown action '${action}' (expected list|add|eject)`);
+  return 2;
+}
+
 function cmdHeartbeat(opts) {
   const projectRoot = resolveProjectRoot(opts);
   const message = opts.message || opts.m || '';
@@ -3427,6 +3562,8 @@ function main(argv) {
         return cmdHeartbeat(opts);
       case 'tasks':
         return cmdTasks(opts);
+      case 'quarantine':
+        return cmdQuarantine(opts, positional.slice(1));
       default:
         return 2;
     }

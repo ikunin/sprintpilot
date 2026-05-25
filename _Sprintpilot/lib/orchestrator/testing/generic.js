@@ -23,4 +23,13 @@ function buildCmd({ scope, profile }) {
   return profile.testing_commands_affected || null;
 }
 
-module.exports = { NAME, detect, buildCmd };
+// v2.4.0 — quarantine exclude flags. The generic adapter has no
+// portable way to exclude tests by ID. The quarantine list is still
+// surfaced via decisions[] / template slots; the user is responsible
+// for plumbing the exclusion into their custom test command if they
+// need shell-level enforcement.
+function buildExcludeFlags(_testIds) {
+  return '';
+}
+
+module.exports = { NAME, detect, buildCmd, buildExcludeFlags };

@@ -43,6 +43,11 @@ function resolveTestScope({
   projectRoot,
   baseBranch,
   phase,
+  // v2.4.0 — list of test IDs to exclude (quarantined flaky tests).
+  // Passed through to adapter.buildCmd as `excludeTestIds`; also
+  // mirrored into the result so the dev-story template can show the
+  // LLM which tests are currently skipped.
+  excludeTestIds = [],
 }) {
   const hint = (state && state.test_scope_hint) || null;
   const wantFull =
@@ -53,7 +58,7 @@ function resolveTestScope({
     const adapter = registry.pickAdapter(projectRoot);
     const command =
       adapter
-        ? adapter.buildCmd({ scope: 'full', profile, projectRoot })
+        ? adapter.buildCmd({ scope: 'full', profile, projectRoot, excludeTestIds })
         : profile.testing_commands_full || null;
     return {
       scope: 'full',
@@ -61,6 +66,7 @@ function resolveTestScope({
       command,
       changed_files: null,
       test_files: arrayOrEmpty(state.test_files),
+      excluded_tests: arrayOrEmpty(excludeTestIds),
       reason: hint && hint.scope === 'full'
         ? 'story_hint_full'
         : 'profile_default_full',
@@ -77,6 +83,7 @@ function resolveTestScope({
       projectRoot,
       reason: 'diff_unavailable',
       state,
+      excludeTestIds,
     });
   }
   // Optional include_dirs widening from the story hint.
@@ -94,6 +101,7 @@ function resolveTestScope({
         profile,
         projectRoot,
         baseRef: baseBranch || profile.base_branch || 'main',
+        excludeTestIds,
       })
     : null;
   if (!command) {
@@ -103,6 +111,7 @@ function resolveTestScope({
       reason: adapter ? 'adapter_no_affected_command' : 'no_adapter_match',
       state,
       changed_files: widened,
+      excludeTestIds,
     });
   }
   return {
@@ -111,6 +120,7 @@ function resolveTestScope({
     command,
     changed_files: widened,
     test_files: testFiles,
+    excluded_tests: arrayOrEmpty(excludeTestIds),
     reason: includeDirs.length > 0
       ? `affected_with_hint_dirs:${includeDirs.length}`
       : 'affected_from_diff',
@@ -118,7 +128,7 @@ function resolveTestScope({
   };
 }
 
-function downgrade({ profile, projectRoot, reason, state, changed_files = null }) {
+function downgrade({ profile, projectRoot, reason, state, changed_files = null, excludeTestIds = [] }) {
   const policy = (profile && profile.testing_fallback) || 'full';
   if (policy === 'halt') {
     return {
@@ -127,6 +137,7 @@ function downgrade({ profile, projectRoot, reason, state, changed_files = null }
       command: null,
       changed_files,
       test_files: arrayOrEmpty(state.test_files),
+      excluded_tests: arrayOrEmpty(excludeTestIds),
       reason: `fallback_halt:${reason}`,
       fallback: true,
     };
@@ -136,7 +147,7 @@ function downgrade({ profile, projectRoot, reason, state, changed_files = null }
   // don't have a clean dir convention. Treat it as full for now.
   const adapter = registry.pickAdapter(projectRoot);
   const command = adapter
-    ? adapter.buildCmd({ scope: 'full', profile, projectRoot })
+    ? adapter.buildCmd({ scope: 'full', profile, projectRoot, excludeTestIds })
     : (profile && profile.testing_commands_full) || null;
   return {
     scope: 'full',
@@ -144,6 +155,7 @@ function downgrade({ profile, projectRoot, reason, state, changed_files = null }
     command,
     changed_files,
     test_files: arrayOrEmpty(state.test_files),
+    excluded_tests: arrayOrEmpty(excludeTestIds),
     reason: `fallback:${reason}`,
     fallback: true,
   };

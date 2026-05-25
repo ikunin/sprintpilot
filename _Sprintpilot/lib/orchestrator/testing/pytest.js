@@ -44,13 +44,15 @@ function detect(projectRoot) {
   return false;
 }
 
-function buildCmd({ scope, changedFiles, testFiles, profile, projectRoot }) {
+function buildCmd({ scope, changedFiles, testFiles, profile, projectRoot, excludeTestIds }) {
   const userCmd = userOverride(profile, scope);
   if (userCmd) return userCmd;
-  if (scope === 'full') return 'pytest';
+  const excludeArg = buildExcludeFlags(excludeTestIds);
+  const append = (cmd) => (excludeArg ? `${cmd} ${excludeArg}` : cmd);
+  if (scope === 'full') return append('pytest');
   // affected — try testmon first (it's stateful and most accurate)
   if (projectRoot && fileExists(path.join(projectRoot, '.testmondata'))) {
-    return 'pytest --testmon';
+    return append('pytest --testmon');
   }
   // Otherwise: map changed source dirs → tests/ subdirs, plus pin the
   // story's new test files explicitly.
@@ -64,9 +66,31 @@ function buildCmd({ scope, changedFiles, testFiles, profile, projectRoot }) {
   const all = Array.from(new Set([...dirs, ...tests]));
   if (all.length === 0) {
     // Nothing identifiable — fall back to full.
-    return 'pytest';
+    return append('pytest');
   }
-  return `pytest ${all.map(quoteArg).join(' ')}`;
+  return append(`pytest ${all.map(quoteArg).join(' ')}`);
+}
+
+// v2.4.0 — quarantine exclude flags. pytest supports `--ignore=<path>`
+// for entire files/dirs and `--deselect <nodeid>` for specific test
+// node IDs (`path/to/test.py::class::method`). We split test IDs by
+// presence of `::` and emit the appropriate flag for each.
+function buildExcludeFlags(testIds) {
+  if (!Array.isArray(testIds) || testIds.length === 0) return '';
+  const args = [];
+  for (const id of testIds) {
+    if (typeof id !== 'string' || !id) continue;
+    if (id.includes('::')) {
+      args.push(`--deselect ${quoteArg(id)}`);
+    } else if (isLikelyPath(id)) {
+      args.push(`--ignore=${quoteArg(id)}`);
+    }
+  }
+  return args.join(' ');
+}
+
+function isLikelyPath(id) {
+  return typeof id === 'string' && (id.includes('/') || /\.py$/.test(id));
 }
 
 // Map a changed source file under `src/foo/bar.py` to candidate test
@@ -103,4 +127,4 @@ function quoteArg(a) {
   return /[ \t"'`$\\!?*&|;<>(){}]/.test(a) ? `'${a.replace(/'/g, "'\\''")}'` : a;
 }
 
-module.exports = { NAME, detect, buildCmd, inferTestDirs };
+module.exports = { NAME, detect, buildCmd, inferTestDirs, buildExcludeFlags };

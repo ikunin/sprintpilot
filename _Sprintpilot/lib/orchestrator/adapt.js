@@ -79,6 +79,31 @@ function interpretSignal(state, signal, profile, verifyResult) {
     sideEffects.push({ kind: 'append_decisions', decisions: signal.decisions, phase: state.phase });
   }
 
+  // v2.4.0 — flaky-test quarantine signal. The LLM/adapter detects a
+  // test that failed then passed on the auto-replay without a code
+  // change between runs and surfaces it here as `output.flaky_tests`
+  // (string[]). The orchestrator records each occurrence; after
+  // N=3 flips of the same test ID across stories, it auto-quarantines
+  // and appends an audit entry to decisions[]. See
+  // lib/orchestrator/flaky-quarantine.js for the persistence shape.
+  if (
+    signal.output &&
+    Array.isArray(signal.output.flaky_tests) &&
+    signal.output.flaky_tests.length > 0
+  ) {
+    const tests = signal.output.flaky_tests.filter(
+      (t) => typeof t === 'string' && t.length > 0,
+    );
+    if (tests.length > 0) {
+      sideEffects.push({
+        kind: 'record_flaky_tests',
+        phase: state.phase,
+        tests,
+        story_key: state.story_key || null,
+      });
+    }
+  }
+
   switch (signal.status) {
     case 'success':
       return handleSuccess(state, signal, profile, verifyResult, sideEffects);

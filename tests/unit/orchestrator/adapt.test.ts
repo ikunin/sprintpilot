@@ -957,6 +957,51 @@ describe('advanceState — session_stories_completed counter', () => {
   });
 });
 
+describe('record_flaky_tests side effect (v2.4.0)', () => {
+  it('emits a record_flaky_tests side-effect when signal.output.flaky_tests is present', () => {
+    const r = interpretSignal(
+      st(STATES.DEV_GREEN),
+      {
+        status: 'success',
+        output: {
+          flaky_tests: ['tests/foo.test.ts', 'tests/bar.test.ts'],
+        },
+      },
+      medium(),
+    );
+    const eff = r.sideEffects.find((e) => e.kind === 'record_flaky_tests');
+    expect(eff).toBeDefined();
+    expect(eff!.tests).toEqual(['tests/foo.test.ts', 'tests/bar.test.ts']);
+    expect(eff!.story_key).toBe('S1');
+    expect(eff!.phase).toBe(STATES.DEV_GREEN);
+  });
+
+  it('does not emit when flaky_tests is empty / missing', () => {
+    const r = interpretSignal(
+      st(STATES.DEV_GREEN),
+      { status: 'success', output: {} },
+      medium(),
+    );
+    expect(r.sideEffects.find((e) => e.kind === 'record_flaky_tests')).toBeUndefined();
+  });
+
+  it('drops non-string entries', () => {
+    const r = interpretSignal(
+      st(STATES.DEV_GREEN),
+      {
+        status: 'success',
+        output: {
+          flaky_tests: ['real-id', null, 42, ''],
+        },
+      },
+      medium(),
+    );
+    const eff = r.sideEffects.find((e) => e.kind === 'record_flaky_tests');
+    expect(eff).toBeDefined();
+    expect(eff!.tests).toEqual(['real-id']);
+  });
+});
+
 describe('advanceState — phase_started_at stamping (v2.4.0)', () => {
   const T = '2026-06-01T12:00:00.000Z';
 
