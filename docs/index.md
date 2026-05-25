@@ -38,6 +38,7 @@
 - [Contributing](./CONTRIBUTING.md) — Project structure, conventions, script/skill creation guides
 - [Extending](./EXTENDING.md) — Adding new git platforms and language linters
 - [Changelog](../CHANGELOG.md) — Version history
+- [Roadmap](./ROADMAP.md) — Forward-looking plan for upcoming releases
 - [README](../README.md) — Comprehensive project introduction with workflow diagrams
 
 ## Getting Started
