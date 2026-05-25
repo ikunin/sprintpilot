@@ -393,6 +393,28 @@ Each gate's output is truncated to `git.lint.output_limit` lines. `git.lint.bloc
 
 `javascript` and `typescript` keys in `lint.linters` merge into a single `js-ts` bucket (both share eslint/biome). An empty list disables linting for that language entirely.
 
+### Tiered, Change-Aware Test Scope (v2.3.18+)
+
+Full regression on every test-running phase dominates per-story latency once a suite passes ~5 minutes wall time. The orchestrator now derives a per-emission test command from the working-tree diff and feeds it to dev-story via template slots — the LLM runs the targeted command rather than the project's default suite. CI remains the safety net for the full suite via `gh pr checks` on `STORY_LAND` (and, when ready, an opt-in local background runner).
+
+Three components live under `_Sprintpilot/lib/orchestrator/testing/`:
+
+1. **Adapter registry** (`index.js`) — probes `vitest.js`, `jest.js`, `pytest.js`, then `generic.js` in priority order. First `detect(projectRoot)` match wins; generic always matches so adapter resolution never returns null. Each adapter exposes `detect(projectRoot)` + `buildCmd({ scope, changedFiles, testFiles, profile, baseRef, projectRoot })`. Adapter-built commands favor the native change-aware flag (`vitest --changed`, `jest --findRelatedTests`, `pytest --testmon`).
+
+2. **Diff helper** (`diff.js`) — `git diff --name-only <base>...HEAD` plus staged/unstaged/untracked since the LLM commits at `STORY_DONE` and earlier phases run pre-commit. Returns `null` on any git failure so the resolver can fall back to `full`.
+
+3. **Scope resolver** (`scope.js#resolveTestScope`) — composes `{ scope, adapter, command, changed_files, test_files, reason, fallback }`. Priority order: `state.test_scope_hint.scope === 'full'` > `profile.testing_scope === 'full'` > affected. Within affected, hint-supplied `include_dirs[]` widen the diff before the adapter sees it. When the adapter returns `null` (e.g. generic with no `testing_commands_affected` override) OR the diff fails, the resolver downgrades per `profile.testing_fallback` (`full` / `directory` / `halt`).
+
+The scope decoration runs in the **CLI edge**, not the state machine. `bin/autopilot.js#decorateTestScope` chains after `decorateRunScript` / `decorateGitOp` and only fires when `stateMachine.isTestPhase(action.phase)` returns true. This keeps `state-machine.js` pure (no `fs` / `git` calls) and matches the existing pattern for git-op step inlining. `state-machine.js#buildTemplateSlots` seeds `test_scope`, `recommended_test_command`, `test_files_hint`, `test_scope_decision_summary`, and `test_scope_hint_guidance` as `null` placeholders; the decorator fills them in.
+
+Signal propagation lives in `adapt.js#advanceState`:
+- `signal.output.test_files: string[]` → `state.test_files` (pinned across phases within a story; cleared at story boundary).
+- `signal.output.test_scope_hint: { scope?, include_dirs? }` → `state.test_scope_hint` (validated lightly; last writer wins; cleared at story boundary).
+
+Every emission writes a `test_scope_decision` ledger entry (kind in `action-ledger.js#VALID_KINDS`) carrying the full decision shape so post-mortem analysis can answer "why did this story take X minutes?".
+
+Configuration lives in a new module: `_Sprintpilot/modules/testing/config.yaml`, threaded through `resolve-profile.js`'s module-overlay loop. Profile defaults (in `profile-rules.js#flatToProfile`): `testing_scope=affected`, `testing_fallback=full`, `testing_full_suite_on_story_land=ci`. The `legacy` profile explicitly pins `testing.scope: full` to preserve v1.0.5 behavior bit-for-bit.
+
 ### Worktree Cost Mitigation
 
 - `with-retry.js` — 3-attempt jittered backoff (500ms–2s) triggered ONLY when stderr matches a ref-lock regex. Non-matching failures pass through.

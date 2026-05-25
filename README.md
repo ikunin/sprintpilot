@@ -36,7 +36,7 @@ npx @ikunin/sprintpilot@latest
 /sprint-autopilot-on
 ```
 
-**What you'll see next.** The orchestrator emits one BMad skill at a time and the LLM executes it. First skill is `bmad-create-story` for the next pending story in `sprint-status.yaml`. You'll watch RED→GREEN tests, a 3-reviewer review pass, patch commits, and a push or PR. The autopilot drives until `session_story_limit` stories are done (default 3), then halts cleanly. Re-run `/sprint-autopilot-on` to continue.
+**What you'll see next.** The orchestrator emits one BMad skill at a time and the LLM executes it. First skill is `bmad-create-story` for the next pending story in `sprint-status.yaml`. You'll watch RED→GREEN tests (scoped to affected files by default — `vitest --changed`, `jest --findRelatedTests`, `pytest --testmon`; CI runs the full suite as the safety net), a 3-reviewer review pass, patch commits, and a push or PR. The autopilot drives until `session_story_limit` stories are done (default 3), then halts cleanly. Re-run `/sprint-autopilot-on` to continue.
 
 **Start at a specific story or epic:**
 

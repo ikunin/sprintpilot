@@ -112,6 +112,27 @@ These live in `_Sprintpilot/modules/git/config.yaml` and change what the orchest
 
 On `STORY_LAND` rebase conflicts (base moved during the story), the orchestrator auto-rebases the story branch onto the latest base. If the rebase has conflicts, the orchestrator halts with a `user_prompt`; resume reads `state.land_pending` and retries the land step.
 
+### Tiered, Change-Aware Test Scope (v2.3.18+)
+
+By default, every test-running phase (`DEV_RED`, `DEV_GREEN`, `PATCH_APPLY`, `PATCH_RETEST`, `NANO_QUICK_DEV`) runs an **affected subset** rather than the full suite. The orchestrator computes the recommended command per emission using a framework adapter and threads it into the dev-story template — the LLM runs that command instead of `npm test`/`pytest`. CI remains the full-suite safety net (it already gates `STORY_LAND` under `merge_strategy: land_as_you_go`).
+
+Per-phase command: derived from `git diff` against `base_branch` plus the story's authored test files.
+
+| Adapter | Detection | Affected command shape |
+|---|---|---|
+| Vitest | `vitest.config.*` or `vitest` in deps | `npx vitest run --changed origin/<base> <new-test-files>` |
+| Jest | `jest.config.*` or `jest` in deps / package.json | `npx jest --findRelatedTests <changed-files> <new-test-files>` |
+| pytest | `pytest.ini` / `conftest.py` / `[tool.pytest]` | `pytest --testmon` (if `.testmondata` exists) or `pytest <dir-mapped tests>` |
+| Generic | always last; matches everything | User's `testing.commands.affected` override, or signal "no recommendation" → resolver falls back to `full` |
+
+**Widening for structural changes.** When the LLM realizes a story touches code that ripples through unrelated tests (shared util refactor, dep bump, schema migration, renamed exported symbol), it can echo `test_scope_hint: { scope: 'full' }` or `test_scope_hint: { include_dirs: [...] }` in its success signal. The hint widens the scope for the next phase in the same story and clears at the story boundary.
+
+**Manual override.** `autopilot next --test-scope full` forces full regression for one emission without editing config — useful when you suspect the affected detection might miss something on a known-risky story.
+
+**Audit.** Every emission writes a `test_scope_decision` ledger entry: adapter, command, reason, fallback flag, file counts.
+
+Full configuration reference: see [Tiered Testing Configuration](CONFIGURATION.md#tiered-testing-configuration-modulestestingconfigyaml).
+
 ### Stopping the Autopilot
 
 ```

@@ -42,6 +42,10 @@ Edit `_Sprintpilot/modules/autopilot/config.yaml`:
 | `git.lint.blocking` | `false` | bool | When true, a failing lint gate rejects verify so the LLM gets a fix-loop. When false, failures are recorded but don't gate the autopilot. |
 | `git.lint.output_limit` | `100` | integer ≥ 0 | Max lines of lint output injected back as context. |
 | `git.lint.linters` | (auto-detect) | map of language → ordered list | Per-language linter preference. Languages: `python` / `javascript` / `typescript` / `rust` / `go` / `ruby` / `java` / `c` / `cpp` / `csharp` / `swift` / `sql` / `kotlin` / `php`. `javascript` and `typescript` merge into a single `js-ts` bucket. An empty list disables linting for that language. |
+| `testing.scope` | `affected` (legacy: `full`) | `affected` / `full` | **v2.3.18.** Per-phase test scope for `DEV_RED` / `DEV_GREEN` / `PATCH_APPLY` / `PATCH_RETEST` / `NANO_QUICK_DEV`. `affected` derives a change-aware command per emission (Vitest `--changed`, Jest `--findRelatedTests`, pytest `--testmon` / directory-mapped, or a configurable generic adapter). CI gates the full suite via `gh pr checks` on `STORY_LAND`. |
+| `testing.fallback` | `full` | `full` / `directory` / `halt` | What happens when affected-detection fails (no adapter match, no diff). `full` is the safe default. |
+| `testing.full_suite_on_story_land` | `ci` | `ci` / `background` / `skip` | Where the regression-net full suite runs. `background` is **deferred to v2.3.19** (currently warns when set). |
+| `testing.commands.affected` / `testing.commands.full` | `null` | string | Verbatim overrides for the adapter-built commands. Useful for monorepos (`nx affected`, `turbo run test`, `lerna run test --since`). |
 
 `retrospective_mode` options:
 - **`auto`** *(default)* — autopilot writes a deterministic retrospective artifact from `sprint-status.yaml` + `decision-log.yaml`, then continues. Single pass, no external skill call, safe under every CLI.

@@ -274,6 +274,26 @@ GitHub and GitLab require their CLIs (`gh`, `glab`). No API fallback is availabl
 | `ma.max_consecutive_conflicts` | `2` | After this many consecutive merge conflicts mid-session, parallel dispatch flips a session-scoped disable flag. |
 | `ma.effective_parallel_floor` | `1` | Don't engage parallel dispatch unless at least this many stories run in parallel. The orchestrator independently short-circuits on `active_layer.length < 2`, so this floor is a defensive backstop. |
 
+## Tiered Testing Configuration (`modules/testing/config.yaml`)
+
+Per-phase test scope. Defaults to **affected-only** in the inner loop (`DEV_RED` / `DEV_GREEN` / `PATCH_APPLY` / `PATCH_RETEST` / `NANO_QUICK_DEV`); CI remains the full-regression safety net via `gh pr checks` on `STORY_LAND` under `merge_strategy: land_as_you_go`. The autopilot computes the recommended test command per emission using a framework adapter (`vitest --changed`, `jest --findRelatedTests`, `pytest --testmon`) and threads it into the dev-story template via `recommended_test_command`.
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `testing.scope` | `affected` (legacy: `full`) | Per-phase test scope. `affected` uses the framework adapter to derive a change-aware command. `full` runs the project's full suite (the pre-v2.3.18 behavior). |
+| `testing.fallback` | `full` | What happens when affected-detection fails (no adapter match, no git diff, no `test_files`). `full` is safe-by-default. `directory` falls back to dir-mapped tests (pytest only). `halt` returns a `user_prompt` so you can intervene. |
+| `testing.full_suite_on_story_land` | `ci` | Where the regression-net full suite runs. `ci` trusts `gh pr checks`. `background` spawns the full command after `STORY_DONE` and blocks the next story on failure (**deferred to v2.3.19** — emits a warning when set today). `skip` disables the gate entirely (speed > safety, prototypes only). |
+| `testing.commands.affected` | `null` | Verbatim override for the adapter-built affected command. Useful for monorepos (`nx affected --target=test`, `turbo run test --filter=...[origin/main]`, `lerna run test --since`). |
+| `testing.commands.full` | `null` | Verbatim override for the full-suite command. Default falls through to the adapter (e.g. `npx vitest run`, `npx jest`, `pytest`). |
+
+Adapter detection order: **vitest** → **jest** → **pytest** → **generic**. First match wins; generic always matches and either returns the user override or signals "no recommendation, fall back to full" so the resolver can downgrade per `testing.fallback`.
+
+Story-level widening: dev-story / quick-dev signals may echo `test_scope_hint: { scope: 'full' }` or `test_scope_hint: { include_dirs: [...] }` to widen the scope for the next phase in the same story. Use this when the change is structural (shared util refactor, dep bump, schema migration, renamed exported symbol). The hint clears at the story boundary.
+
+CLI override: `autopilot next --test-scope full` forces a full run for one emission without editing config.
+
+Every emission is audited in the ledger as a `test_scope_decision` entry: adapter, command, reason, fallback flag, changed-files count, test-files count.
+
 ## Secrets Allowlist (`.secrets-allowlist`)
 
 One glob pattern per line. Files matching these patterns are skipped during secrets scanning.
