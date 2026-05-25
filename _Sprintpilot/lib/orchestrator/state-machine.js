@@ -134,6 +134,13 @@ const NANO_FLOW_SUCCESSORS = {
 // Build instruction template content slots from state + profile. This is the
 // LLM-intelligence preservation channel: every skill invocation gets a rich
 // context bundle, not a free-form prose blob.
+//
+// Test-scope slots (test_scope, recommended_test_command, test_files_hint,
+// test_scope_decision_summary, test_scope_hint_guidance) are seeded null
+// here and filled in by the CLI edge (autopilot.js#decorateTestScope) for
+// the test-running phases: DEV_RED, DEV_GREEN, PATCH_APPLY, PATCH_RETEST,
+// NANO_QUICK_DEV. The state machine stays pure (no fs/git I/O); the
+// decorator runs `git diff` + picks the right adapter.
 function buildTemplateSlots(state, profile, extra = {}) {
   return {
     story_key: state.story_key || null,
@@ -146,8 +153,26 @@ function buildTemplateSlots(state, profile, extra = {}) {
     tests_to_rerun: state.tests_to_rerun || null,
     profile_name: profile.name,
     profile_specific_notes: state.escalation_note || profileNotes(profile),
+    // Filled by autopilot.js#decorateTestScope for test-running phases.
+    test_scope: null,
+    recommended_test_command: null,
+    test_files_hint: null,
+    test_scope_decision_summary: null,
+    test_scope_hint_guidance: null,
     ...extra,
   };
+}
+
+// Phases where the CLI edge should populate test-scope slots.
+const TEST_PHASES = new Set([
+  STATES.DEV_RED,
+  STATES.DEV_GREEN,
+  STATES.PATCH_APPLY,
+  STATES.PATCH_RETEST,
+  STATES.NANO_QUICK_DEV,
+]);
+function isTestPhase(phase) {
+  return TEST_PHASES.has(phase);
 }
 
 function profileNotes(profile) {
@@ -609,4 +634,7 @@ module.exports = {
   // Exposed for tests / inspection.
   buildTemplateSlots,
   HINT_TO_PHASE,
+  // Exposed for autopilot.js#decorateTestScope to know which phases
+  // get the test-scope slot population.
+  isTestPhase,
 };

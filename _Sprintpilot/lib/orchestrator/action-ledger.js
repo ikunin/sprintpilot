@@ -86,6 +86,14 @@ const VALID_KINDS = [
   // halting with `resume_divergence` and demanding `--accept-divergence`
   // for every external completion.
   'state_reconciled',
+  // v2.3.18 — tiered, change-aware testing. Emitted per cmdNext when the
+  // decorator resolves a test scope + command for a test-running phase
+  // (DEV_RED, DEV_GREEN, PATCH_APPLY, PATCH_RETEST, NANO_QUICK_DEV).
+  // detail carries the decision shape from
+  // lib/orchestrator/testing/scope.js#resolveTestScope so post-mortem
+  // analysis (and the runtime UI) can see which adapter ran, what the
+  // recommended command was, and whether fallback fired.
+  'test_scope_decision',
 ];
 
 function isPlainObject(v) {

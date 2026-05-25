@@ -8,7 +8,7 @@
 //   2. _Sprintpilot/modules/autopilot/profiles/_base.yaml  → base defaults
 //      (skipped when the profile has version_pinned set — i.e. legacy)
 //   3. _Sprintpilot/modules/autopilot/profiles/<profile>.yaml → overlay
-//   4. _Sprintpilot/modules/{autopilot,git,ma}/config.yaml → user overrides
+//   4. _Sprintpilot/modules/{autopilot,git,ma,testing}/config.yaml → user overrides
 //
 // Deep-merge semantics:
 //   - leaf values: user override > profile overlay > base > undefined
@@ -243,7 +243,7 @@ function resolveProfile(projectRoot, explicitProfile) {
   let resolved = deepMerge(stripMeta(baseDoc), stripMeta(profileDoc));
 
   // Overlay user config — autopilot/git/ma module YAMLs.
-  for (const moduleName of ['autopilot', 'git', 'ma']) {
+  for (const moduleName of ['autopilot', 'git', 'ma', 'testing']) {
     const moduleCfg = path.join(projectRoot, '_Sprintpilot', 'modules', moduleName, 'config.yaml');
     const doc = readYamlFile(moduleCfg);
     if (!doc || !isPlainObject(doc)) continue;

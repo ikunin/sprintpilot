@@ -19,6 +19,9 @@ const VALID_GRANULARITIES = ['story', 'epic'];
 const VALID_MERGE_STRATEGIES = ['stacked', 'land_as_you_go'];
 const VALID_LAND_WHENS = ['no_wait', 'ci_pass', 'ci_and_review'];
 const VALID_PLATFORM_PROVIDERS = ['auto', 'github', 'gitlab', 'bitbucket', 'gitea', 'git_only'];
+const VALID_TESTING_SCOPES = ['affected', 'full'];
+const VALID_TESTING_FALLBACKS = ['full', 'directory', 'halt'];
+const VALID_FULL_SUITE_MODES = ['ci', 'background', 'skip'];
 
 const DEFAULT_COMMIT_TEMPLATE_STORY = 'feat({epic}): {story-title} ({story-key})';
 const DEFAULT_COMMIT_TEMPLATE_PATCH = 'fix({story-key}): {patch-title}';
@@ -220,6 +223,56 @@ function flatToProfile(resolved, profileName) {
     ),
     retry_budget_per_action: orch.retry_budget_per_action,
     verify_reject_budget: orch.verify_reject_budget,
+
+    // testing.* — tiered test scope (v2.3.18+).
+    //
+    // The autopilot computes a recommended test command per DEV_RED /
+    // DEV_GREEN / PATCH_RETEST / NANO_QUICK_DEV emission and threads it
+    // into the dev-story template via the `recommended_test_command`
+    // slot. The LLM runs that command instead of the project's
+    // default `npm test`. Full regression is still gated by CI (or
+    // optionally a local background run) before merge.
+    //
+    // Knobs:
+    //   testing.scope: 'affected' | 'full'
+    //     Default: 'affected'. The pre-2.3.18 behavior is `full`; users
+    //     who want to keep that explicit can set it.
+    //   testing.fallback: 'full' | 'directory' | 'halt'
+    //     What to do when affected-detection fails (no adapter, no diff,
+    //     no story-authored test_files). 'full' is the safe default;
+    //     'halt' surfaces the issue to the user_prompt path.
+    //   testing.full_suite_on_story_land: 'ci' | 'background' | 'skip'
+    //     Where the safety-net full suite runs. 'ci' (default) trusts
+    //     gh pr checks. 'background' spawns the full command after
+    //     STORY_DONE and blocks the next story on failure. 'skip' is
+    //     speed-over-safety — only for prototyping.
+    //   testing.commands.affected / testing.commands.full
+    //     Optional user overrides; when set, replace adapter-built
+    //     commands verbatim. Useful for monorepos with custom test
+    //     orchestration (nx, turbo, lerna, etc.).
+    testing_scope: coerceEnum(
+      get(resolved, 'testing.scope'),
+      VALID_TESTING_SCOPES,
+      'affected',
+    ),
+    testing_fallback: coerceEnum(
+      get(resolved, 'testing.fallback'),
+      VALID_TESTING_FALLBACKS,
+      'full',
+    ),
+    testing_full_suite_on_story_land: coerceEnum(
+      get(resolved, 'testing.full_suite_on_story_land'),
+      VALID_FULL_SUITE_MODES,
+      'ci',
+    ),
+    testing_commands_affected:
+      typeof get(resolved, 'testing.commands.affected') === 'string'
+        ? get(resolved, 'testing.commands.affected')
+        : null,
+    testing_commands_full:
+      typeof get(resolved, 'testing.commands.full') === 'string'
+        ? get(resolved, 'testing.commands.full')
+        : null,
   };
 }
 

@@ -33,3 +33,13 @@ ma:
   max_parallel_stories: 2
   parallel_epics: false
   state_sharding: never
+
+# v1.0.5 had no tiered test scope; every phase ran the full suite. Legacy
+# preserves that explicitly so future default flips can't drift it.
+testing:
+  scope: full
+  fallback: full
+  full_suite_on_story_land: skip
+  commands:
+    affected: null
+    full: null

@@ -1,0 +1,52 @@
+# Tiered, change-aware testing (v2.3.18+).
+#
+# The autopilot computes a recommended test command per DEV_RED /
+# DEV_GREEN / PATCH_RETEST / NANO_QUICK_DEV emission and threads it
+# into the dev-story template via the `recommended_test_command` slot.
+# The LLM runs that command instead of the project's full `npm test`.
+# Full regression remains the safety net via CI (or an opt-in local
+# background run).
+#
+# Why this exists: as suites grow into the ten-of-minutes range, every
+# story re-running the entire regression pack dominates per-story cycle
+# time. Affected-only inner loops cut that to seconds-to-minutes; CI
+# (or the background opt-in) still catches anything the affected set
+# missed before merge.
+
+testing:
+  # scope: 'affected' (default) | 'full'
+  #   - affected: per-phase command runs only tests reachable from the
+  #     diff against base_branch, plus any story-authored test files.
+  #     Adapters: vitest --changed, jest --findRelatedTests,
+  #     pytest --testmon (when installed), generic shell-out.
+  #   - full: every phase runs the project's full suite. Matches
+  #     pre-v2.3.18 behavior.
+  scope: affected
+
+  # fallback: 'full' (default) | 'directory' | 'halt'
+  #   What to do when affected detection fails (no adapter match, git
+  #   diff unavailable, no test_files declared and no diff to learn
+  #   from). 'full' is safe-by-default. 'halt' surfaces the issue as
+  #   a user_prompt so you can decide.
+  fallback: full
+
+  # full_suite_on_story_land: 'ci' (default) | 'background' | 'skip'
+  #   Where the regression-net full suite runs.
+  #   - ci: trust gh pr checks (already gates STORY_LAND under
+  #     merge_strategy=land_as_you_go). The autopilot never runs the
+  #     full suite locally. Requires that CI actually runs it.
+  #   - background: spawn the full command after STORY_DONE; the
+  #     next story is blocked at cmdStart if the prior run exited
+  #     non-zero. Use this when CI is unreliable or absent.
+  #   - skip: never run the full suite at all. Speed > safety; only
+  #     reasonable for throwaway prototypes.
+  full_suite_on_story_land: ci
+
+  # commands.affected / commands.full
+  #   Optional verbatim overrides. When set, the adapter is bypassed
+  #   and these commands are threaded as-is into the template. Useful
+  #   for monorepos with custom test orchestration (nx run-many, turbo
+  #   run test, lerna run test --since).
+  commands:
+    affected: null
+    full: null

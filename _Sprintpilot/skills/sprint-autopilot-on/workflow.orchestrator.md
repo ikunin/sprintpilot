@@ -270,6 +270,63 @@ rebase has conflicts, the orchestrator halts with a `user_prompt`. You
 resolve conflicts manually, then resume autopilot — it retries the
 land step from `state.land_pending`.
 
+## Tiered, change-aware testing (v2.3.18+)
+
+The autopilot computes a recommended test command per test-running
+phase (DEV_RED, DEV_GREEN, PATCH_APPLY, PATCH_RETEST, NANO_QUICK_DEV)
+and threads it into the dev-story / quick-dev template via these slots:
+
+| Slot | Type | Meaning |
+|---|---|---|
+| `test_scope` | `'affected'` / `'full'` | Effective scope after applying `profile.testing_scope`, the story's `test_scope_hint`, and any `autopilot next --test-scope` override. |
+| `recommended_test_command` | string \| null | The exact command to run for this phase. `null` means "the orchestrator could not derive one — use the project's default suite." |
+| `test_files_hint` | string[] \| null | Story-authored test files, carried forward across phases so they always run even if affected-detection wouldn't pick them up. |
+| `test_scope_decision_summary` | string \| null | One-line audit: `scope=… adapter=… reason=… changed_files=N test_files=M`. Echo this back in your success signal output as `test_scope_used` for end-to-end traceability. |
+| `test_scope_hint_guidance` | string \| null | Inline guidance for when to set `test_scope_hint` on your next signal. |
+
+**Run the `recommended_test_command` verbatim.** Adapters (Vitest,
+Jest, pytest, generic) know the right flags for change-aware testing
+(`--changed`, `--findRelatedTests`, `--testmon`, etc.); don't second-
+guess them. Falling back to `npm test` / `pytest` re-introduces the
+exact full-suite-on-every-story slowness this feature exists to fix.
+
+**Widening scope for a structural change.** When you realize the
+change touches code that affects many tests (refactor of a shared
+util, dependency bump, schema migration, renamed exported symbol),
+add to your success signal:
+
+```json
+{ "test_scope_hint": { "scope": "full" } }
+```
+
+or to widen to a specific set of additional dirs without going full:
+
+```json
+{ "test_scope_hint": { "include_dirs": ["src/shared/", "tests/integration/"] } }
+```
+
+The orchestrator applies the hint to the NEXT phase in the same story.
+The hint is cleared at the story boundary.
+
+**Signal echo.** The success signals for the four test phases should
+include `test_files: [...]` (so the next phase pins them) and may
+include `test_scope_used: "<summary>"` (for the ledger trail). The
+orchestrator records every emission as a `test_scope_decision` ledger
+entry regardless.
+
+## Test-scope knobs
+
+These live in `_Sprintpilot/modules/testing/config.yaml`. Defaults
+favor speed; full-suite remains the safety net via CI (or an opt-in
+local background run, deferred to v2.3.19).
+
+| Knob | Values | Behavior |
+|---|---|---|
+| `scope` | `affected` (default) / `full` | Per-phase test scope. `legacy` profile overrides this to `full` to preserve v1.0.5 behavior. |
+| `fallback` | `full` (default) / `directory` / `halt` | What happens when affected-detection fails (no adapter, no git diff). `full` is safe; `halt` surfaces the issue. |
+| `full_suite_on_story_land` | `ci` (default) / `background` / `skip` | Where the regression-net full suite runs. `ci` trusts gh pr checks. `background` is deferred to v2.3.19. `skip` is speed-over-safety. |
+| `commands.affected` / `commands.full` | string \| null | Verbatim overrides for the adapter-built commands. Useful for monorepos (`nx run-many`, `turbo run test`). |
+
 ## Resume
 
 On the next `autopilot start`, the orchestrator fingerprints

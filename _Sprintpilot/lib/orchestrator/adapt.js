@@ -586,6 +586,42 @@ function advanceState(state, profile, newPhase, signal) {
     next.consecutive_test_failures = 0;
     next.patch_findings = null;
     next.tests_to_rerun = null;
+    // test_scope_hint is story-scoped — clear it at every new-story boundary
+    // so a "widen to full" hint from story N doesn't bleed into story N+1.
+    next.test_scope_hint = null;
+    next.test_files = null;
+  }
+
+  // test_scope_hint propagation. dev-story / nano-quick-dev signals may
+  // carry `test_scope_hint: { scope: 'full' } | { include_dirs: [...] }`
+  // when the LLM realizes the change is structural (refactor of a shared
+  // util, dep bump, schema migration). The hint widens the test scope
+  // for the NEXT phase in the same story; decorateTestScope reads it
+  // from state at action-emission time. We accept the hint on every
+  // signal — last writer wins per story. Validated lightly: anything
+  // that isn't an object with the expected shape is ignored.
+  if (signal && signal.output && signal.output.test_scope_hint) {
+    const h = signal.output.test_scope_hint;
+    if (h && typeof h === 'object' && !Array.isArray(h)) {
+      const cleaned = {};
+      if (h.scope === 'full' || h.scope === 'affected') cleaned.scope = h.scope;
+      if (Array.isArray(h.include_dirs)) {
+        cleaned.include_dirs = h.include_dirs.filter(
+          (d) => typeof d === 'string' && d.length > 0,
+        );
+      }
+      if (Object.keys(cleaned).length > 0) next.test_scope_hint = cleaned;
+    }
+  }
+
+  // test_files propagation. dev-story / quick-dev signals declare the
+  // story-authored test files; the scope resolver pins them so they
+  // always run (even if affected-detection wouldn't have picked them
+  // up). Carry the latest set across phases within a story.
+  if (signal && signal.output && Array.isArray(signal.output.test_files)) {
+    next.test_files = signal.output.test_files.filter(
+      (f) => typeof f === 'string' && f.length > 0,
+    );
   }
 
   // Leaving step 6 (PATCH_RETEST → STORY_DONE / CODE_REVIEW) clears patch state.
@@ -674,6 +710,9 @@ function advanceState(state, profile, newPhase, signal) {
     next.story_key = null;
     next.story_file_path = null;
     next.ac_summary = null;
+    // test_scope_hint is story-scoped; clear at the story boundary.
+    next.test_scope_hint = null;
+    next.test_files = null;
     // session_story_limit: increment per-session completion counter so
     // state-machine.js#nextAction can emit the halt at the next
     // emission. The counter resets on cmdStart (new session boundary).

@@ -40,6 +40,7 @@ const divergence = require('../lib/orchestrator/divergence');
 const reportRenderer = require('../lib/orchestrator/report');
 const gitPlan = require('../lib/orchestrator/git-plan');
 const land = require('../lib/orchestrator/land');
+const testingScope = require('../lib/orchestrator/testing/scope');
 const orchSprintPlan = require('../lib/orchestrator/sprint-plan');
 const sprintPlanScript = require('../scripts/sprint-plan');
 const {
@@ -131,6 +132,12 @@ function help() {
       'Natural-language entry: `/sprint-autopilot-on epic 4` /',
       '`/sprint-autopilot-on stories 3.1, 4.5` — the skill resolves the NL',
       'directive to canonical keys and invokes `autopilot start --stories`.',
+      '',
+      'Test-scope flag (on `next` only):',
+      '  --test-scope <affected|full> Force the test scope for this single',
+      '                               emission, overriding profile.testing_scope.',
+      '                               `affected` runs only the change-impacted',
+      '                               tests; `full` runs the project suite.',
     ].join('\n'),
   );
 }
@@ -950,6 +957,13 @@ function composeRuntimeState(persisted, profile, projectRoot) {
     escalation_note: persisted.escalation_note || null,
     // Branch reuse: persisted across resumes once detected on first boot.
     user_branch: persisted.user_branch || null,
+    // Tiered testing (v2.3.18+): test_scope_hint is set by dev-story
+    // signals when the LLM decides the current story is structural and
+    // needs a wider test scope. decorateTestScope reads it at the next
+    // emission. test_scope_override is the per-emission CLI flag.
+    test_scope_hint: persisted.test_scope_hint || null,
+    test_scope_override: persisted.test_scope_override || null,
+    test_files: Array.isArray(persisted.test_files) ? persisted.test_files : null,
     // Explicit story queue from `autopilot start --stories` / `--epic`.
     // Head is the current pick; adapt.advanceState pops on story
     // completion. Empty array means "no override; use resolveNextStoryKey."
@@ -1210,6 +1224,107 @@ function decorateRunScript(action, state, profile, projectRoot) {
     return { ...action, steps };
   }
   return action;
+}
+
+// decorateTestScope — fill in the tiered-testing template slots for
+// phases where the LLM is about to run tests (DEV_RED / DEV_GREEN /
+// PATCH_APPLY / PATCH_RETEST / NANO_QUICK_DEV). The state machine
+// emits these slots as null placeholders; we resolve the right scope
+// + command here (where we have access to projectRoot + git) so the
+// machine stays pure.
+//
+// Failure mode: any throw inside the resolver leaves the slots null,
+// which the dev-story template interprets as "no recommendation,
+// run your usual suite." The autopilot doesn't crash on a malformed
+// git state.
+function decorateTestScope(action, state, profile, projectRoot) {
+  if (!action || action.type !== 'invoke_skill') return action;
+  if (!state || !stateMachine.isTestPhase(state.phase)) return action;
+  // CLI override takes precedence over profile.testing_scope. Threaded
+  // via state.test_scope_override at cmdNext/cmdRecord entry.
+  const override =
+    typeof state.test_scope_override === 'string' ? state.test_scope_override : null;
+  const effectiveProfile = override
+    ? { ...profile, testing_scope: override }
+    : profile;
+  let decision;
+  try {
+    decision = testingScope.resolveTestScope({
+      state,
+      profile: effectiveProfile,
+      projectRoot,
+      baseBranch: profile.base_branch || 'main',
+      phase: state.phase,
+    });
+  } catch (e) {
+    log.warn(`testingScope.resolveTestScope failed: ${e.message}`);
+    return action;
+  }
+  const summary = formatTestScopeSummary(decision);
+  const slots = action.template_slots || {};
+  const updated = {
+    ...slots,
+    test_scope: decision.scope,
+    recommended_test_command: decision.command,
+    test_files_hint: Array.isArray(decision.test_files) && decision.test_files.length
+      ? decision.test_files
+      : null,
+    test_scope_decision_summary: summary,
+    test_scope_hint_guidance: TEST_SCOPE_HINT_GUIDANCE,
+  };
+  // Audit trail. Wrap append in try/catch so a ledger I/O hiccup never
+  // blocks the action emission — the slots are still threaded.
+  try {
+    ledger.append(
+      {
+        kind: 'test_scope_decision',
+        phase: state.phase,
+        detail: {
+          scope: decision.scope,
+          adapter: decision.adapter,
+          command: decision.command,
+          reason: decision.reason,
+          fallback: decision.fallback,
+          changed_files_count: Array.isArray(decision.changed_files)
+            ? decision.changed_files.length
+            : null,
+          test_files_count: Array.isArray(decision.test_files)
+            ? decision.test_files.length
+            : 0,
+          override: override || null,
+        },
+      },
+      { projectRoot },
+    );
+  } catch (_e) {
+    /* ledger failure is non-fatal */
+  }
+  return { ...action, template_slots: updated };
+}
+
+const TEST_SCOPE_HINT_GUIDANCE =
+  'You may widen the test scope for the NEXT phase by including ' +
+  '`test_scope_hint: { scope: "full" }` or `test_scope_hint: { ' +
+  'include_dirs: ["src/shared/", "tests/integration/"] }` in your ' +
+  'success signal output. Use this when the change is structural ' +
+  '(e.g., refactor of a shared util, dependency bump, schema migration, ' +
+  'renamed exported symbol) — the per-phase affected detection might ' +
+  'miss far-reaching impact in those cases. For ordinary feature work ' +
+  'leave the hint out; the orchestrator-supplied recommendation is fine.';
+
+function formatTestScopeSummary(decision) {
+  if (!decision) return null;
+  const parts = [`scope=${decision.scope}`];
+  if (decision.adapter) parts.push(`adapter=${decision.adapter}`);
+  if (decision.reason) parts.push(`reason=${decision.reason}`);
+  if (decision.fallback) parts.push('fallback=true');
+  if (Array.isArray(decision.changed_files)) {
+    parts.push(`changed_files=${decision.changed_files.length}`);
+  }
+  if (Array.isArray(decision.test_files) && decision.test_files.length) {
+    parts.push(`test_files=${decision.test_files.length}`);
+  }
+  return parts.join(' ');
 }
 
 // Detect manifest files in the project root and return install steps
@@ -2298,8 +2413,13 @@ function cmdStart(opts) {
     return 0;
   }
 
-  const action = decorateRunScript(
-    decorateGitOp(stateMachine.nextAction(runtime, profile), runtime, profile, projectRoot),
+  const action = decorateTestScope(
+    decorateRunScript(
+      decorateGitOp(stateMachine.nextAction(runtime, profile), runtime, profile, projectRoot),
+      runtime,
+      profile,
+      projectRoot,
+    ),
     runtime,
     profile,
     projectRoot,
@@ -2316,6 +2436,18 @@ function cmdNext(opts) {
   const { typed: profile } = resolveProfile(projectRoot, opts.profile);
   const persisted = loadState(projectRoot);
   const runtime = composeRuntimeState(persisted, profile, projectRoot);
+  // --test-scope override (one-shot, this emission only). Accepted values
+  // match profile.testing_scope. Threaded into the runtime so
+  // decorateTestScope picks it up. NOT persisted: each `autopilot next`
+  // invocation must repeat the flag if the user wants to force scope.
+  if (opts && typeof opts['test-scope'] === 'string') {
+    const v = opts['test-scope'];
+    if (v === 'affected' || v === 'full') {
+      runtime.test_scope_override = v;
+    } else {
+      log.warn(`--test-scope ignored: invalid value ${JSON.stringify(v)} (expected affected|full)`);
+    }
+  }
 
   // The LLM-driven workflow (workflow.orchestrator.md) tells the LLM to
   // call `next` directly without `start` — apply the same branch-reuse
@@ -2332,8 +2464,13 @@ function cmdNext(opts) {
     return 0;
   }
 
-  const action = decorateRunScript(
-    decorateGitOp(stateMachine.nextAction(runtime, profile), runtime, profile, projectRoot),
+  const action = decorateTestScope(
+    decorateRunScript(
+      decorateGitOp(stateMachine.nextAction(runtime, profile), runtime, profile, projectRoot),
+      runtime,
+      profile,
+      projectRoot,
+    ),
     runtime,
     profile,
     projectRoot,
@@ -2512,6 +2649,32 @@ function cmdRecord(opts) {
     }
   }
 
+  // v2.3.18 — background full-suite hook.
+  //
+  // When profile.testing_full_suite_on_story_land === 'background' AND the
+  // newly-entered phase is STORY_DONE, the autopilot would normally spawn
+  // the configured full-suite command detached so the next story can
+  // proceed in parallel; on cmdStart we'd then halt if the prior run
+  // exited non-zero.
+  //
+  // The detached-spawn + exit-file tracking + boot-time halt-on-fail logic
+  // is non-trivial subprocess work and lands in v2.3.19. For now, we
+  // honor 'ci' (no-op; CI gates STORY_LAND) and 'skip' (no-op) cleanly,
+  // and warn loudly on 'background' so users with that knob set know it's
+  // not yet wired.
+  if (
+    result.newState.phase === STATES.STORY_DONE &&
+    result.newProfile.testing_full_suite_on_story_land === 'background'
+  ) {
+    log.warn(
+      'testing.full_suite_on_story_land=background is configured but the ' +
+        'background runner is deferred to v2.3.19. CI remains the only ' +
+        'active full-suite gate this release. Set the knob to "ci" (default) ' +
+        'to suppress this warning, or "skip" if you intentionally have no ' +
+        'full-suite gate.',
+    );
+  }
+
   // Story-boundary or halt → flush coalesce buffer if enabled.
   const isStoryBoundary =
     result.newState.phase === STATES.STORY_DONE ||
@@ -2537,8 +2700,13 @@ function cmdRecord(opts) {
   }
 
   const payload = {
-    action: decorateRunScript(
-      decorateGitOp(result.nextAction, result.newState, result.newProfile, projectRoot),
+    action: decorateTestScope(
+      decorateRunScript(
+        decorateGitOp(result.nextAction, result.newState, result.newProfile, projectRoot),
+        result.newState,
+        result.newProfile,
+        projectRoot,
+      ),
       result.newState,
       result.newProfile,
       projectRoot,
