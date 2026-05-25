@@ -34,6 +34,7 @@ const profileRules = require('../lib/orchestrator/profile-rules');
 const verifyMod = require('../lib/orchestrator/verify');
 const stateStore = require('../lib/orchestrator/state-store');
 const ledger = require('../lib/orchestrator/action-ledger');
+const backgroundSuite = require('../lib/orchestrator/background-suite');
 const haltExplainer = require('../lib/orchestrator/halt-explainer');
 const decisionLog = require('../lib/orchestrator/decision-log');
 const userCommands = require('../lib/orchestrator/user-commands');
@@ -2177,6 +2178,69 @@ function cmdStart(opts) {
     );
   }
 
+  // v2.4.0 — background full-suite gate.
+  //
+  // If the previous session spawned a background full-suite run and it
+  // failed (and hasn't been acknowledged), halt this session before any
+  // story work begins. The user must investigate the failure and either
+  // fix the test or acknowledge the sidecar manually before proceeding.
+  // CLI override: `--ack-background-suite` to mark + skip past the halt.
+  const ackBackground = !!(opts && opts['ack-background-suite']);
+  const prior = backgroundSuite.checkPriorRun(projectRoot, profile);
+  if (prior && !ackBackground) {
+    const sidecar = prior.sidecar;
+    const haltAction = decorateHaltContext(
+      {
+        type: 'user_prompt',
+        phase: persisted.current_bmad_step || null,
+        reason: 'background_full_suite_failed',
+        prompt:
+          `Background full-suite run for story ${sidecar.story_key} exited ` +
+          `${sidecar.exit_code} (started ${sidecar.started_at}, completed ${sidecar.completed_at}). ` +
+          `Command: ${sidecar.command}\n\n` +
+          `Investigate the failing tests, fix or skip them, then re-run \`autopilot start\` ` +
+          `(or pass \`--ack-background-suite\` to suppress this halt and continue anyway). ` +
+          `Log tail follows:\n\n${prior.log_tail || '(empty)'}`,
+        story_key: sidecar.story_key,
+        exit_code: sidecar.exit_code,
+        command: sidecar.command,
+        sidecar_path: sidecar.sidecar_path,
+        log_path: sidecar.log_path,
+      },
+      { phase: persisted.current_bmad_step || null, phase_started_at: persisted.phase_started_at || null },
+      projectRoot,
+    );
+    ledger.append(
+      {
+        kind: 'action_emitted',
+        phase: persisted.current_bmad_step || null,
+        action: haltAction,
+      },
+      { projectRoot },
+    );
+    process.stdout.write(
+      `${JSON.stringify({ action: haltAction, phase: persisted.current_bmad_step || null }, null, 2)}\n`,
+    );
+    return 0;
+  }
+  if (prior && ackBackground) {
+    backgroundSuite.acknowledgeSidecar(prior.sidecar.sidecar_path);
+    ledger.append(
+      {
+        kind: 'state_transition',
+        detail: {
+          background_full_suite: 'acknowledged',
+          story_key: prior.sidecar.story_key,
+          exit_code: prior.sidecar.exit_code,
+        },
+      },
+      { projectRoot },
+    );
+    log.info(
+      `Background full-suite failure for ${prior.sidecar.story_key} acknowledged; continuing.`,
+    );
+  }
+
   // parallel_stories: when the flag is set, surface that the BMad state
   // machine emits stories sequentially even though the dispatch-layer
   // building blocks (planBatch, dispatch-layer.js, agent-adapter.js,
@@ -2717,30 +2781,76 @@ function cmdRecord(opts) {
     }
   }
 
-  // v2.3.18 — background full-suite hook.
+  // v2.4.0 — background full-suite runner.
   //
-  // When profile.testing_full_suite_on_story_land === 'background' AND the
-  // newly-entered phase is STORY_DONE, the autopilot would normally spawn
-  // the configured full-suite command detached so the next story can
-  // proceed in parallel; on cmdStart we'd then halt if the prior run
-  // exited non-zero.
-  //
-  // The detached-spawn + exit-file tracking + boot-time halt-on-fail logic
-  // is non-trivial subprocess work and lands in v2.3.19. For now, we
-  // honor 'ci' (no-op; CI gates STORY_LAND) and 'skip' (no-op) cleanly,
-  // and warn loudly on 'background' so users with that knob set know it's
-  // not yet wired.
+  // When profile.testing_full_suite_on_story_land === 'background' AND
+  // the just-completed phase advanced into STORY_DONE, spawn the full
+  // test suite as a detached subprocess. The next session's cmdStart
+  // reads the resulting sidecar; non-zero exit halts before the next
+  // story. CI users keep 'ci' (default no-op here); 'skip' is no-op
+  // too. Closes the v2.3.18 silent caveat for teams without CI.
   if (
     result.newState.phase === STATES.STORY_DONE &&
     result.newProfile.testing_full_suite_on_story_land === 'background'
   ) {
-    log.warn(
-      'testing.full_suite_on_story_land=background is configured but the ' +
-        'background runner is deferred to v2.3.19. CI remains the only ' +
-        'active full-suite gate this release. Set the knob to "ci" (default) ' +
-        'to suppress this warning, or "skip" if you intentionally have no ' +
-        'full-suite gate.',
-    );
+    const storyForRun = result.newState.story_key || runtime.story_key || 'sprint';
+    const command = backgroundSuite.resolveFullSuiteCommand(result.newProfile, projectRoot);
+    if (!command) {
+      log.warn(
+        'testing.full_suite_on_story_land=background but no full-suite command resolves. ' +
+          'Set testing.commands.full in your profile or install a supported adapter. Skipping spawn.',
+      );
+      ledger.append(
+        {
+          kind: 'state_transition',
+          detail: {
+            background_full_suite: 'no_command',
+            story_key: storyForRun,
+          },
+        },
+        { projectRoot },
+      );
+    } else {
+      const spawn = backgroundSuite.spawnBackground({
+        command,
+        projectRoot,
+        storyKey: storyForRun,
+      });
+      if (spawn && spawn.pid) {
+        ledger.append(
+          {
+            kind: 'state_transition',
+            detail: {
+              background_full_suite: 'spawned',
+              story_key: storyForRun,
+              pid: spawn.pid,
+              command,
+              sidecar_path: spawn.sidecar_path,
+              log_path: spawn.log_path,
+            },
+          },
+          { projectRoot },
+        );
+        log.info(
+          `Background full-suite running for ${storyForRun} (pid ${spawn.pid}); ` +
+            `result will gate the next session's cmdStart.`,
+        );
+      } else {
+        const errMsg = (spawn && spawn.error) || 'unknown';
+        log.warn(`Background full-suite spawn failed: ${errMsg}. Continuing without gate.`);
+        ledger.append(
+          {
+            kind: 'state_transition',
+            detail: {
+              background_full_suite: 'spawn_failed',
+              story_key: storyForRun,
+              error: errMsg,
+            },
+          },
+          { projectRoot },
+        );
+      }
+    }
   }
 
   // Story-boundary or halt → flush coalesce buffer if enabled.
@@ -3267,7 +3377,18 @@ function renderProgressBar(done, total) {
 
 function main(argv) {
   const { opts, positional } = parseArgs(argv, {
-    booleanFlags: ['help', 'force', 'accept-divergence', 'no-auto-plan', 'json', 'once'],
+    booleanFlags: [
+      'help',
+      'force',
+      'accept-divergence',
+      'no-auto-plan',
+      'json',
+      'once',
+      // v2.4.0 — skip the background_full_suite_failed halt and ack
+      // the latest sidecar. Used after the user has investigated the
+      // failure and decided to proceed anyway.
+      'ack-background-suite',
+    ],
   });
   if (opts.help) {
     help();
