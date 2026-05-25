@@ -1,5 +1,25 @@
 # Changelog
 
+## [2.3.18] - 2026-05-25
+
+### Added
+
+- **Tiered, change-aware test scope per phase.** Full regression on every story phase becomes intolerable as suites grow; this release shifts the inner loop (`DEV_RED` / `DEV_GREEN` / `PATCH_APPLY` / `PATCH_RETEST` / `NANO_QUICK_DEV`) to affected-only by default. CI remains the safety net for the full suite — already gates `STORY_LAND` under `merge_strategy=land_as_you_go`. Components:
+  - `_Sprintpilot/lib/orchestrator/testing/` — adapter library for Vitest (`--changed`), Jest (`--findRelatedTests`), pytest (`--testmon` or directory-mapped), and a generic shell-out adapter. Registry picks the first matching adapter; generic is the always-matching fallback.
+  - Scope resolver — computes `{ scope, adapter, command, changed_files, test_files, reason, fallback }` from profile knobs + git diff + story-level hints + the CLI override.
+  - `git diff` helper covers staged/unstaged/untracked since the LLM commits at `STORY_DONE` — earlier phases run pre-commit and need the working-tree delta included.
+  - New profile knobs (`_Sprintpilot/modules/testing/config.yaml`): `testing.scope` (default `affected`), `testing.fallback` (default `full`), `testing.full_suite_on_story_land` (default `ci`), `testing.commands.{affected,full}` for monorepo overrides.
+  - State-machine `buildTemplateSlots` seeds `test_scope`, `recommended_test_command`, `test_files_hint`, `test_scope_decision_summary`, and `test_scope_hint_guidance` as null placeholders for test phases. CLI-edge decorator (`decorateTestScope`) fills them after running git probes — the state machine stays pure.
+  - Per-emission `test_scope_decision` ledger entry recording adapter + command + reason + fallback flag for full audit.
+  - `dev-story` / `quick-dev` signals can echo `test_scope_hint: { scope: 'full' }` or `test_scope_hint: { include_dirs: [...] }` when the LLM realizes a change is structural (shared util refactor, dep bump, schema migration). The hint widens the test scope for the NEXT phase in the same story and is cleared at the story boundary. `adapt.js` validates the shape and propagates.
+  - `autopilot next --test-scope affected|full` — one-shot CLI override of `profile.testing_scope` for a single emission, useful for forcing full regression on a known-risky story without editing config.
+  - Workflow doc gets a new "Tiered, change-aware testing" section explaining the template slots, signal echo, and the widening-hint contract.
+  - `legacy` profile pins `testing.scope: full` to preserve v1.0.5 behavior bit-for-bit.
+
+### Deferred
+
+- `testing.full_suite_on_story_land: background` (detached spawn + exit-file tracking + halt-on-boot logic). Configured value emits a warning so it's not silently accepted — set to `ci` (default) to suppress. Full implementation lands in v2.3.19.
+
 ## [2.3.17] - 2026-05-24
 
 ### Fixed
