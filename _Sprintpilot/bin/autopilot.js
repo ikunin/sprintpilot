@@ -2628,6 +2628,44 @@ function cmdStart(opts) {
     }
   }
 
+  // v2.5.1 — corrupt sprint-plan.yaml halt. When the live plan file
+  // fails to parse, do NOT auto-rebuild via /sprintpilot-plan-sprint:
+  // that destroys the existing curated plan (~150 entries in practice)
+  // because of a localized YAML break. Emit a user_prompt with the
+  // parser's exact line number and the file path so the user can fix
+  // manually OR explicitly opt into the destructive re-derive via
+  // `autopilot start --no-auto-plan` + manual /sprintpilot-plan-sprint.
+  const corrupt = orchSprintPlan.planCorruptHaltDescriptor({ projectRoot });
+  if (corrupt) {
+    const haltAction = decorateHaltContext(
+      {
+        type: 'user_prompt',
+        phase: persisted.current_bmad_step || null,
+        reason: corrupt.reason,
+        prompt:
+          `sprint-plan.yaml is corrupt and the autopilot will not auto-rebuild it ` +
+          `(doing so would discard the existing curated plan). Parser error:\n\n` +
+          `  ${corrupt.message}\n\nFile: ${corrupt.file}\n\n` +
+          `Fix the indentation/structure manually, then re-run \`autopilot start\`. ` +
+          `If you intend to rebuild from scratch, delete the file and run ` +
+          `\`autopilot start\` (greenfield) or run \`/sprintpilot-plan-sprint\` directly.`,
+        file: corrupt.file,
+        parser_error: corrupt.message,
+        parser_error_code: corrupt.error,
+      },
+      { phase: persisted.current_bmad_step || null, phase_started_at: persisted.phase_started_at || null },
+      projectRoot,
+    );
+    ledger.append(
+      { kind: 'action_emitted', phase: persisted.current_bmad_step || null, action: haltAction },
+      { projectRoot },
+    );
+    process.stdout.write(
+      `${JSON.stringify({ action: haltAction, phase: persisted.current_bmad_step || null }, null, 2)}\n`,
+    );
+    return 0;
+  }
+
   // Auto-derive gate: emit an `invoke_skill` action that asks the LLM
   // session to run /sprintpilot-plan-sprint. Only fires when:
   //   - the user opted in via `autopilot.auto_plan_on_start: true` (config), OR

@@ -186,6 +186,41 @@ describe('autopilot start', () => {
     const actionEntry = lines.map((l) => JSON.parse(l)).find((e) => e.kind === 'action_emitted');
     expect(actionEntry).toBeDefined();
   });
+
+  it('halts cleanly with sprint_plan_corrupt instead of auto-rebuilding when sprint-plan.yaml is unparseable (v2.5.1 Jarvis fix)', () => {
+    // Reproduce the Jarvis-observed scenario: a `- key: ...` entry was
+    // appended OUTSIDE the stories: list, breaking the YAML structure.
+    // Pre-2.5.1, this triggered shouldAutoDerive → invoke_skill:
+    // sprintpilot-plan-sprint, which would discard the entire curated
+    // plan. Post-fix, we emit a user_prompt halt with the parser error.
+    const broken = [
+      'schema_version: 1',
+      'status: {}',
+      'epics: []',
+      'stories:',
+      '  - key: a',
+      'dependencies:',
+      '  stories:',
+      '    a:',
+      '      depends_on: []',
+      '  - key: rogue',                  // misindented — outside stories[]
+      'cross_epic_deps: []',
+      'overrides: []',
+      '',
+    ].join('\n');
+    const impl = join(projectRoot, '_bmad-output', 'implementation-artifacts');
+    mkdirSync(impl, { recursive: true });
+    writeFileSync(join(impl, 'sprint-plan.yaml'), broken, 'utf8');
+    const r = runCli(['start']);
+    expect(r.status).toBe(0);
+    const parsed = JSON.parse(r.stdout);
+    expect(parsed.action.type).toBe('user_prompt');
+    expect(parsed.action.reason).toBe('sprint_plan_corrupt');
+    expect(parsed.action.parser_error_code).toBe('parse_error');
+    expect(parsed.action.file).toContain('sprint-plan.yaml');
+    // CRITICAL: the destructive auto-rebuild action MUST NOT fire.
+    expect(parsed.action.skill).toBeUndefined();
+  });
 });
 
 describe('autopilot start — resume divergence handling (v2.2.30)', () => {
