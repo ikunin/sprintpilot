@@ -38,6 +38,7 @@ const backgroundSuite = require('../lib/orchestrator/background-suite');
 const changeSizeClassifier = require('../lib/orchestrator/change-size-classifier');
 const flakyQuarantine = require('../lib/orchestrator/flaky-quarantine');
 const haltExplainer = require('../lib/orchestrator/halt-explainer');
+const sprintHealth = require('../lib/orchestrator/sprint-health');
 const decisionLog = require('../lib/orchestrator/decision-log');
 const userCommands = require('../lib/orchestrator/user-commands');
 const divergence = require('../lib/orchestrator/divergence');
@@ -3038,6 +3039,45 @@ function cmdRecord(opts) {
     result.verdict === 'halt';
   if (result.newProfile.coalesce_state_writes && isStoryBoundary) {
     stateStore.flush(result.newProfile, { projectRoot, story: result.newState.story_key });
+  }
+
+  // v2.5.0 — sprint-health metrics. When the RETROSPECTIVE phase
+  // advances successfully (LLM has written the retro file), append a
+  // machine-tagged metrics block at the bottom. Idempotent: the
+  // sprint-health module replaces the tagged section if already
+  // present, so re-runs of the same retro don't duplicate.
+  if (
+    runtime.phase === STATES.RETROSPECTIVE &&
+    result.verdict === 'advanced'
+  ) {
+    try {
+      const epicKey = runtime.current_epic || result.newState.current_epic || null;
+      if (epicKey) {
+        const retroPath = path.join(
+          projectRoot,
+          '_bmad-output',
+          'retrospectives',
+          `${epicKey}.md`,
+        );
+        const allEntries = ledger.read({ projectRoot });
+        const metrics = sprintHealth.computeMetrics(allEntries, { epicKey });
+        const writeResult = sprintHealth.appendMetricsSection(retroPath, metrics);
+        ledger.append(
+          {
+            kind: 'state_transition',
+            detail: {
+              sprint_health_metrics: writeResult.mode,
+              epic_key: epicKey,
+              stories_completed: metrics.stories_completed,
+              total_halts: metrics.total_halts,
+            },
+          },
+          { projectRoot },
+        );
+      }
+    } catch (e) {
+      log.warn(`sprint-health metrics append failed: ${e.message}`);
+    }
   }
 
   // On halt: record fingerprint for resume divergence detection.
