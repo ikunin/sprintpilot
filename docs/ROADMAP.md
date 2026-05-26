@@ -5,7 +5,9 @@ one-feature-per-release. Each entry has a rough effort estimate, the
 symptom it kills, and any dependencies on prior bundles.
 
 This doc is a living artifact — re-shuffled as priorities shift or
-real usage reveals new pain points. Last updated: v2.4.1.
+real usage reveals new pain points. Last updated: v2.4.1 (with
+v2.5.0 re-scoped from "memory bundle" → "observability bundle"
+after audit found BMad already provides the memory features).
 
 ## Currently shipped
 
@@ -38,22 +40,22 @@ real usage reveals new pain points. Last updated: v2.4.1.
 - **v2.3.14** — reconciliation guards against unpushed work.
 - **v2.3.13** — boot-time auto-reconcile with BMAD's sprint-status.
 
-## v2.5.0 — Memory bundle
+## v2.5.0 — Observability bundle
 
-Kills the "LLM relearns the project every session" problem.
+The original v2.5.0 was a "memory bundle" — project conventions
+file, pre-flight story briefing, lessons-from-retros injection.
+Cancelled after audit: BMad already ships **all** of it. The
+`project-context.md` glob is loaded by `bmad-create-story`,
+`bmad-dev-story`, `bmad-quick-dev`, `bmad-code-review`,
+`bmad-retrospective`, `bmad-sprint-planning`, and several agent
+skills. `bmad-create-story` already does "Analyze 1-5 most recent
+commits for relevance to current story." `bmad-retrospective`
+already extracts lessons and tracks "previous lessons applied vs.
+ignored." Adding a Sprintpilot-side conventions file or briefing
+slot would have duplicated all of it.
 
-| Component | Effort | Kills |
-|---|---|---|
-| Project conventions file — persistent `_bmad-output/conventions.md`, auto-appended at each retro, auto-injected into every dev-story template | ~2 days | Generic patterns sneaking in despite project idioms |
-| Pre-flight story briefing — new `story_briefing` template slot: recent commits to AC-relevant files, related decision-log entries, lessons-from-similar-stories from retros | ~3 days | Re-discovery of the same gotchas every story |
-
-**Total: ~5 days.** Minor bump because this is a semantically
-meaningful behavior change.
-
-## v2.5.1 — Observability bundle
-
-Once memory is in place, the remaining frustration is "what's it
-doing right now?" Pure visibility, no behavior change.
+So v2.5.0 is now the observability bundle (formerly tagged v2.5.1).
+"What's it doing right now?" — pure visibility, no behavior change.
 
 | Component | Effort | Kills |
 |---|---|---|
@@ -61,7 +63,8 @@ doing right now?" Pure visibility, no behavior change.
 | Sprint-health metrics in retros — LOC delta, test count delta, coverage delta, avg phase time, retry rate, halt count | ~1-2 days | Sprint drift only discovered when something breaks |
 | Live timeline TUI — `autopilot watch` tails the ledger and renders updating phases, decisions, halts, test results | ~3-5 days | "Is it still healthy?" glances during long sessions |
 
-**Total: ~5-8 days.** Patch bump.
+**Total: ~5-8 days.** Minor bump (renumbered from v2.5.1; the
+original v2.5.0 slot is permanently empty by design).
 
 ## v2.6.0 — Bigger bets
 
@@ -96,16 +99,16 @@ interactive session.
 ```
 trust  ─→ v2.4.0
 speed  ─────────→ v2.4.1
-memory ─────────────────→ v2.5.0
-obs    ─────────────────────────→ v2.5.1
-bets   ─────────────────────────────────→ v2.6.0 → v2.6.x
-v3     ──────────────────────────────────────────────────→ v3.0.0
+obs    ─────────────────→ v2.5.0   (formerly v2.5.1; memory bundle cancelled — BMad covers it)
+bets   ─────────────────────────→ v2.6.0 → v2.6.x
+v3     ──────────────────────────────────────────────→ v3.0.0
 ```
 
 Trust before speed because the trust wins pay back on every sprint
 regardless of project size, and they de-risk the bigger bets by
-surfacing failure modes more clearly. Speed before memory because
-speed wins are small and self-contained; memory needs more design.
+surfacing failure modes more clearly. Speed before observability
+because speed wins compound; observability is read-only and
+doesn't gate further work.
 
 ## Explicitly NOT on the roadmap
 
