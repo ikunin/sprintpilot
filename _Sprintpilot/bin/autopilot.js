@@ -55,7 +55,7 @@ const {
 
 const { STATES } = stateMachine;
 
-const SUBCOMMANDS = ['start', 'next', 'record', 'state', 'report', 'validate-config', 'status', 'progress', 'heartbeat', 'tasks', 'quarantine'];
+const SUBCOMMANDS = ['start', 'next', 'record', 'state', 'report', 'validate-config', 'status', 'progress', 'heartbeat', 'tasks', 'quarantine', 'watch'];
 
 // v2.3.12 — canonical per-story task list (the BMad 7-step cycle,
 // collapsed into operator-visible labels). Used by `autopilot tasks` to
@@ -114,6 +114,11 @@ function help() {
       '  autopilot status             One-line status',
       '  autopilot quarantine list|add <id>|eject <id>',
       '                               Inspect/manage flaky-test quarantine',
+      '  autopilot watch [--once] [--no-tui]',
+      '                               Live ledger tail: status header +',
+      '                               recent events, re-rendered on each',
+      '                               new ledger entry. `--once` for one',
+      '                               render; `--no-tui` for plain output.',
       '',
       'Global flags:',
       '  --project-root <path>        Default: CWD',
@@ -3471,6 +3476,164 @@ function cmdTasks(opts) {
   return 0;
 }
 
+// v2.5.0 — `autopilot watch`: live timeline TUI. Tails the ledger
+// via action-ledger.tail() and re-renders a status block + recent
+// events on every new entry. In TTY mode (default), each render
+// clears the screen and redraws. With `--no-tui` (or when stdout
+// isn't a TTY), each new event prints as a single appended line —
+// works cleanly piped into a file or `tee`.
+//
+// Flags:
+//   --once         render the current state once and exit (no tail)
+//   --no-tui       disable ANSI repainting; print event-per-line
+//
+// Exits cleanly on SIGINT; the tail iterator's AbortController is
+// wired to the signal so the loop terminates immediately.
+function cmdWatch(opts) {
+  const projectRoot = resolveProjectRoot(opts);
+  const persisted = loadState(projectRoot);
+  const useTty = !opts['no-tui'] && process.stdout.isTTY === true;
+
+  // First render is always full-state.
+  const initialStatus = buildRichStatus(projectRoot, persisted, opts);
+  const initialEntries = ledger.read({ projectRoot }, { limit: 20 });
+  if (useTty) {
+    process.stdout.write('\x1b[2J\x1b[H'); // clear + home
+  }
+  renderWatchFrame(initialStatus, initialEntries, { tty: useTty });
+
+  if (opts.once) return 0;
+
+  // Tail loop. node:async iterators play well with sync code; we use
+  // a small adapter that runs the async generator and exits on SIGINT.
+  const abortCtrl = new AbortController();
+  const onSigint = () => {
+    abortCtrl.abort();
+  };
+  process.on('SIGINT', onSigint);
+  process.on('SIGTERM', onSigint);
+
+  return tailLoop(projectRoot, abortCtrl.signal, useTty, opts)
+    .then(() => {
+      process.off('SIGINT', onSigint);
+      process.off('SIGTERM', onSigint);
+      return 0;
+    })
+    .catch((e) => {
+      log.error(`autopilot watch: ${e.message}`);
+      return 1;
+    });
+}
+
+async function tailLoop(projectRoot, signal, useTty, opts) {
+  for await (const event of ledger.tail({ projectRoot, signal, pollIntervalMs: 500 })) {
+    if (signal.aborted) break;
+    if (useTty) {
+      // Re-render the whole frame on each new event. Cheap enough at
+      // ledger cadence (1-5 events/min in practice).
+      const persisted = loadState(projectRoot);
+      const status = buildRichStatus(projectRoot, persisted, opts);
+      const entries = ledger.read({ projectRoot }, { limit: 20 });
+      process.stdout.write('\x1b[2J\x1b[H');
+      renderWatchFrame(status, entries, { tty: true });
+    } else {
+      // Plain mode: append a one-line digest per event.
+      process.stdout.write(`${formatWatchEventLine(event)}\n`);
+    }
+  }
+}
+
+function renderWatchFrame(status, entries, { tty }) {
+  const c = tty ? colorize : (_color, text) => text;
+  const out = [];
+  out.push(c('bold', `Sprintpilot — autopilot watch`));
+  out.push(c('dim', `  story=${status.story || '-'}  phase=${status.current_phase || '-'}  profile=${status.profile_name || '-'}`));
+  if (status.time_in_phase_minutes !== null) {
+    out.push(c('dim', `  time-in-phase: ${status.time_in_phase_minutes}m`));
+  }
+  const counters = [];
+  if (status.retry_count_this_phase) counters.push(`retry=${status.retry_count_this_phase}`);
+  if (status.verify_reject_count) counters.push(`verify-reject=${status.verify_reject_count}`);
+  if (status.consecutive_test_failures) counters.push(`consec-test-fail=${status.consecutive_test_failures}`);
+  if (status.diagnostic_pending) counters.push(c('yellow', 'diagnostic-pending'));
+  if (counters.length > 0) out.push(`  ${counters.join('  ')}`);
+  if (status.halt_active) {
+    out.push(c('red', `  HALT: ${status.halt_reason || 'unknown'}`));
+  }
+  if (status.background_full_suite) {
+    const bs = status.background_full_suite;
+    const stateColor = bs.state === 'green' ? 'green' : bs.state === 'failed' ? 'red' : 'dim';
+    out.push(`  background suite: ${c(stateColor, bs.state)}${bs.story_key ? ` (${bs.story_key})` : ''}`);
+  }
+  if (status.quarantined_test_count > 0) {
+    out.push(`  quarantined tests: ${status.quarantined_test_count}`);
+  }
+  out.push('');
+  out.push(c('bold', `Recent ledger events (newest last):`));
+  for (const e of entries) {
+    out.push(`  ${formatWatchEventLine(e, { tty })}`);
+  }
+  if (tty) {
+    out.push('');
+    out.push(c('dim', `Press Ctrl-C to exit.`));
+  }
+  process.stdout.write(`${out.join('\n')}\n`);
+}
+
+function formatWatchEventLine(e, { tty = false } = {}) {
+  if (!e) return '';
+  const c = tty ? colorize : (_color, text) => text;
+  const ts = (e.ts || '').slice(11, 19); // HH:MM:SS
+  const seq = e.seq != null ? `#${e.seq}` : '';
+  const phase = e.phase || (e.action && e.action.phase) || '';
+  let kindColor = 'dim';
+  let extra = '';
+  switch (e.kind) {
+    case 'halt':
+      kindColor = 'red';
+      extra = e.reason ? ` reason=${e.reason}` : '';
+      break;
+    case 'verify_rejected':
+      kindColor = 'yellow';
+      break;
+    case 'action_emitted':
+      kindColor = e.action && e.action.type === 'user_prompt' ? 'yellow' : 'cyan';
+      extra = e.action ? ` ${e.action.skill || e.action.op || e.action.type}` : '';
+      break;
+    case 'state_transition':
+      kindColor = 'green';
+      if (e.from && e.to) extra = ` ${e.from}→${e.to}${e.verdict ? ` (${e.verdict})` : ''}`;
+      break;
+    case 'test_scope_decision':
+      kindColor = 'dim';
+      extra = e.detail ? ` ${e.detail.scope || ''} ${e.detail.adapter || ''}` : '';
+      break;
+    case 'review_depth_decision':
+      kindColor = 'dim';
+      extra = e.detail ? ` ${e.detail.size || ''} reviewers=${e.detail.reviewer_count || ''}` : '';
+      break;
+    default:
+      break;
+  }
+  return `${ts} ${seq} ${c(kindColor, e.kind)}${phase ? ` [${phase}]` : ''}${extra}`;
+}
+
+// Tiny ANSI colorizer — keeps the dependency footprint at zero. Only
+// used in TTY rendering; the plain-mode path bypasses it entirely.
+function colorize(color, text) {
+  const codes = {
+    bold: '\x1b[1m',
+    dim: '\x1b[2m',
+    red: '\x1b[31m',
+    green: '\x1b[32m',
+    yellow: '\x1b[33m',
+    blue: '\x1b[34m',
+    cyan: '\x1b[36m',
+  };
+  const reset = '\x1b[0m';
+  return `${codes[color] || ''}${text}${reset}`;
+}
+
 // v2.4.0 — flaky-quarantine inspection / manual edits.
 //
 // Subcommands:
@@ -3850,9 +4013,12 @@ function main(argv) {
       // the latest sidecar. Used after the user has investigated the
       // failure and decided to proceed anyway.
       'ack-background-suite',
-      // v2.5.0 observability — status formatter selectors.
+      // v2.5.0 observability — status formatter selectors + watch.
       'human',
       'legacy',
+      // watch flag: --no-tui drops ANSI repainting. (--once is already
+      // declared above for cmdNext.)
+      'no-tui',
     ],
   });
   if (opts.help) {
@@ -3894,6 +4060,8 @@ function main(argv) {
         return cmdTasks(opts);
       case 'quarantine':
         return cmdQuarantine(opts, positional.slice(1));
+      case 'watch':
+        return cmdWatch(opts);
       default:
         return 2;
     }
@@ -3904,7 +4072,20 @@ function main(argv) {
 }
 
 if (require.main === module) {
-  process.exit(main(process.argv.slice(2)));
+  const result = main(process.argv.slice(2));
+  // v2.5.0 — `autopilot watch` returns a Promise<number> because it
+  // tails the ledger via an async iterator. Other subcommands stay
+  // synchronous and return a number directly. Handle both shapes.
+  if (result && typeof result.then === 'function') {
+    Promise.resolve(result)
+      .then((code) => process.exit(typeof code === 'number' ? code : 0))
+      .catch((e) => {
+        log.error(`autopilot: ${e.message}`);
+        process.exit(1);
+      });
+  } else {
+    process.exit(typeof result === 'number' ? result : 0);
+  }
 }
 
 module.exports = {
@@ -3915,6 +4096,10 @@ module.exports = {
   composeRuntimeState,
   acquireAutopilotLock,
   runWorktreeHealthCheck,
+  // v2.5.0 observability helpers (exposed for unit tests).
+  buildRichStatus,
+  renderStatusHuman,
+  formatWatchEventLine,
   // v2.3.12 — task list helpers exposed for unit tests
   STORY_TASK_DEFINITIONS,
   STORY_PHASE_ORDER,

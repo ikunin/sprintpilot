@@ -489,6 +489,15 @@ describe('autopilot state / report / status', () => {
     expect(r.stdout).toContain('story=');
     expect(r.stdout).toContain('phase=create_story');
   });
+
+  it('watch --once --no-tui renders a single frame and exits', () => {
+    runCli(['start']);
+    const r = runCli(['watch', '--once', '--no-tui']);
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain('Sprintpilot');
+    expect(r.stdout).toContain('autopilot watch');
+    expect(r.stdout).toContain('Recent ledger events');
+  });
 });
 
 describe('autopilot help / unknown subcommand', () => {
