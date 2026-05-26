@@ -3428,11 +3428,29 @@ function deriveTasksForStory(currentPhase, recentLedgerEntries, opts = {}) {
   });
 }
 
-function tasksToMarkdown(story, tasks, { heading = 'Sprintpilot — current story' } = {}) {
+function tasksToMarkdown(story, tasks, opts = {}) {
+  const heading = opts.heading || 'Sprintpilot — current story';
+  const queueHead = opts.queueHead || null;
+  const remainingInQueue = typeof opts.remainingInQueue === 'number' ? opts.remainingInQueue : 0;
+  const epicKey = opts.epicKey || null;
   const lines = [];
   lines.push(`# ${heading}`);
   lines.push('');
-  lines.push(story ? `**Story:** \`${story}\`` : '**Story:** (none — between stories or idle)');
+  // v2.5.1 — surface the queued next-story when current_story is null
+  // but the autopilot is on a story-creation phase (queue head already
+  // chosen, spec not yet authored). Pre-fix, the header said
+  // '(none — between stories or idle)' even though the checklist
+  // below was already ticking 'Create story spec ← starting now' —
+  // a self-contradicting board.
+  if (story) {
+    lines.push(`**Story:** \`${story}\``);
+  } else if (queueHead) {
+    const detail = remainingInQueue > 1 ? ` (queue: ${remainingInQueue} stories)` : '';
+    lines.push(`**Story:** \`${queueHead}\` (queued; spec not yet authored)${detail}`);
+  } else {
+    lines.push('**Story:** (none — between stories or idle)');
+  }
+  if (epicKey) lines.push(`**Epic:** \`${epicKey}\``);
   lines.push('');
   for (const t of tasks) {
     let glyph = '[ ]';
@@ -3474,7 +3492,12 @@ function writeSprintTasksFile(projectRoot, persisted) {
     const tail = recent[recent.length - 1] || null;
     const haltActive = !!(tail && tail.kind === 'halt');
     const tasks = deriveTasksForStory(currentPhase, recent, { haltActive });
-    const body = tasksToMarkdown(story, tasks);
+    const queueHead = !story && Array.isArray(persisted && persisted.story_queue) && persisted.story_queue.length > 0
+      ? persisted.story_queue[0]
+      : null;
+    const remainingInQueue = Array.isArray(persisted && persisted.story_queue) ? persisted.story_queue.length : 0;
+    const epicKey = persisted && persisted.current_epic ? String(persisted.current_epic) : null;
+    const body = tasksToMarkdown(story, tasks, { queueHead, remainingInQueue, epicKey });
     const file = tasksFilePath(projectRoot, persisted);
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.writeFileSync(file, body, 'utf8');
@@ -3506,11 +3529,32 @@ function cmdTasks(opts) {
   const tail = recent[recent.length - 1] || null;
   const haltActive = !!(tail && tail.kind === 'halt');
   const tasks = deriveTasksForStory(currentPhase, recent, { haltActive });
+  // v2.5.1 — surface the queue head + epic so the board doesn't claim
+  // "idle" while it's actually about to author a story spec.
+  const queueHead = !story && Array.isArray(persisted.story_queue) && persisted.story_queue.length > 0
+    ? persisted.story_queue[0]
+    : null;
+  const remainingInQueue = Array.isArray(persisted.story_queue) ? persisted.story_queue.length : 0;
+  const epicKey = persisted.current_epic ? String(persisted.current_epic) : null;
   if (opts.markdown || opts.md) {
-    process.stdout.write(tasksToMarkdown(story, tasks));
+    process.stdout.write(tasksToMarkdown(story, tasks, { queueHead, remainingInQueue, epicKey }));
     return 0;
   }
-  process.stdout.write(`${JSON.stringify({ story, current_phase: currentPhase, halt_active: haltActive, tasks }, null, 2)}\n`);
+  process.stdout.write(
+    `${JSON.stringify(
+      {
+        story,
+        story_queue_head: queueHead,
+        story_queue_length: remainingInQueue,
+        epic: epicKey,
+        current_phase: currentPhase,
+        halt_active: haltActive,
+        tasks,
+      },
+      null,
+      2,
+    )}\n`,
+  );
   return 0;
 }
 
