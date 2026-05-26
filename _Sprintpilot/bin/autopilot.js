@@ -3433,6 +3433,7 @@ function tasksToMarkdown(story, tasks, opts = {}) {
   const queueHead = opts.queueHead || null;
   const remainingInQueue = typeof opts.remainingInQueue === 'number' ? opts.remainingInQueue : 0;
   const epicKey = opts.epicKey || null;
+  const storyTitle = opts.storyTitle || null;
   const lines = [];
   lines.push(`# ${heading}`);
   lines.push('');
@@ -3442,11 +3443,17 @@ function tasksToMarkdown(story, tasks, opts = {}) {
   // '(none — between stories or idle)' even though the checklist
   // below was already ticking 'Create story spec ← starting now' —
   // a self-contradicting board.
+  //
+  // Also surfaces the human-readable title (from the story file's H1
+  // when it exists) as a suffix so the board names BOTH the stable
+  // key and the story's purpose. Caller passes opts.storyTitle; null
+  // is fine and renders key-only.
+  const titleSuffix = storyTitle ? ` — ${storyTitle}` : '';
   if (story) {
-    lines.push(`**Story:** \`${story}\``);
+    lines.push(`**Story:** \`${story}\`${titleSuffix}`);
   } else if (queueHead) {
     const detail = remainingInQueue > 1 ? ` (queue: ${remainingInQueue} stories)` : '';
-    lines.push(`**Story:** \`${queueHead}\` (queued; spec not yet authored)${detail}`);
+    lines.push(`**Story:** \`${queueHead}\`${titleSuffix} (queued; spec not yet authored)${detail}`);
   } else {
     lines.push('**Story:** (none — between stories or idle)');
   }
@@ -3469,6 +3476,42 @@ function tasksToMarkdown(story, tasks, opts = {}) {
   lines.push(`_Updated: ${new Date().toISOString()}_`);
   lines.push('');
   return lines.join('\n');
+}
+
+// v2.5.1 — extract the human-readable title from a BMad story file's
+// first H1. BMad's bmad-create-story emits files like
+// `_bmad-output/implementation-artifacts/<story-key>.md` with a
+// `# Story <id>: <Title>` H1. We pull just the H1 text (after the
+// first `# `) so the task board can name the story without the user
+// translating its slug.
+//
+// Returns null when the file is absent, unreadable, or has no H1 —
+// callers render key-only in that case.
+function readStoryTitleFromFile(projectRoot, storyKey, persisted) {
+  if (!storyKey) return null;
+  try {
+    const artDir =
+      (persisted && persisted.implementation_artifacts) ||
+      path.join(projectRoot, '_bmad-output', 'implementation-artifacts');
+    // persisted.story_file_path is stored relative to projectRoot
+    // (e.g. `_bmad-output/implementation-artifacts/15-4-foo.md`), so
+    // we join when the path isn't absolute. Same treatment for the
+    // implementation_artifacts override if a caller passed a relative
+    // string there.
+    const rawPath = (persisted && persisted.story_file_path) || path.join(artDir, `${storyKey}.md`);
+    const storyFile = path.isAbsolute(rawPath) ? rawPath : path.join(projectRoot, rawPath);
+    const text = fs.readFileSync(storyFile, 'utf8');
+    // First H1 wins. Skip frontmatter (--- … ---) if present.
+    let body = text;
+    if (body.startsWith('---')) {
+      const end = body.indexOf('\n---', 3);
+      if (end !== -1) body = body.slice(end + 4);
+    }
+    const m = body.match(/^#\s+(.+?)\s*$/m);
+    return m ? m[1] : null;
+  } catch (_e) {
+    return null;
+  }
 }
 
 function tasksFilePath(projectRoot, persisted) {
@@ -3497,7 +3540,8 @@ function writeSprintTasksFile(projectRoot, persisted) {
       : null;
     const remainingInQueue = Array.isArray(persisted && persisted.story_queue) ? persisted.story_queue.length : 0;
     const epicKey = persisted && persisted.current_epic ? String(persisted.current_epic) : null;
-    const body = tasksToMarkdown(story, tasks, { queueHead, remainingInQueue, epicKey });
+    const storyTitle = readStoryTitleFromFile(projectRoot, story || queueHead, persisted);
+    const body = tasksToMarkdown(story, tasks, { queueHead, remainingInQueue, epicKey, storyTitle });
     const file = tasksFilePath(projectRoot, persisted);
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.writeFileSync(file, body, 'utf8');
@@ -3536,14 +3580,16 @@ function cmdTasks(opts) {
     : null;
   const remainingInQueue = Array.isArray(persisted.story_queue) ? persisted.story_queue.length : 0;
   const epicKey = persisted.current_epic ? String(persisted.current_epic) : null;
+  const storyTitle = readStoryTitleFromFile(projectRoot, story || queueHead, persisted);
   if (opts.markdown || opts.md) {
-    process.stdout.write(tasksToMarkdown(story, tasks, { queueHead, remainingInQueue, epicKey }));
+    process.stdout.write(tasksToMarkdown(story, tasks, { queueHead, remainingInQueue, epicKey, storyTitle }));
     return 0;
   }
   process.stdout.write(
     `${JSON.stringify(
       {
         story,
+        story_title: storyTitle,
         story_queue_head: queueHead,
         story_queue_length: remainingInQueue,
         epic: epicKey,

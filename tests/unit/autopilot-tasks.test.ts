@@ -27,6 +27,7 @@ const { STORY_TASK_DEFINITIONS, STORY_PHASE_ORDER, deriveTasksForStory, tasksToM
         queueHead?: string | null;
         remainingInQueue?: number;
         epicKey?: string | null;
+        storyTitle?: string | null;
       },
     ) => string;
   };
@@ -189,5 +190,23 @@ describe('tasksToMarkdown', () => {
     expect(md).toContain('**Story:** `15-3-active`');
     expect(md).not.toContain('queued');
     expect(md).toContain('**Epic:** `15`');
+  });
+
+  it('appends the human-readable storyTitle when supplied (v2.5.1)', () => {
+    const md = tasksToMarkdown('15-4-claude-code-persona-backend', deriveTasksForStory('dev_red', []), {
+      epicKey: '15',
+      storyTitle: 'Story 15.4: Claude Code Persona Backend',
+    });
+    expect(md).toContain('**Story:** `15-4-claude-code-persona-backend` — Story 15.4: Claude Code Persona Backend');
+  });
+
+  it('appends storyTitle to a queued story too', () => {
+    const md = tasksToMarkdown(null, deriveTasksForStory('create_story', []), {
+      queueHead: '15-4-claude-code-persona-backend',
+      remainingInQueue: 6,
+      epicKey: '15',
+      storyTitle: 'Story 15.4: Claude Code Persona Backend',
+    });
+    expect(md).toContain('**Story:** `15-4-claude-code-persona-backend` — Story 15.4: Claude Code Persona Backend (queued; spec not yet authored) (queue: 6 stories)');
   });
 });
