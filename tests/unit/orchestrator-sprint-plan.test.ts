@@ -45,6 +45,7 @@ const {
   composePlanQueue,
   refreshIfPlanExists,
   shouldAutoDerive,
+  planCorruptHaltDescriptor,
   planExhausted,
   planRejectionReason,
   collectUpstreams,
@@ -86,7 +87,13 @@ const {
     projectRoot: string;
     profile: Record<string, unknown>;
     opts?: Record<string, unknown>;
-  }) => { auto_derive: boolean; reason: string; missing_keys?: string[] };
+  }) => { auto_derive: boolean; reason: string; missing_keys?: string[]; error?: string; message?: string };
+  planCorruptHaltDescriptor: (opts: { projectRoot: string }) => {
+    reason: string;
+    error: string;
+    message: string;
+    file: string;
+  } | null;
   planExhausted: (opts: { projectRoot: string }) => {
     exhausted: boolean;
     reason?: string;
@@ -226,6 +233,79 @@ describe('planStaleness', () => {
     write(plan, { projectRoot: tmpRoot });
     seedSprintStatus('development_status:\n  1-1-a: backlog\n  1-2-b: done\n');
     expect(planStaleness({ projectRoot: tmpRoot }).stale).toBe(false);
+  });
+});
+
+// ──────────────────────────────────────────────────────────────────
+// planCorruptHaltDescriptor + shouldAutoDerive corrupt-protection
+// (v2.5.1 — Jarvis-observed bug: auto-rebuild on corrupt file)
+// ──────────────────────────────────────────────────────────────────
+
+describe('planCorruptHaltDescriptor', () => {
+  it('returns null when no plan exists', () => {
+    expect(planCorruptHaltDescriptor({ projectRoot: tmpRoot })).toBeNull();
+  });
+
+  it('returns null when plan parses successfully', () => {
+    seedPlan();
+    expect(planCorruptHaltDescriptor({ projectRoot: tmpRoot })).toBeNull();
+  });
+
+  it('returns a descriptor with parser error when plan is unparseable', () => {
+    mkdirSync(join(tmpRoot, '_bmad-output', 'implementation-artifacts'), { recursive: true });
+    writeFileSync(planPath(tmpRoot), 'broken: : yaml :\n');
+    const r = planCorruptHaltDescriptor({ projectRoot: tmpRoot });
+    expect(r).not.toBeNull();
+    expect(r!.reason).toBe('sprint_plan_corrupt');
+    expect(r!.error).toBe('parse_error');
+    expect(typeof r!.message).toBe('string');
+    expect(r!.file).toContain('sprint-plan.yaml');
+  });
+
+  it('returns a descriptor for the Jarvis-observed indentation break', () => {
+    // Reproduce the actual structural bug: a `- key:` entry appended
+    // OUTSIDE the stories: list, breaking nesting.
+    const broken = [
+      'schema_version: 1',
+      'status: {}',
+      'epics: []',
+      'stories:',
+      '  - key: a',
+      'dependencies:',
+      '  stories:',
+      '    a:',
+      '      depends_on: []',
+      '  - key: rogue',  // rogue at wrong indent
+      'cross_epic_deps: []',
+      'overrides: []',
+      '',
+    ].join('\n');
+    mkdirSync(join(tmpRoot, '_bmad-output', 'implementation-artifacts'), { recursive: true });
+    writeFileSync(planPath(tmpRoot), broken);
+    const r = planCorruptHaltDescriptor({ projectRoot: tmpRoot });
+    expect(r).not.toBeNull();
+    expect(r!.reason).toBe('sprint_plan_corrupt');
+  });
+});
+
+describe('shouldAutoDerive — corrupt plan protection', () => {
+  it('does NOT auto-derive when plan is corrupt (would destroy curated entries)', () => {
+    mkdirSync(join(tmpRoot, '_bmad-output', 'implementation-artifacts'), { recursive: true });
+    writeFileSync(planPath(tmpRoot), 'broken: : yaml :\n');
+    const r = shouldAutoDerive({ projectRoot: tmpRoot, profile: {} });
+    expect(r.auto_derive).toBe(false);
+    expect(r.reason).toBe('plan_corrupt');
+    expect(r.error).toBe('parse_error');
+  });
+
+  it('auto-derives normally when plan is just stale (added_stories)', () => {
+    const plan = emptyPlan({ source: 'auto' });
+    plan.stories = [{ key: '1-1-a', plan_status: 'pending' }];
+    write(plan, { projectRoot: tmpRoot });
+    seedSprintStatus('development_status:\n  1-1-a: backlog\n  1-2-b: backlog\n');
+    const r = shouldAutoDerive({ projectRoot: tmpRoot, profile: {} });
+    expect(r.auto_derive).toBe(true);
+    expect(r.reason).toBe('stale_added_stories');
   });
 });
 

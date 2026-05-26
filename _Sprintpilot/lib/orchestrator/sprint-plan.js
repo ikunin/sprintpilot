@@ -300,6 +300,23 @@ function refreshIfPlanExists({ projectRoot }) {
 // Auto-derive gating
 // ---------------------------------------------------------------
 
+// planCorruptHaltDescriptor({ projectRoot }) — when the live plan file
+// fails to parse / validate, build a user_prompt halt descriptor with
+// the parser error verbatim so the user can pinpoint the bad line.
+// Returns null when the plan is fine. The autopilot CLI consults this
+// BEFORE shouldAutoDerive so corrupt files surface as a halt rather
+// than silently auto-rebuilding from scratch.
+function planCorruptHaltDescriptor({ projectRoot }) {
+  const staleness = planStaleness({ projectRoot });
+  if (!staleness.stale || staleness.reason !== 'corrupt') return null;
+  return {
+    reason: 'sprint_plan_corrupt',
+    error: staleness.error || 'parse_error',
+    message: staleness.message || 'sprint-plan.yaml could not be parsed',
+    file: path.join(projectRoot, '_bmad-output', 'implementation-artifacts', 'sprint-plan.yaml'),
+  };
+}
+
 // Decide whether cmdStart should emit an `invoke_skill` action for
 // /sprintpilot-plan-sprint based on:
 //   - whether the plan is stale,
@@ -320,6 +337,20 @@ function shouldAutoDerive({ projectRoot, profile, opts }) {
   }
 
   const staleness = planStaleness({ projectRoot });
+  // Corrupt plan — DO NOT auto-derive. A re-derive via /sprintpilot-plan-sprint
+  // would discard the entire existing plan (added_at, plan_status, history,
+  // user-added entries) just because of a localized parse error. The autopilot
+  // CLI catches this via planCorruptHaltDescriptor and emits a user_prompt
+  // with the file path + parser message so the user can fix manually OR
+  // explicitly opt into the destructive re-derive.
+  if (staleness.stale && staleness.reason === 'corrupt') {
+    return {
+      auto_derive: false,
+      reason: 'plan_corrupt',
+      error: staleness.error,
+      message: staleness.message,
+    };
+  }
   // Plan exists and is stale → ALWAYS re-derive (the user already adopted
   // the plan workflow; we keep it fresh). Spread staleness first so the
   // explicit `reason` (with `stale_` prefix) wins.
@@ -470,6 +501,7 @@ function autoPlanFirstSeenSentinelPath(projectRoot) {
 module.exports = {
   NON_PENDING_PLAN_STATUSES,
   STALENESS_REASONS,
+  planCorruptHaltDescriptor,
   legacyDependenciesPath,
   sprintStatusPath,
   readSprintStatusKeys,
