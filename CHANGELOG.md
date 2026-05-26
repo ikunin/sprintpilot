@@ -1,5 +1,29 @@
 # Changelog
 
+## [2.5.0] - 2026-05-26
+
+### Added — Observability bundle
+
+The original v2.5.0 was a "memory bundle" (project conventions file, pre-flight story briefing, retro-lessons injection). Audit found BMad already ships every piece: `project-context.md` is loaded by every implementation skill, `bmad-create-story` analyzes 1-5 recent commits, and `bmad-retrospective` tracks lessons-applied vs. lessons-ignored. So v2.5.0 became the observability bundle (formerly tagged v2.5.1 in the roadmap).
+
+- **`autopilot status` is now observability-grade.** Replaces the one-line `story=X step=Y` digest with a structured JSON payload by default. Fields include `current_phase`, `time_in_phase_minutes`, `retry_count_this_phase`, `verify_reject_count`, `consecutive_test_failures`, `diagnostic_pending`, `halt_active` + `halt_reason`, `recent_events` (last 3 informative ledger entries), `background_full_suite` (sidecar state), `quarantined_test_count`. New flags: `--human` (compact text block), `--legacy` (preserves pre-v2.5.0 one-line shape for any callers that pinned it).
+- **Sprint-health metrics appended to retros.** After a successful RETROSPECTIVE phase advance, the orchestrator appends a `## Sprint Health Metrics` markdown section to `_bmad-output/retrospectives/<epic>.md`. Idempotent — HTML-comment tagged so re-running a retro replaces the block in place. Metrics: stories completed, total actions / halts / verify-rejections / retries (with per-story rate), profile escalations, flaky tests recorded + auto-quarantined, review-depth distribution (trivial/normal/structural), average phase duration. New module: `_Sprintpilot/lib/orchestrator/sprint-health.js`.
+- **`autopilot watch` — live timeline TUI.** Tails the ledger via the existing async iterator and re-renders a status header + recent events on every new ledger entry. TTY mode clears + redraws; `--no-tui` emits one line per event for `tee` / log piping. `--once` renders the current state once and exits. Color-coded by kind (red halts, yellow verify-rejected, green state_transitions, cyan invoke_skill, dim test_scope_decision / review_depth_decision). Exits cleanly on SIGINT.
+
+### Cancelled
+
+- **Original v2.5.0 ("Memory bundle").** BMad already provides project-context.md loading across every implementation skill, recent-commits analysis in `bmad-create-story`, and lessons tracking in `bmad-retrospective`. The original v2.5.0 would have duplicated all of it. ROADMAP.md updated accordingly; the v2.5.0 slot is permanently empty by design (the observability bundle was renumbered from v2.5.1).
+
+### CLI
+
+- `autopilot status [--human|--legacy]` — the default switches from the legacy one-liner to JSON. `--legacy` preserves the old shape exactly.
+- `autopilot watch [--once] [--no-tui]` — new subcommand.
+
+### Migration notes
+
+- Scripts that parsed the previous `status` one-liner need either `--legacy` for the old shape or JSON parsing for the new shape. Field set is a superset of the legacy two-field digest.
+- Retro files written by prior versions are unchanged on read; on next retro advance, the metrics block appends below existing content. Re-running the retro updates the block in place via the HTML-comment tag pair.
+
 ## [2.4.1] - 2026-05-26
 
 ### Added — Speed-beyond-tests bundle

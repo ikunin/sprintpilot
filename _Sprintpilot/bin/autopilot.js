@@ -38,6 +38,7 @@ const backgroundSuite = require('../lib/orchestrator/background-suite');
 const changeSizeClassifier = require('../lib/orchestrator/change-size-classifier');
 const flakyQuarantine = require('../lib/orchestrator/flaky-quarantine');
 const haltExplainer = require('../lib/orchestrator/halt-explainer');
+const sprintHealth = require('../lib/orchestrator/sprint-health');
 const decisionLog = require('../lib/orchestrator/decision-log');
 const userCommands = require('../lib/orchestrator/user-commands');
 const divergence = require('../lib/orchestrator/divergence');
@@ -54,7 +55,7 @@ const {
 
 const { STATES } = stateMachine;
 
-const SUBCOMMANDS = ['start', 'next', 'record', 'state', 'report', 'validate-config', 'status', 'progress', 'heartbeat', 'tasks', 'quarantine'];
+const SUBCOMMANDS = ['start', 'next', 'record', 'state', 'report', 'validate-config', 'status', 'progress', 'heartbeat', 'tasks', 'quarantine', 'watch'];
 
 // v2.3.12 — canonical per-story task list (the BMad 7-step cycle,
 // collapsed into operator-visible labels). Used by `autopilot tasks` to
@@ -113,6 +114,11 @@ function help() {
       '  autopilot status             One-line status',
       '  autopilot quarantine list|add <id>|eject <id>',
       '                               Inspect/manage flaky-test quarantine',
+      '  autopilot watch [--once] [--no-tui]',
+      '                               Live ledger tail: status header +',
+      '                               recent events, re-rendered on each',
+      '                               new ledger entry. `--once` for one',
+      '                               render; `--no-tui` for plain output.',
       '',
       'Global flags:',
       '  --project-root <path>        Default: CWD',
@@ -3040,6 +3046,45 @@ function cmdRecord(opts) {
     stateStore.flush(result.newProfile, { projectRoot, story: result.newState.story_key });
   }
 
+  // v2.5.0 — sprint-health metrics. When the RETROSPECTIVE phase
+  // advances successfully (LLM has written the retro file), append a
+  // machine-tagged metrics block at the bottom. Idempotent: the
+  // sprint-health module replaces the tagged section if already
+  // present, so re-runs of the same retro don't duplicate.
+  if (
+    runtime.phase === STATES.RETROSPECTIVE &&
+    result.verdict === 'advanced'
+  ) {
+    try {
+      const epicKey = runtime.current_epic || result.newState.current_epic || null;
+      if (epicKey) {
+        const retroPath = path.join(
+          projectRoot,
+          '_bmad-output',
+          'retrospectives',
+          `${epicKey}.md`,
+        );
+        const allEntries = ledger.read({ projectRoot });
+        const metrics = sprintHealth.computeMetrics(allEntries, { epicKey });
+        const writeResult = sprintHealth.appendMetricsSection(retroPath, metrics);
+        ledger.append(
+          {
+            kind: 'state_transition',
+            detail: {
+              sprint_health_metrics: writeResult.mode,
+              epic_key: epicKey,
+              stories_completed: metrics.stories_completed,
+              total_halts: metrics.total_halts,
+            },
+          },
+          { projectRoot },
+        );
+      }
+    } catch (e) {
+      log.warn(`sprint-health metrics append failed: ${e.message}`);
+    }
+  }
+
   // On halt: record fingerprint for resume divergence detection.
   if (result.verdict === 'halt' || (result.nextAction && result.nextAction.type === 'halt')) {
     const fp = divergence.fingerprint({ projectRoot });
@@ -3106,13 +3151,195 @@ function cmdValidateConfig(opts) {
   return 0;
 }
 
+// v2.5.0 — `autopilot status` is now structured + observability-grade.
+//
+// Default output is JSON (machine-readable, scriptable). `--human` (or
+// `-h` when not conflicting with --help) renders the same data as a
+// compact human-scannable block. The legacy one-line shape lives behind
+// `--legacy` for any callers that pinned to it.
+//
+// Fields:
+//   story, story_queue_head, current_phase, profile_name
+//   time_in_phase_minutes              (from state.phase_started_at)
+//   retry_count_this_phase, verify_reject_count, consecutive_test_failures
+//   diagnostic_pending, diagnostic_completed
+//   session_stories_completed, session_story_limit
+//   halt_active                         (true when ledger tail is a halt)
+//   halt_reason                         (when halt_active)
+//   recent_events: [{ kind, seq, ts, ... }]   last 3 informative ledger entries
+//   background_full_suite: { state, story_key?, exit_code?, age_minutes? }
+//   quarantined_test_count
 function cmdStatus(opts) {
   const projectRoot = resolveProjectRoot(opts);
   const persisted = loadState(projectRoot);
-  const story = persisted.current_story || '-';
-  const step = persisted.current_bmad_step || '-';
-  process.stdout.write(`story=${story} step=${step}\n`);
+  if (opts && opts.legacy) {
+    const story = persisted.current_story || '-';
+    const step = persisted.current_bmad_step || '-';
+    process.stdout.write(`story=${story} step=${step}\n`);
+    return 0;
+  }
+  const status = buildRichStatus(projectRoot, persisted, opts);
+  if (opts && (opts.human || opts.h)) {
+    process.stdout.write(`${renderStatusHuman(status)}\n`);
+    return 0;
+  }
+  process.stdout.write(`${JSON.stringify(status, null, 2)}\n`);
   return 0;
+}
+
+function buildRichStatus(projectRoot, persisted, opts) {
+  const ledgerEntries = ledger.read({ projectRoot });
+  const tail = ledgerEntries[ledgerEntries.length - 1] || null;
+  const haltActive = !!(tail && tail.kind === 'halt');
+  const phase = persisted.current_bmad_step || null;
+  const phaseStartedAt = persisted.phase_started_at || null;
+
+  // Time-in-phase: minutes since state.phase_started_at (set on every
+  // phase advance by adapt.advanceState). Null when missing — applies
+  // pre-v2.4.0 sessions or fresh boots before any advance.
+  let timeInPhase = null;
+  if (phaseStartedAt) {
+    const t = Date.parse(phaseStartedAt);
+    if (Number.isFinite(t)) timeInPhase = Math.round(((Date.now() - t) / 60_000) * 10) / 10;
+  }
+
+  // Recent events — last 3 informative entries (skip routine state_transitions
+  // and decoration entries). The halt-explainer's RECENT_ACTION_TYPES list
+  // is the cleanest reusable filter.
+  const recent = [];
+  for (let i = ledgerEntries.length - 1; i >= 0 && recent.length < 3; i -= 1) {
+    const e = ledgerEntries[i];
+    if (!e) continue;
+    if (e.kind === 'state_transition' && !haltActive) continue;
+    if (e.kind === 'test_scope_decision') continue;
+    if (e.kind === 'review_depth_decision') continue;
+    if (e.kind === 'action_emitted' && e.action) {
+      recent.push({
+        seq: e.seq,
+        ts: e.ts,
+        kind: 'action_emitted',
+        type: e.action.type,
+        skill: e.action.skill || null,
+        op: e.action.op || null,
+        phase: e.action.phase || e.phase || null,
+      });
+    } else if (
+      e.kind === 'verify_result' || e.kind === 'halt' || e.kind === 'verify_rejected' ||
+      e.kind === 'profile_escalated'
+    ) {
+      recent.push({ seq: e.seq, ts: e.ts, kind: e.kind, phase: e.phase || null });
+    }
+  }
+  recent.reverse();
+
+  // Background-suite sidecar state. Returns null when the knob isn't set
+  // to background OR no sidecars exist yet.
+  let backgroundFullSuite = null;
+  try {
+    const sidecar = backgroundSuite.readLatestSidecar(projectRoot);
+    if (sidecar) {
+      const ageMs = sidecar.completed_at
+        ? Date.now() - Date.parse(sidecar.completed_at)
+        : Date.now() - Date.parse(sidecar.started_at);
+      backgroundFullSuite = {
+        state: sidecar.acknowledged
+          ? 'acknowledged'
+          : typeof sidecar.exit_code === 'number'
+            ? sidecar.exit_code === 0
+              ? 'green'
+              : 'failed'
+            : 'running',
+        story_key: sidecar.story_key,
+        exit_code: typeof sidecar.exit_code === 'number' ? sidecar.exit_code : null,
+        age_minutes: Number.isFinite(ageMs) ? Math.round((ageMs / 60_000) * 10) / 10 : null,
+      };
+    }
+  } catch (_e) {
+    /* sidecar read is best-effort */
+  }
+
+  // Quarantine count.
+  let quarantinedCount = 0;
+  try {
+    const q = flakyQuarantine.read(projectRoot);
+    quarantinedCount = (q.quarantined || []).length;
+  } catch (_e) {
+    quarantinedCount = 0;
+  }
+
+  // Profile (resolved fresh so the value matches the next emission).
+  let profileName = null;
+  try {
+    const { typed } = resolveProfile(projectRoot, opts && opts.profile);
+    profileName = typed.name;
+  } catch (_e) {
+    profileName = null;
+  }
+
+  return {
+    story: persisted.current_story || null,
+    story_queue_head: Array.isArray(persisted.story_queue) && persisted.story_queue.length > 0
+      ? persisted.story_queue[0]
+      : null,
+    current_phase: phase,
+    profile_name: profileName,
+    time_in_phase_minutes: timeInPhase,
+    phase_started_at: phaseStartedAt,
+    retry_count_this_phase: persisted.retry_count_this_phase || 0,
+    verify_reject_count: persisted.verify_reject_count || 0,
+    consecutive_test_failures: persisted.consecutive_test_failures || 0,
+    diagnostic_pending: persisted.diagnostic_pending === true,
+    diagnostic_completed: persisted.diagnostic_completed === true,
+    session_stories_completed: persisted.session_stories_completed || 0,
+    halt_active: haltActive,
+    halt_reason: haltActive ? (tail.reason || null) : null,
+    recent_events: recent,
+    background_full_suite: backgroundFullSuite,
+    quarantined_test_count: quarantinedCount,
+  };
+}
+
+function renderStatusHuman(s) {
+  const lines = [];
+  lines.push(`story=${s.story || '-'}  phase=${s.current_phase || '-'}  profile=${s.profile_name || '-'}`);
+  if (s.time_in_phase_minutes !== null) {
+    lines.push(`time-in-phase: ${s.time_in_phase_minutes}m  (since ${s.phase_started_at || '?'})`);
+  }
+  const counters = [];
+  if (s.retry_count_this_phase) counters.push(`retry=${s.retry_count_this_phase}`);
+  if (s.verify_reject_count) counters.push(`verify-reject=${s.verify_reject_count}`);
+  if (s.consecutive_test_failures) counters.push(`consec-test-fail=${s.consecutive_test_failures}`);
+  if (s.diagnostic_pending) counters.push('diagnostic-pending');
+  if (counters.length > 0) lines.push(`counters: ${counters.join('  ')}`);
+  if (s.story_queue_head && s.story_queue_head !== s.story) {
+    lines.push(`next: ${s.story_queue_head}`);
+  }
+  if (s.session_stories_completed > 0) {
+    lines.push(`session stories done: ${s.session_stories_completed}`);
+  }
+  if (s.halt_active) {
+    lines.push(`HALT: ${s.halt_reason || 'unknown'}`);
+  }
+  if (s.background_full_suite) {
+    const bs = s.background_full_suite;
+    lines.push(
+      `background suite: ${bs.state}` +
+        (bs.story_key ? ` (story=${bs.story_key}` : '') +
+        (typeof bs.exit_code === 'number' ? `, exit=${bs.exit_code}` : '') +
+        (bs.age_minutes !== null ? `, ${bs.age_minutes}m ago)` : bs.story_key ? ')' : ''),
+    );
+  }
+  if (s.quarantined_test_count > 0) {
+    lines.push(`quarantined tests: ${s.quarantined_test_count}`);
+  }
+  if (s.recent_events.length > 0) {
+    lines.push(`recent (oldest → newest):`);
+    for (const e of s.recent_events) {
+      const tag = e.skill || e.op || e.kind;
+      lines.push(`  #${e.seq} ${e.ts} ${e.kind} ${tag} ${e.phase ? `(${e.phase})` : ''}`);
+    }
+  }
+  return lines.join('\n');
 }
 
 // v2.3.10 — `autopilot heartbeat --message "<text>"` appends a
@@ -3247,6 +3474,164 @@ function cmdTasks(opts) {
   }
   process.stdout.write(`${JSON.stringify({ story, current_phase: currentPhase, halt_active: haltActive, tasks }, null, 2)}\n`);
   return 0;
+}
+
+// v2.5.0 — `autopilot watch`: live timeline TUI. Tails the ledger
+// via action-ledger.tail() and re-renders a status block + recent
+// events on every new entry. In TTY mode (default), each render
+// clears the screen and redraws. With `--no-tui` (or when stdout
+// isn't a TTY), each new event prints as a single appended line —
+// works cleanly piped into a file or `tee`.
+//
+// Flags:
+//   --once         render the current state once and exit (no tail)
+//   --no-tui       disable ANSI repainting; print event-per-line
+//
+// Exits cleanly on SIGINT; the tail iterator's AbortController is
+// wired to the signal so the loop terminates immediately.
+function cmdWatch(opts) {
+  const projectRoot = resolveProjectRoot(opts);
+  const persisted = loadState(projectRoot);
+  const useTty = !opts['no-tui'] && process.stdout.isTTY === true;
+
+  // First render is always full-state.
+  const initialStatus = buildRichStatus(projectRoot, persisted, opts);
+  const initialEntries = ledger.read({ projectRoot }, { limit: 20 });
+  if (useTty) {
+    process.stdout.write('\x1b[2J\x1b[H'); // clear + home
+  }
+  renderWatchFrame(initialStatus, initialEntries, { tty: useTty });
+
+  if (opts.once) return 0;
+
+  // Tail loop. node:async iterators play well with sync code; we use
+  // a small adapter that runs the async generator and exits on SIGINT.
+  const abortCtrl = new AbortController();
+  const onSigint = () => {
+    abortCtrl.abort();
+  };
+  process.on('SIGINT', onSigint);
+  process.on('SIGTERM', onSigint);
+
+  return tailLoop(projectRoot, abortCtrl.signal, useTty, opts)
+    .then(() => {
+      process.off('SIGINT', onSigint);
+      process.off('SIGTERM', onSigint);
+      return 0;
+    })
+    .catch((e) => {
+      log.error(`autopilot watch: ${e.message}`);
+      return 1;
+    });
+}
+
+async function tailLoop(projectRoot, signal, useTty, opts) {
+  for await (const event of ledger.tail({ projectRoot, signal, pollIntervalMs: 500 })) {
+    if (signal.aborted) break;
+    if (useTty) {
+      // Re-render the whole frame on each new event. Cheap enough at
+      // ledger cadence (1-5 events/min in practice).
+      const persisted = loadState(projectRoot);
+      const status = buildRichStatus(projectRoot, persisted, opts);
+      const entries = ledger.read({ projectRoot }, { limit: 20 });
+      process.stdout.write('\x1b[2J\x1b[H');
+      renderWatchFrame(status, entries, { tty: true });
+    } else {
+      // Plain mode: append a one-line digest per event.
+      process.stdout.write(`${formatWatchEventLine(event)}\n`);
+    }
+  }
+}
+
+function renderWatchFrame(status, entries, { tty }) {
+  const c = tty ? colorize : (_color, text) => text;
+  const out = [];
+  out.push(c('bold', `Sprintpilot — autopilot watch`));
+  out.push(c('dim', `  story=${status.story || '-'}  phase=${status.current_phase || '-'}  profile=${status.profile_name || '-'}`));
+  if (status.time_in_phase_minutes !== null) {
+    out.push(c('dim', `  time-in-phase: ${status.time_in_phase_minutes}m`));
+  }
+  const counters = [];
+  if (status.retry_count_this_phase) counters.push(`retry=${status.retry_count_this_phase}`);
+  if (status.verify_reject_count) counters.push(`verify-reject=${status.verify_reject_count}`);
+  if (status.consecutive_test_failures) counters.push(`consec-test-fail=${status.consecutive_test_failures}`);
+  if (status.diagnostic_pending) counters.push(c('yellow', 'diagnostic-pending'));
+  if (counters.length > 0) out.push(`  ${counters.join('  ')}`);
+  if (status.halt_active) {
+    out.push(c('red', `  HALT: ${status.halt_reason || 'unknown'}`));
+  }
+  if (status.background_full_suite) {
+    const bs = status.background_full_suite;
+    const stateColor = bs.state === 'green' ? 'green' : bs.state === 'failed' ? 'red' : 'dim';
+    out.push(`  background suite: ${c(stateColor, bs.state)}${bs.story_key ? ` (${bs.story_key})` : ''}`);
+  }
+  if (status.quarantined_test_count > 0) {
+    out.push(`  quarantined tests: ${status.quarantined_test_count}`);
+  }
+  out.push('');
+  out.push(c('bold', `Recent ledger events (newest last):`));
+  for (const e of entries) {
+    out.push(`  ${formatWatchEventLine(e, { tty })}`);
+  }
+  if (tty) {
+    out.push('');
+    out.push(c('dim', `Press Ctrl-C to exit.`));
+  }
+  process.stdout.write(`${out.join('\n')}\n`);
+}
+
+function formatWatchEventLine(e, { tty = false } = {}) {
+  if (!e) return '';
+  const c = tty ? colorize : (_color, text) => text;
+  const ts = (e.ts || '').slice(11, 19); // HH:MM:SS
+  const seq = e.seq != null ? `#${e.seq}` : '';
+  const phase = e.phase || (e.action && e.action.phase) || '';
+  let kindColor = 'dim';
+  let extra = '';
+  switch (e.kind) {
+    case 'halt':
+      kindColor = 'red';
+      extra = e.reason ? ` reason=${e.reason}` : '';
+      break;
+    case 'verify_rejected':
+      kindColor = 'yellow';
+      break;
+    case 'action_emitted':
+      kindColor = e.action && e.action.type === 'user_prompt' ? 'yellow' : 'cyan';
+      extra = e.action ? ` ${e.action.skill || e.action.op || e.action.type}` : '';
+      break;
+    case 'state_transition':
+      kindColor = 'green';
+      if (e.from && e.to) extra = ` ${e.from}→${e.to}${e.verdict ? ` (${e.verdict})` : ''}`;
+      break;
+    case 'test_scope_decision':
+      kindColor = 'dim';
+      extra = e.detail ? ` ${e.detail.scope || ''} ${e.detail.adapter || ''}` : '';
+      break;
+    case 'review_depth_decision':
+      kindColor = 'dim';
+      extra = e.detail ? ` ${e.detail.size || ''} reviewers=${e.detail.reviewer_count || ''}` : '';
+      break;
+    default:
+      break;
+  }
+  return `${ts} ${seq} ${c(kindColor, e.kind)}${phase ? ` [${phase}]` : ''}${extra}`;
+}
+
+// Tiny ANSI colorizer — keeps the dependency footprint at zero. Only
+// used in TTY rendering; the plain-mode path bypasses it entirely.
+function colorize(color, text) {
+  const codes = {
+    bold: '\x1b[1m',
+    dim: '\x1b[2m',
+    red: '\x1b[31m',
+    green: '\x1b[32m',
+    yellow: '\x1b[33m',
+    blue: '\x1b[34m',
+    cyan: '\x1b[36m',
+  };
+  const reset = '\x1b[0m';
+  return `${codes[color] || ''}${text}${reset}`;
 }
 
 // v2.4.0 — flaky-quarantine inspection / manual edits.
@@ -3628,6 +4013,12 @@ function main(argv) {
       // the latest sidecar. Used after the user has investigated the
       // failure and decided to proceed anyway.
       'ack-background-suite',
+      // v2.5.0 observability — status formatter selectors + watch.
+      'human',
+      'legacy',
+      // watch flag: --no-tui drops ANSI repainting. (--once is already
+      // declared above for cmdNext.)
+      'no-tui',
     ],
   });
   if (opts.help) {
@@ -3669,6 +4060,8 @@ function main(argv) {
         return cmdTasks(opts);
       case 'quarantine':
         return cmdQuarantine(opts, positional.slice(1));
+      case 'watch':
+        return cmdWatch(opts);
       default:
         return 2;
     }
@@ -3679,7 +4072,20 @@ function main(argv) {
 }
 
 if (require.main === module) {
-  process.exit(main(process.argv.slice(2)));
+  const result = main(process.argv.slice(2));
+  // v2.5.0 — `autopilot watch` returns a Promise<number> because it
+  // tails the ledger via an async iterator. Other subcommands stay
+  // synchronous and return a number directly. Handle both shapes.
+  if (result && typeof result.then === 'function') {
+    Promise.resolve(result)
+      .then((code) => process.exit(typeof code === 'number' ? code : 0))
+      .catch((e) => {
+        log.error(`autopilot: ${e.message}`);
+        process.exit(1);
+      });
+  } else {
+    process.exit(typeof result === 'number' ? result : 0);
+  }
 }
 
 module.exports = {
@@ -3690,6 +4096,10 @@ module.exports = {
   composeRuntimeState,
   acquireAutopilotLock,
   runWorktreeHealthCheck,
+  // v2.5.0 observability helpers (exposed for unit tests).
+  buildRichStatus,
+  renderStatusHuman,
+  formatWatchEventLine,
   // v2.3.12 — task list helpers exposed for unit tests
   STORY_TASK_DEFINITIONS,
   STORY_PHASE_ORDER,
