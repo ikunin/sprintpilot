@@ -5,13 +5,22 @@ one-feature-per-release. Each entry has a rough effort estimate, the
 symptom it kills, and any dependencies on prior bundles.
 
 This doc is a living artifact — re-shuffled as priorities shift or
-real usage reveals new pain points. Last updated: v2.4.1 (with
-v2.5.0 re-scoped from "memory bundle" → "observability bundle"
-after audit found BMad already provides the memory features).
+real usage reveals new pain points. Last updated: v2.5.0
+(observability bundle shipped; original "memory bundle" cancelled
+as redundant with BMad).
 
 ## Currently shipped
 
-- **v2.4.1** *(latest)* — speed-beyond-tests bundle. Change-size-
+- **v2.5.0** *(latest)* — observability bundle (renumbered from
+  v2.5.1 after the original memory bundle was cancelled as
+  redundant with BMad). Better `autopilot status` (JSON by default
+  with structured fields, `--human` / `--legacy` formatters);
+  sprint-health metrics appended to retros (idempotent HTML-tagged
+  block; counts halts/retries/escalations/flaky/review-depth +
+  per-phase average duration); `autopilot watch` live timeline TUI
+  (re-renders on every ledger entry; `--once` / `--no-tui` for CI
+  + piping).
+- **v2.4.1** — speed-beyond-tests bundle. Change-size-
   scaled review depth (trivial → 1 reviewer, normal → 3, structural
   → 3 + extended Edge Case Hunter — kills the 40-60% review tax on
   typo PRs); diagnostic mode on consecutive failures (between the
@@ -40,7 +49,7 @@ after audit found BMad already provides the memory features).
 - **v2.3.14** — reconciliation guards against unpushed work.
 - **v2.3.13** — boot-time auto-reconcile with BMAD's sprint-status.
 
-## v2.5.0 — Observability bundle
+## Note on v2.5.0 numbering
 
 The original v2.5.0 was a "memory bundle" — project conventions
 file, pre-flight story briefing, lessons-from-retros injection.
@@ -51,20 +60,11 @@ Cancelled after audit: BMad already ships **all** of it. The
 skills. `bmad-create-story` already does "Analyze 1-5 most recent
 commits for relevance to current story." `bmad-retrospective`
 already extracts lessons and tracks "previous lessons applied vs.
-ignored." Adding a Sprintpilot-side conventions file or briefing
-slot would have duplicated all of it.
+ignored."
 
-So v2.5.0 is now the observability bundle (formerly tagged v2.5.1).
-"What's it doing right now?" — pure visibility, no behavior change.
-
-| Component | Effort | Kills |
-|---|---|---|
-| Better `autopilot status` — current phase + time-in-phase + last 3 ledger events + queue head + retry counts | ~1 day | `tail -f ledger.jsonl` becoming the de-facto status command |
-| Sprint-health metrics in retros — LOC delta, test count delta, coverage delta, avg phase time, retry rate, halt count | ~1-2 days | Sprint drift only discovered when something breaks |
-| Live timeline TUI — `autopilot watch` tails the ledger and renders updating phases, decisions, halts, test results | ~3-5 days | "Is it still healthy?" glances during long sessions |
-
-**Total: ~5-8 days.** Minor bump (renumbered from v2.5.1; the
-original v2.5.0 slot is permanently empty by design).
+So the observability bundle (formerly tagged v2.5.1) was renumbered
+v2.5.0 — and the original v2.5.0 slot stays permanently empty by
+design.
 
 ## v2.6.0 — Bigger bets
 
