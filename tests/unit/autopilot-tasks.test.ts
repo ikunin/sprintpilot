@@ -153,17 +153,17 @@ describe('tasksToMarkdown', () => {
   });
 
   it('shows the queue head when current_story is null and the autopilot is creating its spec (v2.5.1)', () => {
-    // Reproduce the Jarvis-observed scenario: persisted.current_story is
-    // null but story_queue[0] is set and current_bmad_step is create_story.
+    // Regression coverage: persisted.current_story is null but
+    // story_queue[0] is set and current_bmad_step is create_story.
     // Pre-fix this rendered "Story: (none — between stories or idle)"
     // while the checklist below said "Create story spec ← in progress" —
     // a self-contradicting board.
     const tasks = deriveTasksForStory('create_story', []);
     const md = tasksToMarkdown(null, tasks, {
-      queueHead: '15-4-claude-code-persona-backend',
+      queueHead: '2-3-sample-story',
       remainingInQueue: 6,
     });
-    expect(md).toContain('**Story:** `15-4-claude-code-persona-backend` (queued; spec not yet authored)');
+    expect(md).toContain('**Story:** `2-3-sample-story` (queued; spec not yet authored)');
     expect(md).toContain('(queue: 6 stories)');
     expect(md).toContain('- [ ] Create story spec ← in progress');
     // The misleading idle line must NOT appear.
@@ -174,40 +174,40 @@ describe('tasksToMarkdown', () => {
 
   it('omits the queue count parenthetical when only one story remains', () => {
     const md = tasksToMarkdown(null, deriveTasksForStory('create_story', []), {
-      queueHead: '15-9-final',
+      queueHead: '2-9-final',
       remainingInQueue: 1,
     });
-    expect(md).toContain('**Story:** `15-9-final` (queued; spec not yet authored)');
+    expect(md).toContain('**Story:** `2-9-final` (queued; spec not yet authored)');
     expect(md).not.toContain('(queue:');
   });
 
   it('current_story wins over queue head when both are set', () => {
-    const md = tasksToMarkdown('15-3-active', deriveTasksForStory('dev_green', []), {
-      queueHead: '15-4-next',
+    const md = tasksToMarkdown('2-1-active', deriveTasksForStory('dev_green', []), {
+      queueHead: '2-2-next',
       remainingInQueue: 5,
     });
-    expect(md).toContain('**Story:** `15-3-active`');
+    expect(md).toContain('**Story:** `2-1-active`');
     expect(md).not.toContain('queued');
     expect(md).not.toContain('**Epic:**');
   });
 
   it('prefers storyTitle (human title) over the key when supplied', () => {
-    const md = tasksToMarkdown('15-4-claude-code-persona-backend', deriveTasksForStory('dev_red', []), {
-      storyTitle: 'Story 15.4: Claude Code Persona Backend',
+    const md = tasksToMarkdown('2-3-sample-story', deriveTasksForStory('dev_red', []), {
+      storyTitle: 'Story 2.3: Sample Story Title',
     });
-    expect(md).toContain('**Story:** Story 15.4: Claude Code Persona Backend');
+    expect(md).toContain('**Story:** Story 2.3: Sample Story Title');
     // Key is suppressed when the title is present — epic + slug are in
     // the title; the slug-key was just visual noise.
-    expect(md).not.toContain('15-4-claude-code-persona-backend');
+    expect(md).not.toContain('2-3-sample-story');
   });
 
   it('uses storyTitle for a queued story too', () => {
     const md = tasksToMarkdown(null, deriveTasksForStory('create_story', []), {
-      queueHead: '15-4-claude-code-persona-backend',
+      queueHead: '2-3-sample-story',
       remainingInQueue: 6,
-      storyTitle: 'Story 15.4: Claude Code Persona Backend',
+      storyTitle: 'Story 2.3: Sample Story Title',
     });
-    expect(md).toContain('**Story:** Story 15.4: Claude Code Persona Backend (queued; spec not yet authored) (queue: 6 stories)');
-    expect(md).not.toContain('`15-4-claude-code-persona-backend`');
+    expect(md).toContain('**Story:** Story 2.3: Sample Story Title (queued; spec not yet authored) (queue: 6 stories)');
+    expect(md).not.toContain('`2-3-sample-story`');
   });
 });
