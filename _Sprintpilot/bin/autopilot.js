@@ -3106,13 +3106,195 @@ function cmdValidateConfig(opts) {
   return 0;
 }
 
+// v2.5.0 — `autopilot status` is now structured + observability-grade.
+//
+// Default output is JSON (machine-readable, scriptable). `--human` (or
+// `-h` when not conflicting with --help) renders the same data as a
+// compact human-scannable block. The legacy one-line shape lives behind
+// `--legacy` for any callers that pinned to it.
+//
+// Fields:
+//   story, story_queue_head, current_phase, profile_name
+//   time_in_phase_minutes              (from state.phase_started_at)
+//   retry_count_this_phase, verify_reject_count, consecutive_test_failures
+//   diagnostic_pending, diagnostic_completed
+//   session_stories_completed, session_story_limit
+//   halt_active                         (true when ledger tail is a halt)
+//   halt_reason                         (when halt_active)
+//   recent_events: [{ kind, seq, ts, ... }]   last 3 informative ledger entries
+//   background_full_suite: { state, story_key?, exit_code?, age_minutes? }
+//   quarantined_test_count
 function cmdStatus(opts) {
   const projectRoot = resolveProjectRoot(opts);
   const persisted = loadState(projectRoot);
-  const story = persisted.current_story || '-';
-  const step = persisted.current_bmad_step || '-';
-  process.stdout.write(`story=${story} step=${step}\n`);
+  if (opts && opts.legacy) {
+    const story = persisted.current_story || '-';
+    const step = persisted.current_bmad_step || '-';
+    process.stdout.write(`story=${story} step=${step}\n`);
+    return 0;
+  }
+  const status = buildRichStatus(projectRoot, persisted, opts);
+  if (opts && (opts.human || opts.h)) {
+    process.stdout.write(`${renderStatusHuman(status)}\n`);
+    return 0;
+  }
+  process.stdout.write(`${JSON.stringify(status, null, 2)}\n`);
   return 0;
+}
+
+function buildRichStatus(projectRoot, persisted, opts) {
+  const ledgerEntries = ledger.read({ projectRoot });
+  const tail = ledgerEntries[ledgerEntries.length - 1] || null;
+  const haltActive = !!(tail && tail.kind === 'halt');
+  const phase = persisted.current_bmad_step || null;
+  const phaseStartedAt = persisted.phase_started_at || null;
+
+  // Time-in-phase: minutes since state.phase_started_at (set on every
+  // phase advance by adapt.advanceState). Null when missing — applies
+  // pre-v2.4.0 sessions or fresh boots before any advance.
+  let timeInPhase = null;
+  if (phaseStartedAt) {
+    const t = Date.parse(phaseStartedAt);
+    if (Number.isFinite(t)) timeInPhase = Math.round(((Date.now() - t) / 60_000) * 10) / 10;
+  }
+
+  // Recent events — last 3 informative entries (skip routine state_transitions
+  // and decoration entries). The halt-explainer's RECENT_ACTION_TYPES list
+  // is the cleanest reusable filter.
+  const recent = [];
+  for (let i = ledgerEntries.length - 1; i >= 0 && recent.length < 3; i -= 1) {
+    const e = ledgerEntries[i];
+    if (!e) continue;
+    if (e.kind === 'state_transition' && !haltActive) continue;
+    if (e.kind === 'test_scope_decision') continue;
+    if (e.kind === 'review_depth_decision') continue;
+    if (e.kind === 'action_emitted' && e.action) {
+      recent.push({
+        seq: e.seq,
+        ts: e.ts,
+        kind: 'action_emitted',
+        type: e.action.type,
+        skill: e.action.skill || null,
+        op: e.action.op || null,
+        phase: e.action.phase || e.phase || null,
+      });
+    } else if (
+      e.kind === 'verify_result' || e.kind === 'halt' || e.kind === 'verify_rejected' ||
+      e.kind === 'profile_escalated'
+    ) {
+      recent.push({ seq: e.seq, ts: e.ts, kind: e.kind, phase: e.phase || null });
+    }
+  }
+  recent.reverse();
+
+  // Background-suite sidecar state. Returns null when the knob isn't set
+  // to background OR no sidecars exist yet.
+  let backgroundFullSuite = null;
+  try {
+    const sidecar = backgroundSuite.readLatestSidecar(projectRoot);
+    if (sidecar) {
+      const ageMs = sidecar.completed_at
+        ? Date.now() - Date.parse(sidecar.completed_at)
+        : Date.now() - Date.parse(sidecar.started_at);
+      backgroundFullSuite = {
+        state: sidecar.acknowledged
+          ? 'acknowledged'
+          : typeof sidecar.exit_code === 'number'
+            ? sidecar.exit_code === 0
+              ? 'green'
+              : 'failed'
+            : 'running',
+        story_key: sidecar.story_key,
+        exit_code: typeof sidecar.exit_code === 'number' ? sidecar.exit_code : null,
+        age_minutes: Number.isFinite(ageMs) ? Math.round((ageMs / 60_000) * 10) / 10 : null,
+      };
+    }
+  } catch (_e) {
+    /* sidecar read is best-effort */
+  }
+
+  // Quarantine count.
+  let quarantinedCount = 0;
+  try {
+    const q = flakyQuarantine.read(projectRoot);
+    quarantinedCount = (q.quarantined || []).length;
+  } catch (_e) {
+    quarantinedCount = 0;
+  }
+
+  // Profile (resolved fresh so the value matches the next emission).
+  let profileName = null;
+  try {
+    const { typed } = resolveProfile(projectRoot, opts && opts.profile);
+    profileName = typed.name;
+  } catch (_e) {
+    profileName = null;
+  }
+
+  return {
+    story: persisted.current_story || null,
+    story_queue_head: Array.isArray(persisted.story_queue) && persisted.story_queue.length > 0
+      ? persisted.story_queue[0]
+      : null,
+    current_phase: phase,
+    profile_name: profileName,
+    time_in_phase_minutes: timeInPhase,
+    phase_started_at: phaseStartedAt,
+    retry_count_this_phase: persisted.retry_count_this_phase || 0,
+    verify_reject_count: persisted.verify_reject_count || 0,
+    consecutive_test_failures: persisted.consecutive_test_failures || 0,
+    diagnostic_pending: persisted.diagnostic_pending === true,
+    diagnostic_completed: persisted.diagnostic_completed === true,
+    session_stories_completed: persisted.session_stories_completed || 0,
+    halt_active: haltActive,
+    halt_reason: haltActive ? (tail.reason || null) : null,
+    recent_events: recent,
+    background_full_suite: backgroundFullSuite,
+    quarantined_test_count: quarantinedCount,
+  };
+}
+
+function renderStatusHuman(s) {
+  const lines = [];
+  lines.push(`story=${s.story || '-'}  phase=${s.current_phase || '-'}  profile=${s.profile_name || '-'}`);
+  if (s.time_in_phase_minutes !== null) {
+    lines.push(`time-in-phase: ${s.time_in_phase_minutes}m  (since ${s.phase_started_at || '?'})`);
+  }
+  const counters = [];
+  if (s.retry_count_this_phase) counters.push(`retry=${s.retry_count_this_phase}`);
+  if (s.verify_reject_count) counters.push(`verify-reject=${s.verify_reject_count}`);
+  if (s.consecutive_test_failures) counters.push(`consec-test-fail=${s.consecutive_test_failures}`);
+  if (s.diagnostic_pending) counters.push('diagnostic-pending');
+  if (counters.length > 0) lines.push(`counters: ${counters.join('  ')}`);
+  if (s.story_queue_head && s.story_queue_head !== s.story) {
+    lines.push(`next: ${s.story_queue_head}`);
+  }
+  if (s.session_stories_completed > 0) {
+    lines.push(`session stories done: ${s.session_stories_completed}`);
+  }
+  if (s.halt_active) {
+    lines.push(`HALT: ${s.halt_reason || 'unknown'}`);
+  }
+  if (s.background_full_suite) {
+    const bs = s.background_full_suite;
+    lines.push(
+      `background suite: ${bs.state}` +
+        (bs.story_key ? ` (story=${bs.story_key}` : '') +
+        (typeof bs.exit_code === 'number' ? `, exit=${bs.exit_code}` : '') +
+        (bs.age_minutes !== null ? `, ${bs.age_minutes}m ago)` : bs.story_key ? ')' : ''),
+    );
+  }
+  if (s.quarantined_test_count > 0) {
+    lines.push(`quarantined tests: ${s.quarantined_test_count}`);
+  }
+  if (s.recent_events.length > 0) {
+    lines.push(`recent (oldest → newest):`);
+    for (const e of s.recent_events) {
+      const tag = e.skill || e.op || e.kind;
+      lines.push(`  #${e.seq} ${e.ts} ${e.kind} ${tag} ${e.phase ? `(${e.phase})` : ''}`);
+    }
+  }
+  return lines.join('\n');
 }
 
 // v2.3.10 — `autopilot heartbeat --message "<text>"` appends a
@@ -3628,6 +3810,9 @@ function main(argv) {
       // the latest sidecar. Used after the user has investigated the
       // failure and decided to proceed anyway.
       'ack-background-suite',
+      // v2.5.0 observability — status formatter selectors.
+      'human',
+      'legacy',
     ],
   });
   if (opts.help) {

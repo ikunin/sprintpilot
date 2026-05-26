@@ -457,11 +457,37 @@ describe('autopilot state / report / status', () => {
     expect(r.stdout).toContain('Ledger summary');
   });
 
-  it('status prints a one-line summary', () => {
+  it('status --legacy prints the pre-v2.5.0 one-line summary', () => {
+    runCli(['start']);
+    const r = runCli(['status', '--legacy']);
+    expect(r.status).toBe(0);
+    expect(r.stdout.trim()).toBe('story=- step=create_story');
+  });
+
+  it('status (default) prints structured JSON with the v2.5.0 fields', () => {
     runCli(['start']);
     const r = runCli(['status']);
     expect(r.status).toBe(0);
-    expect(r.stdout.trim()).toBe('story=- step=create_story');
+    const obj = JSON.parse(r.stdout);
+    expect(obj).toMatchObject({
+      story: null,
+      current_phase: 'create_story',
+      retry_count_this_phase: 0,
+      verify_reject_count: 0,
+      halt_active: false,
+    });
+    // Fields whose values vary but whose presence is the contract.
+    expect(obj).toHaveProperty('time_in_phase_minutes');
+    expect(obj).toHaveProperty('recent_events');
+    expect(obj).toHaveProperty('quarantined_test_count', 0);
+  });
+
+  it('status --human renders a compact text block', () => {
+    runCli(['start']);
+    const r = runCli(['status', '--human']);
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain('story=');
+    expect(r.stdout).toContain('phase=create_story');
   });
 });
 
