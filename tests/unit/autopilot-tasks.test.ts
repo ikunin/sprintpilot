@@ -22,7 +22,12 @@ const { STORY_TASK_DEFINITIONS, STORY_PHASE_ORDER, deriveTasksForStory, tasksToM
     tasksToMarkdown: (
       story: string | null,
       tasks: Task[],
-      opts?: { heading?: string },
+      opts?: {
+        heading?: string;
+        queueHead?: string | null;
+        remainingInQueue?: number;
+        storyTitle?: string | null;
+      },
     ) => string;
   };
 
@@ -123,6 +128,7 @@ describe('tasksToMarkdown', () => {
     const tasks = deriveTasksForStory('dev_red', []);
     const md = tasksToMarkdown('t-22a-test', tasks);
     expect(md).toMatch(/^# Sprintpilot/);
+    // No human title supplied → fall back to the key.
     expect(md).toContain('**Story:** `t-22a-test`');
     expect(md).toContain('- [x] Create story spec');
     expect(md).toContain('- [x] Check readiness');
@@ -144,5 +150,64 @@ describe('tasksToMarkdown', () => {
   it('handles a null story (between stories) gracefully', () => {
     const md = tasksToMarkdown(null, deriveTasksForStory(null, []));
     expect(md).toContain('**Story:** (none — between stories or idle)');
+  });
+
+  it('shows the queue head when current_story is null and the autopilot is creating its spec (v2.5.1)', () => {
+    // Regression coverage: persisted.current_story is null but
+    // story_queue[0] is set and current_bmad_step is create_story.
+    // Pre-fix this rendered "Story: (none — between stories or idle)"
+    // while the checklist below said "Create story spec ← in progress" —
+    // a self-contradicting board.
+    const tasks = deriveTasksForStory('create_story', []);
+    const md = tasksToMarkdown(null, tasks, {
+      queueHead: '2-3-sample-story',
+      remainingInQueue: 6,
+    });
+    expect(md).toContain('**Story:** `2-3-sample-story` (queued; spec not yet authored)');
+    expect(md).toContain('(queue: 6 stories)');
+    expect(md).toContain('- [ ] Create story spec ← in progress');
+    // The misleading idle line must NOT appear.
+    expect(md).not.toContain('(none — between stories or idle)');
+    // Epic is implicit in the key — board does NOT render a separate row.
+    expect(md).not.toContain('**Epic:**');
+  });
+
+  it('omits the queue count parenthetical when only one story remains', () => {
+    const md = tasksToMarkdown(null, deriveTasksForStory('create_story', []), {
+      queueHead: '2-9-final',
+      remainingInQueue: 1,
+    });
+    expect(md).toContain('**Story:** `2-9-final` (queued; spec not yet authored)');
+    expect(md).not.toContain('(queue:');
+  });
+
+  it('current_story wins over queue head when both are set', () => {
+    const md = tasksToMarkdown('2-1-active', deriveTasksForStory('dev_green', []), {
+      queueHead: '2-2-next',
+      remainingInQueue: 5,
+    });
+    expect(md).toContain('**Story:** `2-1-active`');
+    expect(md).not.toContain('queued');
+    expect(md).not.toContain('**Epic:**');
+  });
+
+  it('prefers storyTitle (human title) over the key when supplied', () => {
+    const md = tasksToMarkdown('2-3-sample-story', deriveTasksForStory('dev_red', []), {
+      storyTitle: 'Story 2.3: Sample Story Title',
+    });
+    expect(md).toContain('**Story:** Story 2.3: Sample Story Title');
+    // Key is suppressed when the title is present — epic + slug are in
+    // the title; the slug-key was just visual noise.
+    expect(md).not.toContain('2-3-sample-story');
+  });
+
+  it('uses storyTitle for a queued story too', () => {
+    const md = tasksToMarkdown(null, deriveTasksForStory('create_story', []), {
+      queueHead: '2-3-sample-story',
+      remainingInQueue: 6,
+      storyTitle: 'Story 2.3: Sample Story Title',
+    });
+    expect(md).toContain('**Story:** Story 2.3: Sample Story Title (queued; spec not yet authored) (queue: 6 stories)');
+    expect(md).not.toContain('`2-3-sample-story`');
   });
 });

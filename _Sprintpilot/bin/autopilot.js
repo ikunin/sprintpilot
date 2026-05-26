@@ -3428,11 +3428,29 @@ function deriveTasksForStory(currentPhase, recentLedgerEntries, opts = {}) {
   });
 }
 
-function tasksToMarkdown(story, tasks, { heading = 'Sprintpilot — current story' } = {}) {
+function tasksToMarkdown(story, tasks, opts = {}) {
+  const heading = opts.heading || 'Sprintpilot — current story';
+  const queueHead = opts.queueHead || null;
+  const remainingInQueue = typeof opts.remainingInQueue === 'number' ? opts.remainingInQueue : 0;
+  const storyTitle = opts.storyTitle || null;
   const lines = [];
   lines.push(`# ${heading}`);
   lines.push('');
-  lines.push(story ? `**Story:** \`${story}\`` : '**Story:** (none — between stories or idle)');
+  // v2.5.1 — prefer the human-readable story title (from the story
+  // file's H1) over the slug-key — the key encodes epic + slug so
+  // surfacing both is redundant noise on the board. When the title is
+  // unavailable (queued story whose spec file doesn't exist yet) we
+  // fall back to the key. Epic is implicit in the key/title and is
+  // not rendered as a separate row.
+  if (story) {
+    lines.push(`**Story:** ${storyTitle ? storyTitle : `\`${story}\``}`);
+  } else if (queueHead) {
+    const detail = remainingInQueue > 1 ? ` (queue: ${remainingInQueue} stories)` : '';
+    const label = storyTitle ? storyTitle : `\`${queueHead}\``;
+    lines.push(`**Story:** ${label} (queued; spec not yet authored)${detail}`);
+  } else {
+    lines.push('**Story:** (none — between stories or idle)');
+  }
   lines.push('');
   for (const t of tasks) {
     let glyph = '[ ]';
@@ -3451,6 +3469,42 @@ function tasksToMarkdown(story, tasks, { heading = 'Sprintpilot — current stor
   lines.push(`_Updated: ${new Date().toISOString()}_`);
   lines.push('');
   return lines.join('\n');
+}
+
+// v2.5.1 — extract the human-readable title from a BMad story file's
+// first H1. BMad's bmad-create-story emits files like
+// `_bmad-output/implementation-artifacts/<story-key>.md` with a
+// `# Story <id>: <Title>` H1. We pull just the H1 text (after the
+// first `# `) so the task board can name the story without the user
+// translating its slug.
+//
+// Returns null when the file is absent, unreadable, or has no H1 —
+// callers render key-only in that case.
+function readStoryTitleFromFile(projectRoot, storyKey, persisted) {
+  if (!storyKey) return null;
+  try {
+    const artDir =
+      (persisted && persisted.implementation_artifacts) ||
+      path.join(projectRoot, '_bmad-output', 'implementation-artifacts');
+    // persisted.story_file_path is stored relative to projectRoot
+    // (e.g. `_bmad-output/implementation-artifacts/15-4-foo.md`), so
+    // we join when the path isn't absolute. Same treatment for the
+    // implementation_artifacts override if a caller passed a relative
+    // string there.
+    const rawPath = (persisted && persisted.story_file_path) || path.join(artDir, `${storyKey}.md`);
+    const storyFile = path.isAbsolute(rawPath) ? rawPath : path.join(projectRoot, rawPath);
+    const text = fs.readFileSync(storyFile, 'utf8');
+    // First H1 wins. Skip frontmatter (--- … ---) if present.
+    let body = text;
+    if (body.startsWith('---')) {
+      const end = body.indexOf('\n---', 3);
+      if (end !== -1) body = body.slice(end + 4);
+    }
+    const m = body.match(/^#\s+(.+?)\s*$/m);
+    return m ? m[1] : null;
+  } catch (_e) {
+    return null;
+  }
 }
 
 function tasksFilePath(projectRoot, persisted) {
@@ -3474,7 +3528,12 @@ function writeSprintTasksFile(projectRoot, persisted) {
     const tail = recent[recent.length - 1] || null;
     const haltActive = !!(tail && tail.kind === 'halt');
     const tasks = deriveTasksForStory(currentPhase, recent, { haltActive });
-    const body = tasksToMarkdown(story, tasks);
+    const queueHead = !story && Array.isArray(persisted && persisted.story_queue) && persisted.story_queue.length > 0
+      ? persisted.story_queue[0]
+      : null;
+    const remainingInQueue = Array.isArray(persisted && persisted.story_queue) ? persisted.story_queue.length : 0;
+    const storyTitle = readStoryTitleFromFile(projectRoot, story || queueHead, persisted);
+    const body = tasksToMarkdown(story, tasks, { queueHead, remainingInQueue, storyTitle });
     const file = tasksFilePath(projectRoot, persisted);
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.writeFileSync(file, body, 'utf8');
@@ -3506,11 +3565,38 @@ function cmdTasks(opts) {
   const tail = recent[recent.length - 1] || null;
   const haltActive = !!(tail && tail.kind === 'halt');
   const tasks = deriveTasksForStory(currentPhase, recent, { haltActive });
+  // v2.5.1 — surface the queue head + epic so the board doesn't claim
+  // "idle" while it's actually about to author a story spec.
+  const queueHead = !story && Array.isArray(persisted.story_queue) && persisted.story_queue.length > 0
+    ? persisted.story_queue[0]
+    : null;
+  const remainingInQueue = Array.isArray(persisted.story_queue) ? persisted.story_queue.length : 0;
+  const epicKey = persisted.current_epic ? String(persisted.current_epic) : null;
+  const storyTitle = readStoryTitleFromFile(projectRoot, story || queueHead, persisted);
   if (opts.markdown || opts.md) {
-    process.stdout.write(tasksToMarkdown(story, tasks));
+    process.stdout.write(tasksToMarkdown(story, tasks, { queueHead, remainingInQueue, storyTitle }));
     return 0;
   }
-  process.stdout.write(`${JSON.stringify({ story, current_phase: currentPhase, halt_active: haltActive, tasks }, null, 2)}\n`);
+  // JSON output keeps `epic` for machine consumers — the human-readable
+  // markdown drops the epic row (it's already encoded in the story key
+  // / title), but scripts and dashboards may still want the bare
+  // identifier separately.
+  process.stdout.write(
+    `${JSON.stringify(
+      {
+        story,
+        story_title: storyTitle,
+        story_queue_head: queueHead,
+        story_queue_length: remainingInQueue,
+        epic: epicKey,
+        current_phase: currentPhase,
+        halt_active: haltActive,
+        tasks,
+      },
+      null,
+      2,
+    )}\n`,
+  );
   return 0;
 }
 
