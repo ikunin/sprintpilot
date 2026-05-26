@@ -3432,32 +3432,25 @@ function tasksToMarkdown(story, tasks, opts = {}) {
   const heading = opts.heading || 'Sprintpilot — current story';
   const queueHead = opts.queueHead || null;
   const remainingInQueue = typeof opts.remainingInQueue === 'number' ? opts.remainingInQueue : 0;
-  const epicKey = opts.epicKey || null;
   const storyTitle = opts.storyTitle || null;
   const lines = [];
   lines.push(`# ${heading}`);
   lines.push('');
-  // v2.5.1 — surface the queued next-story when current_story is null
-  // but the autopilot is on a story-creation phase (queue head already
-  // chosen, spec not yet authored). Pre-fix, the header said
-  // '(none — between stories or idle)' even though the checklist
-  // below was already ticking 'Create story spec ← starting now' —
-  // a self-contradicting board.
-  //
-  // Also surfaces the human-readable title (from the story file's H1
-  // when it exists) as a suffix so the board names BOTH the stable
-  // key and the story's purpose. Caller passes opts.storyTitle; null
-  // is fine and renders key-only.
-  const titleSuffix = storyTitle ? ` — ${storyTitle}` : '';
+  // v2.5.1 — prefer the human-readable story title (from the story
+  // file's H1) over the slug-key — the key encodes epic + slug so
+  // surfacing both is redundant noise on the board. When the title is
+  // unavailable (queued story whose spec file doesn't exist yet) we
+  // fall back to the key. Epic is implicit in the key/title and is
+  // not rendered as a separate row.
   if (story) {
-    lines.push(`**Story:** \`${story}\`${titleSuffix}`);
+    lines.push(`**Story:** ${storyTitle ? storyTitle : `\`${story}\``}`);
   } else if (queueHead) {
     const detail = remainingInQueue > 1 ? ` (queue: ${remainingInQueue} stories)` : '';
-    lines.push(`**Story:** \`${queueHead}\`${titleSuffix} (queued; spec not yet authored)${detail}`);
+    const label = storyTitle ? storyTitle : `\`${queueHead}\``;
+    lines.push(`**Story:** ${label} (queued; spec not yet authored)${detail}`);
   } else {
     lines.push('**Story:** (none — between stories or idle)');
   }
-  if (epicKey) lines.push(`**Epic:** \`${epicKey}\``);
   lines.push('');
   for (const t of tasks) {
     let glyph = '[ ]';
@@ -3539,9 +3532,8 @@ function writeSprintTasksFile(projectRoot, persisted) {
       ? persisted.story_queue[0]
       : null;
     const remainingInQueue = Array.isArray(persisted && persisted.story_queue) ? persisted.story_queue.length : 0;
-    const epicKey = persisted && persisted.current_epic ? String(persisted.current_epic) : null;
     const storyTitle = readStoryTitleFromFile(projectRoot, story || queueHead, persisted);
-    const body = tasksToMarkdown(story, tasks, { queueHead, remainingInQueue, epicKey, storyTitle });
+    const body = tasksToMarkdown(story, tasks, { queueHead, remainingInQueue, storyTitle });
     const file = tasksFilePath(projectRoot, persisted);
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.writeFileSync(file, body, 'utf8');
@@ -3582,9 +3574,13 @@ function cmdTasks(opts) {
   const epicKey = persisted.current_epic ? String(persisted.current_epic) : null;
   const storyTitle = readStoryTitleFromFile(projectRoot, story || queueHead, persisted);
   if (opts.markdown || opts.md) {
-    process.stdout.write(tasksToMarkdown(story, tasks, { queueHead, remainingInQueue, epicKey, storyTitle }));
+    process.stdout.write(tasksToMarkdown(story, tasks, { queueHead, remainingInQueue, storyTitle }));
     return 0;
   }
+  // JSON output keeps `epic` for machine consumers — the human-readable
+  // markdown drops the epic row (it's already encoded in the story key
+  // / title), but scripts and dashboards may still want the bare
+  // identifier separately.
   process.stdout.write(
     `${JSON.stringify(
       {
