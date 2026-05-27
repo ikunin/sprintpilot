@@ -46,6 +46,7 @@ Edit `_Sprintpilot/modules/autopilot/config.yaml`:
 | `testing.fallback` | `full` | `full` / `directory` / `halt` | What happens when affected-detection fails (no adapter match, no diff). `full` is the safe default. |
 | `testing.full_suite_on_story_land` | `ci` | `ci` / `background` / `skip` | Where the regression-net full suite runs. `background` is **deferred to v2.3.19** (currently warns when set). |
 | `testing.commands.affected` / `testing.commands.full` | `null` | string | Verbatim overrides for the adapter-built commands. Useful for monorepos (`nx affected`, `turbo run test`, `lerna run test --since`). |
+| `autopilot.resume_mid_skill` | `true` | bool | **v2.6.0.** When true, `autopilot start` detects skill invocations interrupted by a crash / OS kill and threads a structured `resume_hint` (AC checkboxes, files changed since `phase_started_at`, last `verify_result`, `patch_commits`, last `skill_checkpoint`) into the next `invoke_skill` action so the skill skips already-done work instead of restarting from zero. Skills emit progress via `signal.output.checkpoint` (`{ summary, ac_done, tests_passing, tests_failing, files_touched, next_step }`). Manual override: `autopilot resume [--no-emit] [--force]`. Set to `false` for byte-for-byte v2.5.x semantics. |
 
 `retrospective_mode` options:
 - **`auto`** *(default)* — autopilot writes a deterministic retrospective artifact from `sprint-status.yaml` + `decision-log.yaml`, then continues. Single pass, no external skill call, safe under every CLI.
@@ -110,14 +111,36 @@ Independent of `session_story_limit`, the autopilot forces an extra session at e
 
 This behavior is not configurable: it's a mitigation for late-session instruction decay that drops cleanup actions in long single-session runs. The extra session is short (typically ~60-100 turns, under $2). Enforced by the `sprint_finalize_pending` terminal state in `_Sprintpilot/lib/orchestrator/state-machine.js`.
 
+### Resume mid-skill (v2.6.0)
+
+When `autopilot.resume_mid_skill: true` (the default), `autopilot start` walks the ledger backwards on every boot looking for an `action_emitted` (`type: invoke_skill`) whose phase never reached a terminal entry (`signal_recorded`, `halt`, or a prior `phase_resumed`). When one is found — meaning the previous session was killed mid-skill — the orchestrator builds a structured `resume_hint` from observable state and threads it into the next `invoke_skill` action's `template_slots.resume_hint`:
+
+- `phase`, `story_key`, `reason` (`skill_interrupted` or `manual_resume`), `interrupted_at`, `phase_started_at`, `elapsed_minutes`.
+- `checkpoint` — the most recent `skill_checkpoint` ledger entry's payload (if any). Shape: `{ summary, ac_done, tests_passing, tests_failing, files_touched, next_step }`.
+- `changed_files` — working-tree changes (staged + unstaged + untracked) plus commits made on the branch since `phase_started_at`, capped at 50.
+- `ac_completed` / `ac_total` — parsed from the story markdown's `## Acceptance Criteria` checklist.
+- `last_test_result` — the most recent `verify_result` ledger entry for the phase, summarised as `{ ok, summary }`.
+- `patches_landed` — `state.patch_commits` (PATCH_RETEST / PATCH_APPLY only).
+- `summary` — one-line human-readable description for logs / `autopilot watch`.
+
+Skills that know about `resume_hint` should: (1) treat `ac_completed` as a fast-path filter — checked-off ACs don't need re-implementing; (2) trust `checkpoint.tests_passing` — already-green tests don't need re-running unless `changed_files` invalidates them; (3) re-run anything in `checkpoint.tests_failing` first; (4) inspect `changed_files` for in-progress edits.
+
+Long-running skills emit progress checkpoints via `signal.output.checkpoint` (same shape as `resume_hint.checkpoint`). Checkpoints are NOT terminal — the skill keeps running and emits its actual signal when done. The next interruption surfaces the most recent checkpoint to the resuming skill.
+
+Each detected interruption appends a `phase_resumed` ledger entry carrying the full hint payload. `autopilot watch` colorises it like any other informational event.
+
+**Manual override.** `autopilot resume` forces a hint to be built for the current phase even when auto-detection says nothing to resume (useful when a previous session emitted `signal_recorded: success` but the work wasn't in fact complete). `--no-emit` prints the would-be hint without re-emitting the action (preview without ledger pollution). `--force` proceeds even when `resume_mid_skill: false` is set in the profile.
+
 ### Resume divergence
 
-At session start, the orchestrator fingerprints `_bmad-output/`, sprint-status.yaml, and per-story branch HEADs and compares against the fingerprint stamped at the last halt. When they differ, two escape paths proceed without manual state surgery:
+At session start, the orchestrator also fingerprints `_bmad-output/`, sprint-status.yaml, and per-story branch HEADs and compares against the fingerprint stamped at the last halt. When they differ, two escape paths proceed without manual state surgery:
 
 - **External completion (auto)** — when the persisted `current_story` is `done` in sprint-status (story merged outside the autopilot: manual PR merge, hotfix, UI action), the stale story identity is cleared and the orchestrator picks the next pending story. Logged as `divergence_accepted, reason: external_completion`.
 - **`--accept-divergence` flag** — catch-all for divergence patterns the auto-acknowledge doesn't cover (multiple stories completed externally, branch heads moved, etc.). Logged as `reason: explicit_accept`.
 
 Divergences outside both paths emit `resume_divergence` with the diff so the user/LLM can resolve.
+
+Resume divergence (sprint-level) is independent from resume mid-skill (phase-level) — both run on every `autopilot start` and are complementary: divergence catches sprint-status drift; resume mid-skill catches in-flight phase interruptions.
 
 ### Terminal statuses for epic-done routing
 

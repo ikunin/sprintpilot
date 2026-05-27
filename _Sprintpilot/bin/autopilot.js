@@ -34,6 +34,7 @@ const profileRules = require('../lib/orchestrator/profile-rules');
 const verifyMod = require('../lib/orchestrator/verify');
 const stateStore = require('../lib/orchestrator/state-store');
 const ledger = require('../lib/orchestrator/action-ledger');
+const resumeContext = require('../lib/orchestrator/resume-context');
 const backgroundSuite = require('../lib/orchestrator/background-suite');
 const changeSizeClassifier = require('../lib/orchestrator/change-size-classifier');
 const flakyQuarantine = require('../lib/orchestrator/flaky-quarantine');
@@ -55,7 +56,7 @@ const {
 
 const { STATES } = stateMachine;
 
-const SUBCOMMANDS = ['start', 'next', 'record', 'state', 'report', 'validate-config', 'status', 'progress', 'heartbeat', 'tasks', 'quarantine', 'watch'];
+const SUBCOMMANDS = ['start', 'next', 'record', 'state', 'report', 'validate-config', 'status', 'progress', 'heartbeat', 'tasks', 'quarantine', 'watch', 'resume'];
 
 // v2.3.12 — canonical per-story task list (the BMad 7-step cycle,
 // collapsed into operator-visible labels). Used by `autopilot tasks` to
@@ -119,6 +120,14 @@ function help() {
       '                               recent events, re-rendered on each',
       '                               new ledger entry. `--once` for one',
       '                               render; `--no-tui` for plain output.',
+      '  autopilot resume [--no-emit] [--force]',
+      '                               Force a resume-mid-skill hint to be',
+      '                               built for the current phase, even if',
+      '                               auto-detection says nothing to resume.',
+      '                               `--no-emit` prints the hint without',
+      '                               re-emitting the action; `--force`',
+      '                               proceeds even when resume_mid_skill',
+      '                               is disabled in the profile.',
       '',
       'Global flags:',
       '  --project-root <path>        Default: CWD',
@@ -1168,6 +1177,187 @@ function decorateHaltContext(action, state, projectRoot) {
     log.warn(`halt-explainer failed (${e.message}); emitting bare prompt`);
     return action;
   }
+}
+
+// v2.6.0 — resume mid-skill. When cmdStart / cmdNext are about to emit
+// an `invoke_skill` action and the ledger shows that the same phase
+// already had an action_emitted with no subsequent terminal entry
+// (signal_recorded / halt / phase_resumed), build a `resume_hint`
+// from observable world state and thread it into the action's
+// template_slots. Also appends a `phase_resumed` ledger entry so the
+// hint payload is visible to `autopilot watch` and audit.
+//
+// Pure (no I/O) detection lives in resume-context.js; this function is
+// the impure shim that gathers the world bundle (git diff list, story
+// file markdown, last verify_result) and writes the ledger entry.
+//
+// Skipped when:
+//   - profile.resume_mid_skill is false
+//   - action.type isn't invoke_skill (other action types restart
+//     idempotently; see RESUMABLE_PHASES filter)
+//   - resume-context.detect says nothing to resume
+//
+// Pass `{ force: true }` to bypass the detect short-circuit (used by
+// cmdResume — the user explicitly asked for a manual resume).
+// Pass `{ dryRun: true }` to build and attach the hint without
+// appending a `phase_resumed` ledger entry (used by
+// `autopilot resume --no-emit` for preview).
+function decorateResumeHint(action, state, profile, projectRoot, options) {
+  if (!action || action.type !== 'invoke_skill') return action;
+  if (!profile || profile.resume_mid_skill === false) return action;
+
+  const force = !!(options && options.force);
+  const dryRun = !!(options && options.dryRun);
+  let entries;
+  try {
+    entries = ledger.read({ projectRoot });
+  } catch (_e) {
+    return action;
+  }
+  const detection = resumeContext.detect(
+    { ...state, current_bmad_step: state.phase || state.current_bmad_step },
+    entries,
+    { force },
+  );
+  if (!detection.resuming) return action;
+
+  // Assemble the world bundle. Each lookup is wrapped — a slow / failed
+  // git command must not block the action emission.
+  const phase = detection.phase;
+  const phaseStartedAt = state.phase_started_at || null;
+  const nowIso = new Date().toISOString();
+  const storyFilePath = state.story_file_path || null;
+
+  let changedFiles = [];
+  try {
+    changedFiles = collectChangedFilesSincePhaseStart(projectRoot, phaseStartedAt);
+  } catch (_e) {
+    changedFiles = [];
+  }
+
+  let ac = { completed: [], total: 0 };
+  if (storyFilePath) {
+    try {
+      const text = fs.readFileSync(
+        path.isAbsolute(storyFilePath) ? storyFilePath : path.join(projectRoot, storyFilePath),
+        'utf8',
+      );
+      ac = resumeContext.parseAcceptanceCriteria(text);
+    } catch (_e) {
+      ac = { completed: [], total: 0 };
+    }
+  }
+
+  const lastTestResult = resumeContext.lastTestResultFromLedger(entries, phase);
+  const patchesLanded = Array.isArray(state.patch_commits) ? state.patch_commits.slice() : [];
+
+  const hint = resumeContext.build(detection, {
+    now: nowIso,
+    phase_started_at: phaseStartedAt,
+    changed_files: changedFiles,
+    ac_completed: ac.completed,
+    ac_total: ac.total,
+    last_test_result: lastTestResult,
+    patches_landed: patchesLanded,
+  });
+  if (!hint) return action;
+
+  // Record the hint for audit + watch BEFORE mutating the action so a
+  // crash between here and stdout still leaves a breadcrumb. Skipped
+  // in dryRun mode (preview path used by `autopilot resume --no-emit`).
+  if (!dryRun) {
+    try {
+      ledger.append(
+        {
+          kind: 'phase_resumed',
+          phase,
+          reason: detection.reason,
+          hint,
+        },
+        { projectRoot },
+      );
+    } catch (e) {
+      log.warn(`failed to append phase_resumed ledger entry: ${e.message}`);
+    }
+  }
+
+  const slots = action.template_slots || {};
+  return {
+    ...action,
+    template_slots: {
+      ...slots,
+      resume_hint: hint,
+    },
+  };
+}
+
+// Git names-only diff between the story branch's HEAD and what it was
+// when the phase started. We approximate "phase start" by walking back
+// commits whose committer time is on/after `phaseStartedAt` and taking
+// the parent of the oldest one. Failing that, falls back to the diff
+// against the base branch — better to over-report than miss touched
+// files entirely.
+function collectChangedFilesSincePhaseStart(projectRoot, phaseStartedAt) {
+  if (!projectRoot) return [];
+  const { execFileSync } = require('node:child_process');
+  const opts = {
+    cwd: projectRoot,
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'ignore'],
+    timeout: 3_000,
+  };
+  const runGit = (args) => {
+    try {
+      return execFileSync('git', ['-C', projectRoot, ...args], opts);
+    } catch (_e) {
+      return null;
+    }
+  };
+  const parseList = (raw) =>
+    typeof raw === 'string'
+      ? raw
+          .split(/\r?\n/)
+          .map((s) => s.trim())
+          .filter((s) => s.length > 0)
+      : [];
+
+  // 1. Working-tree changes (staged + unstaged + untracked). These are
+  //    the most accurate signal of "work the skill was about to commit
+  //    when it died." `--name-only` for tracked changes.
+  const workingTree = new Set();
+  const tracked = runGit(['diff', '--name-only', 'HEAD']);
+  for (const f of parseList(tracked)) workingTree.add(f);
+  const untracked = runGit(['ls-files', '--others', '--exclude-standard']);
+  for (const f of parseList(untracked)) workingTree.add(f);
+
+  // 2. Commits made on this branch since the phase started. Use
+  //    --since when we have a timestamp; otherwise compare against
+  //    @{u} (the upstream) as a coarse fallback.
+  let commitFiles = new Set();
+  if (typeof phaseStartedAt === 'string' && phaseStartedAt) {
+    const sinceLog = runGit([
+      'log',
+      `--since=${phaseStartedAt}`,
+      '--name-only',
+      '--pretty=format:',
+      'HEAD',
+    ]);
+    for (const f of parseList(sinceLog)) commitFiles.add(f);
+  }
+  if (commitFiles.size === 0) {
+    const vsUpstream = runGit(['diff', '--name-only', '@{u}...HEAD']);
+    if (vsUpstream !== null) {
+      for (const f of parseList(vsUpstream)) commitFiles.add(f);
+    }
+  }
+
+  const merged = new Set();
+  for (const f of workingTree) merged.add(f);
+  for (const f of commitFiles) merged.add(f);
+  // Bound the result so a sweeping mass-rename doesn't flood the
+  // template_slots with thousands of files. The hint builder also
+  // caps at 50 — this is the early cut.
+  return Array.from(merged).slice(0, 200);
 }
 
 function decorateGitOp(action, state, profile, projectRoot) {
@@ -2747,7 +2937,12 @@ function cmdStart(opts) {
     decorateReviewDepth(
       decorateTestScope(
         decorateRunScript(
-          decorateGitOp(stateMachine.nextAction(runtime, profile), runtime, profile, projectRoot),
+          decorateResumeHint(
+            decorateGitOp(stateMachine.nextAction(runtime, profile), runtime, profile, projectRoot),
+            runtime,
+            profile,
+            projectRoot,
+          ),
           runtime,
           profile,
           projectRoot,
@@ -2865,6 +3060,32 @@ function cmdRecord(opts) {
     { kind: 'signal_recorded', phase: runtime.phase, status: signal.status },
     { projectRoot },
   );
+
+  // v2.6.0 — checkpoint persistence. Skills emit progress checkpoints
+  // via `signal.output.checkpoint` so a crash between the checkpoint
+  // and the terminal signal lets the next boot replay it back as
+  // `resume_hint.checkpoint`. normaliseCheckpoint enforces the
+  // documented schema (strings only, capped lengths, no smuggled
+  // fields). Recording is best-effort — a failed append never blocks
+  // the signal record itself.
+  if (profile && profile.resume_mid_skill !== false && signal && signal.output) {
+    const cp = resumeContext.normaliseCheckpoint(signal.output.checkpoint);
+    if (cp) {
+      try {
+        ledger.append(
+          {
+            kind: 'skill_checkpoint',
+            phase: runtime.phase,
+            story_key: runtime.story_key || null,
+            checkpoint: cp,
+          },
+          { projectRoot },
+        );
+      } catch (e) {
+        log.warn(`failed to append skill_checkpoint ledger entry: ${e.message}`);
+      }
+    }
+  }
 
   // Verify only on `success` and `verify_override`. Under `git.enabled:
   // false`, git-op phases skip verify entirely — there's no commit_sha/
@@ -3170,6 +3391,96 @@ function cmdState(opts) {
   const projectRoot = resolveProjectRoot(opts);
   const persisted = loadState(projectRoot);
   process.stdout.write(`${JSON.stringify(persisted, null, 2)}\n`);
+  return 0;
+}
+
+// v2.6.0 — `autopilot resume` is the manual escape hatch for the
+// resume-mid-skill feature. Without it, resume detection fires only
+// at `autopilot start` boundaries (the right default — every healthy
+// flow goes through start). The cases that need a manual override:
+//
+//   - The previous session emitted `signal_recorded: success` but the
+//     surrounding work was not in fact complete (skill claimed
+//     success too eagerly; the user notices and wants the hint built
+//     anyway).
+//   - The user is mid-session and wants to inspect what hint the
+//     orchestrator would build, without restarting the session.
+//
+// `autopilot resume` re-emits the current phase's invoke_skill action
+// with `template_slots.resume_hint` forced — bypassing the
+// detect-says-no short-circuit. `--no-emit` only prints the would-be
+// hint without re-emitting (useful for the LLM to inspect).
+function cmdResume(opts) {
+  const projectRoot = resolveProjectRoot(opts);
+  const { typed: profile } = resolveProfile(projectRoot, opts.profile);
+  if (profile.resume_mid_skill === false) {
+    const out = {
+      kind: 'resume_disabled',
+      reason:
+        'autopilot.resume_mid_skill is false in the active profile. Enable it (true) and re-run, or pass --force to override per-invocation.',
+    };
+    process.stdout.write(`${JSON.stringify(out, null, 2)}\n`);
+    return opts.force ? 0 : 2;
+  }
+  const persisted = loadState(projectRoot);
+  const runtime = composeRuntimeState(persisted, profile, projectRoot);
+
+  // Build the planned action via the normal pipeline so the hint
+  // attaches via decorateResumeHint exactly like in cmdStart. Pass
+  // `force: true` so detection short-circuits to "yes, resume."
+  // Under --no-emit we also pass `dryRun: true` so the preview path
+  // doesn't pollute the ledger with a `phase_resumed` entry the user
+  // didn't actually act on.
+  const baseAction = stateMachine.nextAction(runtime, profile);
+  const decorated = decorateResumeHint(
+    decorateGitOp(baseAction, runtime, profile, projectRoot),
+    runtime,
+    profile,
+    projectRoot,
+    { force: true, dryRun: !!opts['no-emit'] },
+  );
+  if (decorated.type !== 'invoke_skill') {
+    const out = {
+      kind: 'resume_not_applicable',
+      phase: runtime.phase,
+      reason:
+        `The current phase (${runtime.phase}) is not an invoke_skill phase. ` +
+        'Resume hints are only meaningful for skill-invoking phases ' +
+        '(DEV_RED, DEV_GREEN, CODE_REVIEW, PATCH_APPLY, PATCH_RETEST, NANO_QUICK_DEV, CREATE_STORY, CHECK_READINESS, RETROSPECTIVE).',
+    };
+    process.stdout.write(`${JSON.stringify(out, null, 2)}\n`);
+    return 2;
+  }
+
+  const hint =
+    decorated.template_slots && decorated.template_slots.resume_hint
+      ? decorated.template_slots.resume_hint
+      : null;
+
+  if (opts['no-emit']) {
+    process.stdout.write(
+      `${JSON.stringify({ kind: 'resume_preview', phase: runtime.phase, hint }, null, 2)}\n`,
+    );
+    return 0;
+  }
+
+  const finalAction = decorateHaltContext(
+    decorateReviewDepth(
+      decorateTestScope(decorateRunScript(decorated, runtime, profile, projectRoot), runtime, profile, projectRoot),
+      runtime,
+      profile,
+      projectRoot,
+    ),
+    runtime,
+    projectRoot,
+  );
+  ledger.append(
+    { kind: 'action_emitted', phase: runtime.phase, action: finalAction },
+    { projectRoot },
+  );
+  process.stdout.write(
+    `${JSON.stringify({ action: finalAction, phase: runtime.phase, hint }, null, 2)}\n`,
+  );
   return 0;
 }
 
@@ -4143,6 +4454,11 @@ function main(argv) {
       // watch flag: --no-tui drops ANSI repainting. (--once is already
       // declared above for cmdNext.)
       'no-tui',
+      // v2.6.0 — `autopilot resume --no-emit` prints the would-be hint
+      // without re-emitting the action. `--force` is already declared
+      // above and is reused by cmdResume to bypass the profile-disabled
+      // short-circuit.
+      'no-emit',
     ],
   });
   if (opts.help) {
@@ -4186,6 +4502,8 @@ function main(argv) {
         return cmdQuarantine(opts, positional.slice(1));
       case 'watch':
         return cmdWatch(opts);
+      case 'resume':
+        return cmdResume(opts);
       default:
         return 2;
     }
@@ -4231,4 +4549,7 @@ module.exports = {
   tasksToMarkdown,
   // v2.3.13 — boot-time sprint-status reconciliation helper
   reconcileWithSprintStatus,
+  // v2.6.0 — resume mid-skill hint decoration + git-diff probe
+  decorateResumeHint,
+  collectChangedFilesSincePhaseStart,
 };

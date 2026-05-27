@@ -326,6 +326,23 @@ function flatToProfile(resolved, profileName) {
       PHASE_TIMEOUT_DEFAULTS_BY_PROFILE[name],
     ),
 
+    // autopilot.resume_mid_skill — v2.6.0. When true, cmdStart inspects
+    // the ledger on boot and, if a skill invocation was emitted but
+    // never reached a terminal signal (success / failure-prompt /
+    // halt), builds a structured `resume_hint` from observable state
+    // (git diff on the story branch since phase_started_at, story file
+    // AC checkboxes, last test result, patch_commits, last
+    // skill_checkpoint) and threads it into the next invoke_skill
+    // action's template_slots. Skills that don't know about resume_hint
+    // ignore it; skills that do can use it to skip already-done work.
+    //
+    // Default: true on every profile. Legacy v1.0.5 sessions were
+    // crash-restart-from-scratch by design; v2.6.0 brings them in line
+    // with the rest of the trust bundle (v2.4.0 budgets, v2.4.0 halt
+    // context, v2.5.0 observability). Set to false to preserve the
+    // pre-v2.6.0 behaviour for a session.
+    resume_mid_skill: coerceBool(get(resolved, 'autopilot.resume_mid_skill'), true),
+
     // testing.* — tiered test scope (v2.3.18+).
     //
     // The autopilot computes a recommended test command per DEV_RED /

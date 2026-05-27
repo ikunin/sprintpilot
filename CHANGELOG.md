@@ -1,5 +1,31 @@
 # Changelog
 
+## [2.6.0] - 2026-05-27
+
+### Added — Resume mid-skill
+
+Before v2.6.0, a crash during `DEV_GREEN` at 80% restarted that phase from 0%. The orchestrator persisted the phase identity but had no view into per-AC progress, modified files, last test outcome, or skill-emitted checkpoints — so on the next boot it could only re-emit "run `bmad-dev-story` for story S1.2" with the same template slots and let the skill start over. The cost: every interrupted session paid the full re-implementation tax on AC the previous session had already finished.
+
+v2.6.0 closes that gap by detecting interrupted phases at boot, building a structured `resume_hint` from observable state, and threading it into the next `invoke_skill` action so the skill can skip already-done work.
+
+- **Detection runs at every `autopilot start`.** The orchestrator walks the ledger backwards looking for the most recent `action_emitted` (`type: invoke_skill`) for the current phase. If no terminal entry (`signal_recorded`, `halt`, or a prior `phase_resumed`) appears after it, the phase was interrupted and detection returns `{ resuming: true, phase, story_key, reason, evidence }`. The detection module (`_Sprintpilot/lib/orchestrator/resume-context.js`) is pure — no fs/git I/O; the CLI edge passes in the world bundle. Detection is scoped to invoke_skill phases (CREATE_STORY, CHECK_READINESS, DEV_RED, DEV_GREEN, CODE_REVIEW, PATCH_APPLY, PATCH_RETEST, RETROSPECTIVE, NANO_QUICK_DEV); git_op / routing phases restart idempotently and don't need hints.
+- **Rich hint for DEV_*, PATCH_*, NANO_QUICK_DEV.** The hint payload carries: `phase`, `story_key`, `reason` (`skill_interrupted` or `manual_resume`), `interrupted_at`, `phase_started_at`, `elapsed_minutes`, `checkpoint` (last `skill_checkpoint` payload, if any), `changed_files` (working tree + commits since `phase_started_at`, capped at 50), `ac_completed` + `ac_total` (parsed from the story markdown's `## Acceptance Criteria` checklist), `last_test_result` (most recent `verify_result` ledger entry summarised as `{ ok, summary }`), `patches_landed` (`state.patch_commits` for PATCH_RETEST / PATCH_APPLY only), and a human-readable `summary`. Stub-hint phases (CODE_REVIEW, RETROSPECTIVE, CREATE_STORY, CHECK_READINESS) get only the phase identity + elapsed time + checkpoint — they're fast enough that the rich bundle is overkill.
+- **Skill checkpoint contract.** Long-running skills can emit progress via `signal.output.checkpoint`, shape `{ summary, ac_done, tests_passing, tests_failing, files_touched, next_step }`. `cmdRecord` normalises the payload (strings only, lengths capped, undocumented fields stripped) and appends a `skill_checkpoint` ledger entry. The next interruption's resume hint surfaces the most recent checkpoint as `resume_hint.checkpoint`, so the resuming skill sees exactly which ACs the previous run finished and which tests it was actively fighting. Checkpoints are NOT terminal — the skill keeps running and emits its actual signal when done.
+- **Ledger trail.** Two new entry kinds — `phase_resumed` (carries the full hint payload for `autopilot watch` + audit) and `skill_checkpoint` (the normalised payload from `signal.output.checkpoint`).
+- **Skill obligations.** Skills that know about `resume_hint` should: (1) treat `ac_completed` as a fast-path filter — checked-off ACs don't need re-implementing; (2) trust `checkpoint.tests_passing` — already-green tests don't need re-running unless `changed_files` invalidates them; (3) re-run anything in `checkpoint.tests_failing` first — those are where the previous session was stuck; (4) inspect `changed_files` for in-progress edits and don't redo them blindly. Skills that don't know about the slot ignore it — it's strict-superset additive.
+- **Manual override via `autopilot resume`.** Bypasses detection and forces the hint to be built for the current phase. Useful when a previous session emitted `signal_recorded: success` but the work wasn't in fact complete (rare, but worth the escape hatch). `--no-emit` prints the would-be hint without re-emitting the action (preview without ledger pollution); `--force` proceeds even when `resume_mid_skill: false` is set in the profile.
+- **Profile knob: `autopilot.resume_mid_skill`.** Defaults to `true` on every profile. Set to `false` for byte-for-byte v2.5.x behaviour (detection + checkpoint persistence both no-op). When `false`, `autopilot resume --force` still works as a per-invocation override.
+
+### CLI
+
+- `autopilot resume [--no-emit] [--force]` — new subcommand.
+
+### Migration notes
+
+- The new ledger entry kinds (`phase_resumed`, `skill_checkpoint`) are additive; existing ledger consumers ignore them. `autopilot watch` colorises them like other informational entries.
+- The `resume_hint` template slot is new but defaults to `null` on every invoke_skill action; skills that don't know about it see no behaviour change.
+- `signal.output.checkpoint` is opt-in for skills; existing skills that don't emit it see no change.
+
 ## [2.5.1] - 2026-05-27
 
 ### Fixed — Autopilot bugs surfaced by live monitoring

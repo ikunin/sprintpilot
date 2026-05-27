@@ -327,7 +327,88 @@ local background run, deferred to v2.3.19).
 | `full_suite_on_story_land` | `ci` (default) / `background` / `skip` | Where the regression-net full suite runs. `ci` trusts gh pr checks. `background` is deferred to v2.3.19. `skip` is speed-over-safety. |
 | `commands.affected` / `commands.full` | string \| null | Verbatim overrides for the adapter-built commands. Useful for monorepos (`nx run-many`, `turbo run test`). |
 
-## Resume
+## Resume mid-skill (v2.6.0)
+
+When `autopilot.resume_mid_skill: true` (the default on every profile
+except where the user explicitly disables it), `autopilot start`
+inspects the ledger on boot and looks for any `action_emitted`
+(`type: invoke_skill`) that never reached a terminal entry
+(`signal_recorded`, `halt`, or a prior `phase_resumed`). If it finds
+one, the phase was interrupted — by a crash, OS kill, terminal close,
+or any other non-graceful exit — and the orchestrator builds a
+structured `resume_hint` from observable state:
+
+| Slot field | Source | Meaning |
+|---|---|---|
+| `phase` | persisted state | The interrupted phase (DEV_RED, DEV_GREEN, PATCH_APPLY, PATCH_RETEST, CODE_REVIEW, NANO_QUICK_DEV, …) |
+| `story_key` | persisted state | Story the phase was working on |
+| `reason` | detection | `skill_interrupted` (auto) or `manual_resume` (`autopilot resume --force`) |
+| `interrupted_at` | ledger | ISO timestamp of the last `action_emitted` for the phase |
+| `phase_started_at` | persisted state | When the phase first entered |
+| `elapsed_minutes` | computed | Wall-clock minutes from phase entry → now |
+| `checkpoint` | last `skill_checkpoint` ledger entry | `{ summary, ac_done, tests_passing, tests_failing, files_touched, next_step }` from the skill's most recent self-report |
+| `changed_files` | `git diff` on the story branch since `phase_started_at` | Files actually modified during this phase (rich-hint phases only) |
+| `ac_completed` / `ac_total` | parsed from the story markdown `## Acceptance Criteria` checklist | ACs whose checkbox is already `[x]` |
+| `last_test_result` | most recent `verify_result` ledger entry for the phase | `{ ok, summary }` describing the last test outcome |
+| `patches_landed` | `state.patch_commits` | Patch findings already committed (PATCH_APPLY / PATCH_RETEST only) |
+| `summary` | computed | One-line human-readable description |
+
+The orchestrator threads this object into the next `invoke_skill`
+action's `template_slots.resume_hint`. The matching `phase_resumed`
+ledger entry records the hint payload so `autopilot watch` and audit
+can see what evidence the skill received.
+
+**Skill obligation.** Skills that know about `resume_hint` (BMad
+dev-story, code-review, quick-dev) should:
+
+1. Trust `ac_completed` as a fast-path filter: ACs already checked
+   off don't need re-implementing.
+2. Trust `checkpoint.tests_passing` for the same reason — tests
+   already green don't need re-running unless the touched files
+   intersect what the checkpoint claims passed.
+3. Re-run anything in `checkpoint.tests_failing` — those are the
+   tests that were red at the last checkpoint and need to be the
+   focus.
+4. Inspect `changed_files` to understand what work was already done
+   on disk; don't redo file edits unless they're clearly incomplete.
+
+Skills that don't know about `resume_hint` ignore the slot. The hint
+is a strict superset of the legacy contract.
+
+### Emitting checkpoints from a skill
+
+Long-running skills should emit checkpoints proactively via the
+existing signal contract — `signal.output.checkpoint`. The shape:
+
+```json
+{
+  "checkpoint": {
+    "summary": "AC1-3 done, AC4 in progress (writing fixture)",
+    "ac_done": ["AC1: …", "AC2: …", "AC3: …"],
+    "tests_passing": ["tests/foo.test.ts > suite > case A"],
+    "tests_failing": ["tests/foo.test.ts > suite > case D"],
+    "files_touched": ["src/foo.ts", "tests/foo.test.ts"],
+    "next_step": "implement AC4 fixture, then run case D"
+  }
+}
+```
+
+Checkpoints are stored as `skill_checkpoint` ledger entries. They are
+NOT terminal — the skill keeps running and emits its actual signal
+(success / failure / blocked) when done. A crash between a checkpoint
+and the terminal signal lets the next boot replay the checkpoint
+back to the skill as `resume_hint.checkpoint`.
+
+### Manual resume
+
+`autopilot resume` (also accepts `--force`) bypasses detection and
+forces the orchestrator to build a `resume_hint` from the current
+phase regardless of whether a terminal entry was already recorded.
+Useful when the previous session emitted a `signal_recorded: success`
+but the surrounding work was not in fact complete (rare, but worth
+the escape hatch).
+
+## Resume (sprint-level — divergence detection)
 
 On the next `autopilot start`, the orchestrator fingerprints
 `_bmad-output/`, sprint-status.yaml, and per-story branch HEADs against

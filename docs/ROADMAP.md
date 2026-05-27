@@ -5,13 +5,40 @@ one-feature-per-release. Each entry has a rough effort estimate, the
 symptom it kills, and any dependencies on prior bundles.
 
 This doc is a living artifact — re-shuffled as priorities shift or
-real usage reveals new pain points. Last updated: v2.5.0
-(observability bundle shipped; original "memory bundle" cancelled
-as redundant with BMad).
+real usage reveals new pain points. Last updated: v2.6.0
+(resume mid-skill shipped — interrupted phases now resume with a
+structured hint built from observable state, ending the
+restart-from-zero tax).
 
 ## Currently shipped
 
-- **v2.5.0** *(latest)* — observability bundle (renumbered from
+- **v2.6.0** *(latest)* — resume mid-skill. On every `autopilot start`,
+  the orchestrator inspects the ledger for an `action_emitted`
+  (`type: invoke_skill`) that never reached a terminal entry
+  (`signal_recorded`, `halt`, or a prior `phase_resumed`). When it
+  finds one, the previous session was interrupted mid-skill — by a
+  crash, OS kill, terminal close, etc. — and the orchestrator builds a
+  structured `resume_hint` from observable state: AC checkboxes
+  parsed from the story markdown, files modified since
+  `phase_started_at` (working tree + commits on the branch), last
+  `verify_result` outcome, `patch_commits` for PATCH_RETEST, and the
+  most recent `skill_checkpoint` payload. The hint is threaded into
+  the next `invoke_skill` action's `template_slots.resume_hint`;
+  skills that know about it skip already-done work (don't re-implement
+  checked-off ACs, don't re-run already-green tests, focus on
+  `tests_failing` from the last checkpoint). A `phase_resumed` ledger
+  entry records the hint payload for `autopilot watch` + audit. New
+  signal contract: `signal.output.checkpoint` (with `summary`,
+  `ac_done`, `tests_passing`, `tests_failing`, `files_touched`,
+  `next_step`) lets long-running skills self-checkpoint so a crash
+  between the checkpoint and the terminal signal still surfaces
+  progress on the next boot. New CLI: `autopilot resume [--no-emit]
+  [--force]` — manual override that builds the hint even when
+  auto-detection says nothing to resume, useful when a previous
+  session emitted `success` but the work wasn't in fact complete.
+  New profile knob: `autopilot.resume_mid_skill: true` (default on
+  every profile; set to false for byte-for-byte v2.5.x semantics).
+- **v2.5.0** — observability bundle (renumbered from
   v2.5.1 after the original memory bundle was cancelled as
   redundant with BMad). Better `autopilot status` (JSON by default
   with structured fields, `--human` / `--legacy` formatters);
@@ -66,17 +93,10 @@ So the observability bundle (formerly tagged v2.5.1) was renumbered
 v2.5.0 — and the original v2.5.0 slot stays permanently empty by
 design.
 
-## v2.6.0 — Bigger bets
+## v2.6.x — Next bigger bets
 
 Worth doing but bigger design surface. Each gets a concept pass
 before commit. Won't ship as a bundle — each lands when ready.
-
-### v2.6.0 — Resume mid-skill
-Persist intermediate state per-skill: which AC are already
-implemented, which patches landed, which tests passed. A crash or
-interrupt during `DEV_GREEN` at 80% picks up at 80%, not 0%.
-**~3-5 days, lots of edge cases.** Wait for a concept pass before
-committing.
 
 ### v2.6.x — Smart story preflight
 Augment `bmad-check-implementation-readiness` to detect: files
@@ -100,7 +120,8 @@ interactive session.
 trust  ─→ v2.4.0
 speed  ─────────→ v2.4.1
 obs    ─────────────────→ v2.5.0   (formerly v2.5.1; memory bundle cancelled — BMad covers it)
-bets   ─────────────────────────→ v2.6.0 → v2.6.x
+resume ─────────────────────────→ v2.6.0
+bets   ─────────────────────────────────→ v2.6.x
 v3     ──────────────────────────────────────────────→ v3.0.0
 ```
 

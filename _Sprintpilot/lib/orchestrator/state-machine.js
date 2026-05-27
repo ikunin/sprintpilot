@@ -165,6 +165,12 @@ function buildTemplateSlots(state, profile, extra = {}) {
     // return it as `output.diagnostic_trace` in its signal.
     diagnostic_mode: state.diagnostic_pending === true,
     diagnostic_trace: state.diagnostic_trace || null,
+    // v2.6.0 — resume mid-skill. Populated by autopilot.js#
+    // decorateResumeHint when cmdStart detects an interrupted phase
+    // (action_emitted with no terminal signal). Null on the happy path
+    // so the skill template can `{{#if resume_hint}}` cleanly. Shape
+    // is defined in lib/orchestrator/resume-context.js#build.
+    resume_hint: state.resume_hint || null,
     ...extra,
   };
 }

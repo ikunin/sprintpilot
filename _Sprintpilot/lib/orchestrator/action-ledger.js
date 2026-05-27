@@ -101,6 +101,18 @@ const VALID_KINDS = [
   // filter on phase transitions don't accidentally treat the decision
   // entry as a phase change.
   'review_depth_decision',
+  // v2.6.0 — resume mid-skill. Emitted by cmdStart when the boot-time
+  // resume detector identifies an interrupted in-flight phase (action
+  // emitted, no terminal signal recorded) and threads a `resume_hint`
+  // into the next skill invocation. detail carries the hint payload
+  // returned by resume-context.build so `autopilot watch` and audit
+  // can see exactly what evidence the skill received.
+  'phase_resumed',
+  // v2.6.0 — checkpoint emitted by a skill mid-execution via
+  // `signal.output.checkpoint`. Persisted so a crash between this
+  // checkpoint and the terminal signal lets the next boot replay it
+  // back to the skill as `resume_hint.checkpoint`.
+  'skill_checkpoint',
 ];
 
 function isPlainObject(v) {
