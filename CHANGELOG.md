@@ -26,6 +26,19 @@ v2.6.0 closes that gap by detecting interrupted phases at boot, building a struc
 - The `resume_hint` template slot is new but defaults to `null` on every invoke_skill action; skills that don't know about it see no behaviour change.
 - `signal.output.checkpoint` is opt-in for skills; existing skills that don't emit it see no change.
 
+### Installer
+
+The `sprintpilot install` flow now writes the runtime-artifact `.gitignore` block on first install and on update. Previously users had to add these entries manually, and a tracked `ledger.jsonl` caused `tail -F`-based monitors (including `autopilot watch`) to replay the whole file on every `git checkout` / `merge` / `pull` that rewrote the working-tree inode. Existing installs: run `npx @ikunin/sprintpilot@latest` to add the entries idempotently; for files already tracked, follow the `git rm --cached` recipe in `docs/CONFIGURATION.md` § "Git tracking policy for `_bmad-output/`".
+
+New entries added:
+- `_bmad-output/implementation-artifacts/ledger.jsonl`
+- `_bmad-output/implementation-artifacts/autopilot-state.yaml`
+- `_bmad-output/implementation-artifacts/.autopilot-state/`
+- `_bmad-output/implementation-artifacts/.timings/`
+- `_bmad-output/implementation-artifacts/.land-snapshots/`
+- `_bmad-output/implementation-artifacts/.background-suite/`
+- `.worktrees/`
+
 ## [2.5.1] - 2026-05-27
 
 ### Fixed — Autopilot bugs surfaced by live monitoring
