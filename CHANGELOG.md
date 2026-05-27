@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.5.1] - 2026-05-27
+
+### Fixed — Autopilot bugs surfaced by live monitoring
+
+- **Corrupt `sprint-plan.yaml` no longer triggers a destructive auto-rebuild.** When the live plan file failed to parse (real-world cause: a `- key:` entry drifted outside the `stories:` list, breaking nesting), `shouldAutoDerive` treated it as stale and emitted `invoke_skill: sprintpilot-plan-sprint` to rebuild from scratch — discarding all curated `added_at` / `plan_status` / history fields just to recover from a localized YAML break. Now: corrupt files surface a `user_prompt` halt with the parser's exact line number and the file path; the user fixes the indentation manually and re-runs. New helper: `planCorruptHaltDescriptor`.
+- **Task board no longer reads `(none — between stories or idle)` while ticking `Create story spec ← in progress`.** `cmdTasks` only consulted `persisted.current_story`, which is null during the transient state between `epic_boundary_check` and the next story's spec authorship. The board now resolves the queue head (`persisted.story_queue[0]`) when `current_story` is null and renders the story title — extracted from the first H1 in the story file (after frontmatter) — falling back to the slug-key when the title isn't available yet (queued story whose spec is still pending). Epic row dropped (the title encodes it). `autopilot tasks` JSON output gains `story_title`, `story_queue_head`, `story_queue_length`, `epic`.
+- **`persisted.story_file_path` is relative.** The H1-extractor previously read it as-given; on cross-project use (e.g., `--project-root <other>`) `fs.readFileSync` resolved it against CWD instead of `projectRoot` and silently returned null. Fixed by joining with `projectRoot` when not absolute.
+
+### CLI
+
+- `autopilot tasks --markdown` rendering simplified: title only (key as fallback), no epic row, queue head surfaced when a spec is about to be authored.
+
 ## [2.5.0] - 2026-05-26
 
 ### Added — Observability bundle
