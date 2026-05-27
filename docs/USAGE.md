@@ -153,7 +153,7 @@ This compares your installed version against npm, shows what's new, and asks for
 
 ### Session Management
 
-The autopilot checkpoints after every 3 stories (configurable via `autopilot.session_story_limit`; nano profile: 5; `0` = unlimited). The orchestrator persists state to `_bmad-output/implementation-artifacts/autopilot-state.yaml` and an append-only `ledger.jsonl` (action history) so resume is exact:
+The autopilot checkpoints after every 3 stories (configurable via `autopilot.session_story_limit`; nano profile: 5; `0` = unlimited). The orchestrator persists state to `_bmad-output/implementation-artifacts/autopilot-state.yaml` and an append-only `ledger.jsonl` (action history) so resume is exact. Both files are per-session and **should be gitignored** — see [`docs/CONFIGURATION.md` § "Git tracking policy for `_bmad-output/`"](CONFIGURATION.md#git-tracking-policy-for-_bmad-output) for the recommended block and the `git rm --cached` recipe for already-tracked files.
 
 ```
 /sprint-autopilot-on    # resumes exactly where it left off

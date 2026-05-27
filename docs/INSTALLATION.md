@@ -155,6 +155,24 @@ Once verified, start the autopilot in your AI tool:
 /sprint-autopilot-on
 ```
 
+## Step 5: `.gitignore` for runtime artifacts
+
+Before the first autopilot run, add the following to your project's `.gitignore`. Specs (story files, sprint-plan, sprint-status, decision-log, retros, reviews) stay tracked; per-session runtime files (ledger, autopilot state, timings) do not.
+
+```gitignore
+# Sprintpilot runtime artifacts (per-session, regenerated each run)
+_bmad-output/implementation-artifacts/ledger.jsonl
+_bmad-output/implementation-artifacts/autopilot-state.yaml
+_bmad-output/implementation-artifacts/.autopilot-state/
+_bmad-output/implementation-artifacts/.timings/
+_bmad-output/implementation-artifacts/.land-snapshots/
+_bmad-output/implementation-artifacts/.background-suite/
+.autopilot.lock
+.worktrees/
+```
+
+**Why this matters:** `ledger.jsonl` is append-only with local-monotonic sequence numbers that don't merge cleanly across branches. Tracking it also causes `tail -F` based monitors (`autopilot watch`, custom dashboards) to replay the whole file every time `git checkout` / `git merge` / `git pull` rewrites the working-tree inode. See [`docs/CONFIGURATION.md` § "Git tracking policy for `_bmad-output/`"](CONFIGURATION.md#git-tracking-policy-for-_bmad-output) for the full rationale, the spec-vs-runtime classification table, and the `git rm --cached` recipe if a previous install tracked these files.
+
 ## Updating
 
 Check if a newer version is available:

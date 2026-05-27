@@ -158,6 +158,65 @@ Re-run `sprintpilot install --profile <name>` to switch profiles non-destructive
 | Plan archive | `.archive/sprint-plan-<plan_id>.yaml` | Sprintpilot | Written on plan exhaustion. Live file deleted; next session sees no plan. |
 | Legacy archive | `.archive/dependencies.yaml.migrated` | Sprintpilot | One-shot move of pre-v2.3.0 `_Sprintpilot/sprints/dependencies.yaml`. |
 
+### Git tracking policy for `_bmad-output/`
+
+`_bmad-output/` mixes two very different kinds of files. **Specs** (versioned, reviewable, team-shared) belong in git; **runtime artifacts** (per-session, machine-generated, high-churn) do not. Mixing the two — particularly tracking the append-only `ledger.jsonl` — causes two real problems:
+
+1. **No semantic merge.** `ledger.jsonl` sequence numbers (`seq=N`) are local-monotonic. Two teammates running the autopilot on different branches both write `seq=N+1, N+2, ...`. Git produces conflict markers or an interleaved file that breaks `nextSeq()` (which reads the last line), `lastWithFingerprint()`, `readSince(afterSeq)`, and the v2.5.0 `autopilot watch` tail iterator.
+2. **Inode churn breaks `tail -F` monitors.** Every `git checkout` / `git merge` / `git pull` that touches a tracked file rewrites the working-tree copy with a new inode. `tail -F` interprets this as log rotation and re-emits the file from byte 0 — flooding any monitoring pipe (your terminal, a CI dashboard, a `tail | grep` filter) with the entire ledger replayed.
+
+**Track in git (specs — team needs these):**
+
+| Artifact | Why tracked |
+|---|---|
+| `stories/*.md` | Story specs with AC, BMad context, reviewers' notes |
+| `implementation-artifacts/sprint-plan.yaml` | Agreed DAG / queue order |
+| `implementation-artifacts/sprint-status.yaml` | Story progress, who shipped what |
+| `implementation-artifacts/sprint-tasks.md` | Human task board (mirrored to coding-agent TODOs) |
+| `implementation-artifacts/decision-log.yaml` | Architectural decisions (audit + onboarding gold) |
+| `implementation-artifacts/<story-key>.md` | Per-story readiness reports |
+| `implementation-artifacts/sprint-plan-dag.mmd` | Rendered DAG (GitHub-renderable mermaid) |
+| `retrospectives/*.md` | Epic retro notes + sprint-health metrics block |
+| `reviews/*.md` | Code review findings per story |
+| `planning-artifacts/*.md` | Planning-skill outputs |
+
+**Don't track (runtime — per-session, regenerated locally):**
+
+| Artifact | Why not |
+|---|---|
+| `implementation-artifacts/ledger.jsonl` | Sequence-number merge conflict + inode-churn replay (see above). Reconciliation works fine without it; teammates don't need each other's per-action audit tape. |
+| `implementation-artifacts/autopilot-state.yaml` | Carries `current_story`, `phase_started_at`, `lock_session_id` — per-machine runtime, meaningless on another machine. |
+| `implementation-artifacts/.timings/*.jsonl` | Per-skill duration shards, very high churn, only useful for local profiling. |
+| `implementation-artifacts/.land-snapshots/` | Land-as-you-go workflow scratch state. |
+| `implementation-artifacts/.autopilot-state/` | State-store coalesce-buffer shards (mirror of `autopilot-state.yaml`). |
+| `implementation-artifacts/.background-suite/` | Per-story sidecar JSON + log from `background-suite-worker.js`. |
+| `.autopilot.lock` | Per-session lock file. |
+| `.worktrees/` | Per-story worktrees from `git worktree add`. |
+
+**Recommended `.gitignore` block** (apply to any Sprintpilot-driven project):
+
+```gitignore
+# Sprintpilot runtime artifacts (per-session, regenerated each run)
+_bmad-output/implementation-artifacts/ledger.jsonl
+_bmad-output/implementation-artifacts/autopilot-state.yaml
+_bmad-output/implementation-artifacts/.autopilot-state/
+_bmad-output/implementation-artifacts/.timings/
+_bmad-output/implementation-artifacts/.land-snapshots/
+_bmad-output/implementation-artifacts/.background-suite/
+.autopilot.lock
+.worktrees/
+```
+
+**Untracking an already-tracked file** (e.g., a project installed before v2.5.x where the installer didn't yet include the runtime-artifact rules):
+
+```bash
+git rm --cached _bmad-output/implementation-artifacts/ledger.jsonl
+# add the gitignore entry, then commit. The working-tree file stays on
+# disk for the local autopilot to keep appending to.
+```
+
+**Team workflow stays clean:** Alice runs autopilot, finishes a story, commits — her commit updates the spec artifacts (sprint-status, decision-log, story file, review file). Bob pulls main, sees what shipped and why via the **tracked** files, runs the next story without inheriting Alice's per-action ledger noise. Cross-machine resume still works because `autopilot-state.yaml` is per-machine — each person's autopilot remembers its own current_story/phase locally.
+
 ### Concurrent execution semantics
 
 Sprintpilot v2.3.0 supports concurrent autopilot sessions on the same project — they serialize their sprint-plan.yaml writes via `.sprintpilot/plan.lock`.
