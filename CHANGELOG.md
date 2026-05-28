@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [2.6.1] - 2026-05-28
 
 ### Fixed — `land_as_you_go` FSM divergence (advance without commit/push/merge)
 
