@@ -1,5 +1,16 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed — `land_as_you_go` FSM divergence (advance without commit/push/merge)
+
+Under `merge_strategy: land_as_you_go`, the orchestrator could advance to the next story while the previous one was never committed, pushed, or merged — stranding finished work on an orphan branch and leaving the next story branching from a base that didn't contain it. The trigger: the plan's `markDone` fires when the FSM *enters* `STORY_DONE`, so a stray `autopilot next` (or boot reconciliation) saw the still-in-flight story as plan-`done`, cleared it, and emitted the *next* story's `create_story` — skipping the commit/push/merge entirely.
+
+- **Root cause fixed.** `composeRuntimeState`'s done-rejection skip now also covers `plan_status='done'` (not just sprint-status `done`) at story-bound phases, so an in-flight story at `STORY_DONE` / `STORY_LAND` is kept and re-emits its git op instead of being reset to the next story. `skipped` / `excluded` remain genuine exclusions and still reject.
+- **`STORY_LAND` merge verification.** `STORY_LAND` previously had no verifier — any "success" advanced the FSM without confirming the merge. New `verifyStoryLand` requires `git_steps_completed: true`; when omitted it probes `git merge-base --is-ancestor <commit_sha> origin/<base>` to confirm the branch merged into base. Squash merges (sha rewritten) require the explicit flag. Auto-skipped under `git.enabled: false`.
+- **Predecessor guard.** Before starting a new story the orchestrator confirms the previous story landed (ledger confirmation, or `origin/<base>` already contains the branch). If not, it emits a `user_prompt` halt (`reason: prior_story_not_landed`) naming the unlanded story and the missing phase.
+- **Auto-recovery.** `recoverUnlandedPredecessor` rewinds the FSM to the predecessor's missing phase — `STORY_DONE` if never committed/pushed, `STORY_LAND` if pushed but never merged — so the next emission finishes that story before advancing. Runs at `autopilot start` AND on the `next`-driven path; logs a `state_reconciled` ledger entry (`rewind_to_unlanded_predecessor`). Mirrors the existing `skip_clear_unpushed` reconcile precedent. Scoped to per-story branches (`reuse_user_branch: false`); a single shared user branch can't distinguish per-story land status.
+
 ## [2.6.0] - 2026-05-27
 
 ### Added — Resume mid-skill

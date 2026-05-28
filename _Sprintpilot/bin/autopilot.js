@@ -818,7 +818,18 @@ function composeRuntimeState(persisted, profile, projectRoot) {
         STATES.STORY_DONE,
         STATES.STORY_LAND,
       ]);
-      const isDoneRejection = /already complete/.test(rejection);
+      // A "done" rejection comes either from sprint-status (`... already
+      // complete`) OR from sprint-plan.yaml (`plan_status='done'`). BOTH
+      // must be skipped at story-bound phases: the plan's `markDone` fires
+      // when the FSM ENTERS story_done (autopilot.js cmdRecord), so by the
+      // time we re-emit story_done / story_land for the SAME in-flight story
+      // the plan already shows it done. Without skipping the plan-done
+      // rejection here, the orchestrator would null story_key and jump to
+      // the NEXT story — skipping the previous story's commit/push/merge
+      // entirely (the land_as_you_go FSM-divergence bug). `skipped` /
+      // `excluded` are deliberate user exclusions and still reject.
+      const isDoneRejection =
+        /already complete/.test(rejection) || /plan_status='done'/.test(rejection);
       const skipDoneRejection = isDoneRejection && STORY_BOUND_PHASES.has(phase);
       if (!skipDoneRejection) {
         process.stderr.write(
@@ -1111,6 +1122,29 @@ function probeRemoteBranchExists(projectRoot, branch) {
   }
 }
 
+// Probe whether origin/<base> already contains <branch> (the branch was
+// merged into base and base was pushed). Used as the git proxy for "the
+// predecessor landed" under merge_strategy=land_as_you_go. Returns false
+// on any error / missing ref — including after a squash-merge that rewrote
+// the sha, or when the branch was deleted post-land — so callers fall back
+// to the ledger's land confirmation rather than trusting an inconclusive
+// probe. Fail-closed: an inconclusive probe never asserts "landed".
+function probeBaseContainsBranch(projectRoot, branch, base) {
+  if (!branch || typeof branch !== 'string') return false;
+  const baseRef = `origin/${base || 'main'}`;
+  try {
+    const { execFileSync } = require('node:child_process');
+    execFileSync(
+      'git',
+      ['-C', projectRoot, 'merge-base', '--is-ancestor', `origin/${branch}`, baseRef],
+      { stdio: ['ignore', 'pipe', 'pipe'], timeout: 5_000 },
+    );
+    return true; // exit 0 → origin/<branch> is an ancestor of origin/<base>
+  } catch (_e) {
+    return false;
+  }
+}
+
 // Emit a per-skill timing event into the legacy .timings/<story>.jsonl
 // shards. This is what `observedParallelism()` reads in the e2e tests —
 // having the orchestrator emit it removes the LLM-driven coupling and
@@ -1358,6 +1392,277 @@ function collectChangedFilesSincePhaseStart(projectRoot, phaseStartedAt) {
   // template_slots with thousands of files. The hint builder also
   // caps at 50 — this is the early cut.
   return Array.from(merged).slice(0, 200);
+}
+
+// Fresh-story-start phases — the first action emitted for a brand-new
+// story. Reaching one of these means the orchestrator is about to begin
+// the NEXT story.
+const STORY_START_PHASES = new Set([
+  STATES.PREPARE_STORY_BRANCH,
+  STATES.CREATE_STORY,
+  STATES.NANO_QUICK_DEV,
+]);
+
+// classifyUnlandedPredecessor(ledgerEntries, nextStoryKey) → descriptor | null
+//
+// Scan the ledger for the most recent STORY_DONE git_op
+// (`commit_and_push_story`) and report how far the predecessor got:
+//   { prevStoryKey, prevBranch, doneConfirmed, landConfirmed }
+// Returns null when there's no predecessor, it's the SAME story being
+// (re)started, or it fully landed (landConfirmed).
+//
+// Confirmation is read from terminal ledger entries AFTER the predecessor's
+// `action_emitted`:
+//   - doneConfirmed: `verify_result` (phase=story_done, ok) OR
+//                    `state_transition` (from=story_done). Either only
+//                    appears once verifyStoryDone accepted the signal, which
+//                    itself enforces commit + push.
+//   - landConfirmed: `verify_result` (phase=story_land, ok) OR
+//                    `state_transition` (from=story_land). Either only
+//                    appears once verifyStoryLand accepted the signal, which
+//                    enforces the merge into the base branch.
+//
+// Pure: no I/O. The caller injects the ledger entries. Intended for
+// merge_strategy=land_as_you_go (where STORY_LAND runs after STORY_DONE).
+function classifyUnlandedPredecessor(ledgerEntries, nextStoryKey) {
+  if (!Array.isArray(ledgerEntries) || ledgerEntries.length === 0) return null;
+  let idx = -1;
+  for (let i = ledgerEntries.length - 1; i >= 0; i -= 1) {
+    const e = ledgerEntries[i];
+    if (
+      e &&
+      e.kind === 'action_emitted' &&
+      e.action &&
+      e.action.type === 'git_op' &&
+      e.action.op === 'commit_and_push_story'
+    ) {
+      idx = i;
+      break;
+    }
+  }
+  if (idx === -1) return null; // No story has reached STORY_DONE yet.
+  const emitted = ledgerEntries[idx];
+  const prevStoryKey = (emitted.action && emitted.action.story_key) || null;
+  if (!prevStoryKey) return null;
+  // Re-emitting the SAME story (resume / retry) — not advancing past it.
+  if (nextStoryKey && prevStoryKey === nextStoryKey) return null;
+
+  let doneConfirmed = false;
+  let landConfirmed = false;
+  for (let i = idx + 1; i < ledgerEntries.length; i += 1) {
+    const e = ledgerEntries[i];
+    if (!e) continue;
+    if (e.kind === 'verify_result' && e.phase === STATES.STORY_DONE && e.ok === true) {
+      doneConfirmed = true;
+    } else if (e.kind === 'state_transition' && e.from === STATES.STORY_DONE) {
+      doneConfirmed = true;
+    } else if (e.kind === 'verify_result' && e.phase === STATES.STORY_LAND && e.ok === true) {
+      landConfirmed = true;
+    } else if (e.kind === 'state_transition' && e.from === STATES.STORY_LAND) {
+      landConfirmed = true;
+    }
+  }
+  if (landConfirmed) return null; // Fully landed — nothing to guard/recover.
+  return {
+    prevStoryKey,
+    prevBranch: (emitted.action && emitted.action.branch) || null,
+    doneConfirmed,
+    landConfirmed,
+  };
+}
+
+// resolvePredecessorRecovery({ entries, nextStoryKey, profile, projectRoot,
+//   gitProbe? }) → { prevStoryKey, branch, base, missingPhase } | null
+//
+// Combine the ledger classification with git probes to decide what (if
+// anything) the previous story still needs before the next one starts under
+// merge_strategy=land_as_you_go. Returns null when fully landed (ledger
+// confirmation OR origin/<base> already contains the branch) or when there's
+// no predecessor. Otherwise returns the missing phase:
+//   - STORY_DONE — the commit/push never completed (re-run the full done
+//     step, which also marks sprint-status done).
+//   - STORY_LAND — committed + pushed (doneConfirmed) but the merge into base
+//     never completed (re-run only the land step).
+//
+// Branch is read from the emitted git_op when present, else recomputed.
+// gitProbe is injectable for tests; defaults probe real git and fail-closed.
+function resolvePredecessorRecovery(input) {
+  const { entries, nextStoryKey, profile, projectRoot } = input || {};
+  const pred = classifyUnlandedPredecessor(entries, nextStoryKey);
+  if (!pred) return null;
+  const base = (profile && profile.base_branch) || 'main';
+  let branch = pred.prevBranch;
+  if (!branch) {
+    const prevEpic = deriveEpicFromStoryKey(pred.prevStoryKey);
+    try {
+      branch = gitPlan.branchName(profile, pred.prevStoryKey, prevEpic, {});
+    } catch (_e) {
+      branch = null;
+    }
+  }
+  const probe =
+    input.gitProbe && typeof input.gitProbe === 'object'
+      ? input.gitProbe
+      : {
+          baseContainsBranch: (b) => probeBaseContainsBranch(projectRoot, b, base),
+        };
+  // Landed out-of-band (e.g. across a fresh session whose ledger doesn't
+  // carry the land confirmation)? Then there's nothing to recover.
+  if (
+    branch &&
+    typeof probe.baseContainsBranch === 'function' &&
+    probe.baseContainsBranch(branch, base)
+  ) {
+    return null;
+  }
+  // doneConfirmed (ledger) ⟹ sprint-status was already marked done at that
+  // time, so it's safe to re-run only the land step. Otherwise re-run the
+  // full STORY_DONE step (which re-marks sprint-status + commits + pushes).
+  const missingPhase = pred.doneConfirmed ? STATES.STORY_LAND : STATES.STORY_DONE;
+  return { prevStoryKey: pred.prevStoryKey, branch, base, missingPhase };
+}
+
+// guardLandAsYouGoPredecessor({ action, runtime, profile, projectRoot,
+//   ledgerEntries?, gitProbe? }) → user_prompt action | null
+//
+// Land-as-you-go invariant: each story must be committed, pushed, AND merged
+// into the base branch before the next story starts, because later stories
+// branch from a base that is expected to already contain it. Without this
+// guard an interleaved `autopilot next` — or a boot-time reconciliation that
+// clears an in-flight story — can emit the NEXT story's first action while
+// the previous story's commit/push/merge never completed, stranding finished
+// work on an orphan branch.
+//
+// This is the runtime SAFETY NET. recoverUnlandedPredecessor (called first,
+// at boot and before each emission) normally rewinds the FSM to finish the
+// predecessor automatically, so this guard only fires when recovery couldn't
+// (e.g. recovery disabled / not yet run). Returns a `user_prompt` halt naming
+// the missing phase, or null when advancing is allowed.
+//
+// Deps are injectable for tests: `ledgerEntries` defaults to `ledger.read`,
+// `gitProbe.baseContainsBranch` defaults to `probeBaseContainsBranch`.
+function guardLandAsYouGoPredecessor(input) {
+  const { action, runtime, profile, projectRoot } = input || {};
+  if (!profile || profile.merge_strategy !== 'land_as_you_go') return null;
+  // A single shared user branch carries every story — per-story land status
+  // isn't distinguishable, so the guard doesn't apply.
+  if (profile.reuse_user_branch) return null;
+  if (!action || !STORY_START_PHASES.has(action.phase)) return null;
+
+  let entries = input.ledgerEntries;
+  if (!Array.isArray(entries)) {
+    try {
+      entries = ledger.read({ projectRoot });
+    } catch (_e) {
+      return null;
+    }
+  }
+  const nextStoryKey = (runtime && runtime.story_key) || null;
+  const rec = resolvePredecessorRecovery({
+    entries,
+    nextStoryKey,
+    profile,
+    projectRoot,
+    gitProbe: input.gitProbe,
+  });
+  if (!rec) return null;
+
+  const branchLabel = rec.branch || `story/${rec.prevStoryKey}`;
+  const missingPushed = rec.missingPhase === STATES.STORY_DONE;
+  const stepGuidance = missingPushed
+    ? `Resume ${rec.prevStoryKey}'s STORY_DONE step — run its commit_and_push_story ` +
+      `git_op (stage the story files, commit, then \`git push -u origin ${branchLabel}\`) ` +
+      `and let the autopilot land it`
+    : `${rec.prevStoryKey} was committed and pushed but never merged into ${rec.base}. ` +
+      `Resume its STORY_LAND step (merge ${branchLabel} into ${rec.base} and push ${rec.base})`;
+  return {
+    type: 'user_prompt',
+    phase: action.phase,
+    reason: 'prior_story_not_landed',
+    missing_phase: rec.missingPhase,
+    prompt:
+      `Refusing to start ${nextStoryKey || 'the next story'}: the previous story ` +
+      `${rec.prevStoryKey} has not landed on ${rec.base}. Under ` +
+      `merge_strategy=land_as_you_go each story must merge into ${rec.base} before ` +
+      `the next one starts (later stories branch from a base that already contains it).\n\n` +
+      `${stepGuidance} before advancing. Re-running /sprint-autopilot-on will recover ` +
+      `automatically. If the work was intentionally abandoned, mark ${rec.prevStoryKey} ` +
+      `terminal (done/skipped/cancelled) in sprint-status.yaml so reconciliation drops it.`,
+    prior_story_key: rec.prevStoryKey,
+    prior_branch: rec.branch || null,
+    next_story_key: nextStoryKey || null,
+  };
+}
+
+// recoverUnlandedPredecessor({ persisted, profile, projectRoot,
+//   ledgerEntries?, gitProbe? }) → recovery | null
+//
+// Auto-recovery for the land_as_you_go FSM-divergence: when the orchestrator
+// is about to start a NEW story (persisted phase is a story-start phase) but
+// a previous story never finished committing/pushing/merging, REWIND the
+// persisted state to that predecessor's missing phase so the next emission
+// finishes it instead of skipping ahead. Mirrors the established
+// reconcileWithSprintStatus precedent of re-firing STORY_DONE for unpushed
+// work; here it also handles the not-yet-merged (STORY_LAND) case.
+//
+// Mutates `persisted` in place and returns
+//   { recovered: true, story, branch, phase, reason }
+// or null when nothing needs recovery. Callers persist the mutation and log
+// a `state_reconciled` ledger entry. Gated to land_as_you_go + per-story
+// branches; only fires when the persisted phase is a story-start phase (so a
+// mid-story emission is never disturbed).
+function recoverUnlandedPredecessor(input) {
+  const { persisted, profile, projectRoot } = input || {};
+  if (!persisted || typeof persisted !== 'object') return null;
+  if (!profile || profile.merge_strategy !== 'land_as_you_go') return null;
+  if (profile.reuse_user_branch || profile.enabled === false) return null;
+  // Only when about to begin a fresh story. composeRuntimeState may not have
+  // run yet, so consult the persisted phase (defaulting to a start phase when
+  // unset — a fresh sprint with a populated ledger still gets checked).
+  const phase = persisted.current_bmad_step || null;
+  if (phase && !STORY_START_PHASES.has(phase)) return null;
+
+  let entries = input.ledgerEntries;
+  if (!Array.isArray(entries)) {
+    try {
+      entries = ledger.read({ projectRoot });
+    } catch (_e) {
+      return null;
+    }
+  }
+  // The story we'd otherwise start (so we don't treat it as its own predecessor).
+  const nextStoryKey = persisted.current_story || null;
+  const rec = resolvePredecessorRecovery({
+    entries,
+    nextStoryKey,
+    profile,
+    projectRoot,
+    gitProbe: input.gitProbe,
+  });
+  if (!rec) return null;
+
+  // Rewind: point the FSM back at the predecessor's missing phase. Reset
+  // phase-scoped counters so the rewound phase starts clean. story_file_path
+  // is cleared (commit_and_push_story / land_story derive the branch from
+  // story_key; verifyStoryDone tolerates a null path).
+  persisted.current_story = rec.prevStoryKey;
+  persisted.current_bmad_step = rec.missingPhase;
+  persisted.current_epic = deriveEpicFromStoryKey(rec.prevStoryKey) || persisted.current_epic || null;
+  persisted.story_file_path = null;
+  persisted.prior_diagnosis = null;
+  persisted.patch_findings = null;
+  persisted.retry_count_this_phase = 0;
+  persisted.verify_reject_count = 0;
+  return {
+    recovered: true,
+    story: rec.prevStoryKey,
+    branch: rec.branch || null,
+    phase: rec.missingPhase,
+    reason:
+      rec.missingPhase === STATES.STORY_DONE
+        ? 'predecessor_not_committed_pushed'
+        : 'predecessor_not_landed',
+  };
 }
 
 function decorateGitOp(action, state, profile, projectRoot) {
@@ -2422,6 +2727,53 @@ function cmdStart(opts) {
     }
   }
 
+  // land_as_you_go auto-recovery. If a previous story never finished
+  // committing/pushing/merging and the FSM drifted to a fresh-story start,
+  // rewind persisted state to that predecessor's missing phase so this boot
+  // finishes it instead of skipping ahead. Mutates persisted in place; logs
+  // a state_reconciled entry and re-baselines like sprint-status reconcile.
+  const landRecovery = recoverUnlandedPredecessor({
+    persisted,
+    profile,
+    projectRoot,
+    gitProbe: gitProbeEnabled
+      ? { baseContainsBranch: (b, base) => probeBaseContainsBranch(projectRoot, b, base) }
+      : undefined,
+  });
+  if (landRecovery) {
+    ledger.append(
+      {
+        kind: 'state_reconciled',
+        detail: {
+          actions: [
+            {
+              kind: 'rewind_to_unlanded_predecessor',
+              story: landRecovery.story,
+              branch: landRecovery.branch,
+              phase: landRecovery.phase,
+              reason: landRecovery.reason,
+            },
+          ],
+        },
+      },
+      { projectRoot },
+    );
+    process.stderr.write(
+      `[autopilot] recovered unlanded story ${landRecovery.story}: rewinding to ${landRecovery.phase} ` +
+        `(${landRecovery.reason}) before starting the next story.\n`,
+    );
+    const recoverFp = divergence.fingerprint({ projectRoot });
+    ledger.append(
+      {
+        kind: 'resume',
+        divergence: { kind: 'state_reconciled', actions: [{ kind: 'rewind_to_unlanded_predecessor', story: landRecovery.story }] },
+        fingerprint: recoverFp,
+      },
+      { projectRoot },
+    );
+    reconciledThisBoot = true;
+  }
+
   // Most-recent ledger entry that carries a fingerprint — either the last
   // clean `halt` or a previously-accepted `resume` (which we re-baseline
   // on accept, below). Without the re-baseline, every subsequent
@@ -2933,7 +3285,7 @@ function cmdStart(opts) {
     return 0;
   }
 
-  const action = decorateHaltContext(
+  let action = decorateHaltContext(
     decorateReviewDepth(
       decorateTestScope(
         decorateRunScript(
@@ -2958,6 +3310,10 @@ function cmdStart(opts) {
     runtime,
     projectRoot,
   );
+  // land_as_you_go guard: never start a new story while the previous one
+  // is unpushed/unlanded. Overrides the emitted action with a halt prompt.
+  const landGuard = guardLandAsYouGoPredecessor({ action, runtime, profile, projectRoot });
+  if (landGuard) action = decorateHaltContext(landGuard, runtime, projectRoot);
   ledger.append({ kind: 'action_emitted', phase: runtime.phase, action }, { projectRoot });
   persistRuntimeState(runtime, profile, projectRoot);
   if (profile.coalesce_state_writes) stateStore.flush(profile, { projectRoot, story: runtime.story_key });
@@ -2969,6 +3325,36 @@ function cmdNext(opts) {
   const projectRoot = resolveProjectRoot(opts);
   const { typed: profile } = resolveProfile(projectRoot, opts.profile);
   const persisted = loadState(projectRoot);
+  // land_as_you_go auto-recovery (also on the `next`-driven path, since the
+  // workflow drives `next` directly without `start`). Rewinds persisted
+  // state to an unlanded predecessor's missing phase BEFORE composing the
+  // runtime, so this emission finishes that story instead of skipping ahead.
+  // The rewound state is persisted by cmdNext's own persistRuntimeState call
+  // below (it derives from the mutated `persisted` via composeRuntimeState).
+  const landRecovery = recoverUnlandedPredecessor({ persisted, profile, projectRoot });
+  if (landRecovery) {
+    ledger.append(
+      {
+        kind: 'state_reconciled',
+        detail: {
+          actions: [
+            {
+              kind: 'rewind_to_unlanded_predecessor',
+              story: landRecovery.story,
+              branch: landRecovery.branch,
+              phase: landRecovery.phase,
+              reason: landRecovery.reason,
+            },
+          ],
+        },
+      },
+      { projectRoot },
+    );
+    process.stderr.write(
+      `[autopilot] recovered unlanded story ${landRecovery.story}: rewinding to ${landRecovery.phase} ` +
+        `(${landRecovery.reason}) before starting the next story.\n`,
+    );
+  }
   const runtime = composeRuntimeState(persisted, profile, projectRoot);
   // --test-scope override (one-shot, this emission only). Accepted values
   // match profile.testing_scope. Threaded into the runtime so
@@ -2999,7 +3385,7 @@ function cmdNext(opts) {
     return 0;
   }
 
-  const action = decorateHaltContext(
+  let action = decorateHaltContext(
     decorateReviewDepth(
       decorateTestScope(
         decorateRunScript(
@@ -3019,6 +3405,10 @@ function cmdNext(opts) {
     runtime,
     projectRoot,
   );
+  // land_as_you_go guard: never start a new story while the previous one
+  // is unpushed/unlanded. Overrides the emitted action with a halt prompt.
+  const landGuard = guardLandAsYouGoPredecessor({ action, runtime, profile, projectRoot });
+  if (landGuard) action = decorateHaltContext(landGuard, runtime, projectRoot);
   ledger.append({ kind: 'action_emitted', phase: runtime.phase, action }, { projectRoot });
   // Persist any mutations done by lockUserBranchIfNeeded — without this
   // every cmdNext under reuse_user_branch=true re-detects the branch and
@@ -4552,4 +4942,10 @@ module.exports = {
   // v2.6.0 — resume mid-skill hint decoration + git-diff probe
   decorateResumeHint,
   collectChangedFilesSincePhaseStart,
+  // land_as_you_go completion guard + auto-recovery (commit + push + merge
+  // before the next story).
+  guardLandAsYouGoPredecessor,
+  recoverUnlandedPredecessor,
+  classifyUnlandedPredecessor,
+  resolvePredecessorRecovery,
 };

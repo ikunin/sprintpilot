@@ -275,6 +275,7 @@ const VERIFIERS = {
   [STATES.PATCH_APPLY]: verifyPatchApply,
   [STATES.PATCH_RETEST]: verifyPatchRetest,
   [STATES.STORY_DONE]: verifyStoryDone,
+  [STATES.STORY_LAND]: verifyStoryLand,
   [STATES.EPIC_BOUNDARY_CHECK]: verifyEpicBoundary,
   [STATES.RETROSPECTIVE]: verifyRetrospective,
   [STATES.NANO_QUICK_DEV]: verifyNanoQuickDev,
@@ -624,6 +625,56 @@ function verifyStoryDone(state, out, ctx) {
           `story file has ${unchecked} unchecked task box(es) remaining — dev-story should flip all to [x]`,
         );
       }
+    }
+  }
+  return { ok: issues.length === 0, issues };
+}
+
+// Probe git to confirm a STORY_LAND signal whose `git_steps_completed`
+// flag was omitted: the story's commit must be reachable from origin/<base>
+// (it was merged into base AND base was pushed). Returns false on any error,
+// missing tooling, missing commit_sha, or a squash-merge (where the original
+// sha isn't an ancestor of the squashed commit) — the caller then falls
+// through to requiring the explicit flag.
+function verifyLandViaProbe(out, base, ctx) {
+  if (!ctx || !ctx.projectRoot) return false;
+  const sha = out && out.commit_sha;
+  if (!sha) return false;
+  const cp = require('node:child_process');
+  try {
+    cp.execFileSync(
+      'git',
+      ['-C', ctx.projectRoot, 'merge-base', '--is-ancestor', sha, `origin/${base}`],
+      { stdio: ['ignore', 'pipe', 'pipe'], timeout: 5_000 },
+    );
+    return true; // exit 0 → sha is an ancestor of origin/<base> → merged + pushed
+  } catch {
+    return false;
+  }
+}
+
+function verifyStoryLand(state, out, ctx) {
+  const issues = [];
+  const base = (ctx.profile && ctx.profile.base_branch) || 'main';
+  // The land step merges the story branch into <base>, pushes <base>, and
+  // deletes the local branch (see scripts/land-this-pr.js). Confirm the
+  // merge+push actually happened before advancing — otherwise the next
+  // story branches from a <base> that doesn't contain this one, which is
+  // exactly the land_as_you_go invariant this state exists to uphold.
+  //
+  // Mirrors verifyStoryDone: the canonical signal is
+  // `git_steps_completed: true`; when omitted, probe git (sha ∈ origin/<base>)
+  // and accept the signal when the probe confirms. Squash merges can't be
+  // confirmed by sha, so under squash the explicit flag is required.
+  if (out.git_steps_completed !== true) {
+    const landed = verifyLandViaProbe(out, base, ctx);
+    if (!landed) {
+      issues.push(
+        `git_steps_completed must be true — set it ONLY after every land step ` +
+          `(merge the story branch into ${base} + \`git push origin ${base}\`) ` +
+          `exited 0. Skipping the merge/push leaves the story unlanded; the next ` +
+          `story would branch from a ${base} that doesn't contain it.`,
+      );
     }
   }
   return { ok: issues.length === 0, issues };

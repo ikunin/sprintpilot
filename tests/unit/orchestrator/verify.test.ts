@@ -239,9 +239,7 @@ describe('verify CREATE_STORY', () => {
   });
 
   it('accepts the AC abbreviation as heading', () => {
-    const path = makeStoryFile(
-      '---\nstory_key: S1\n---\n\n## AC\n- a\n\n## Tasks\n- [ ] do it\n',
-    );
+    const path = makeStoryFile('---\nstory_key: S1\n---\n\n## AC\n- a\n\n## Tasks\n- [ ] do it\n');
     const r = verify(
       { phase: STATES.CREATE_STORY, story_key: 'S1', story_file_path: path },
       {},
@@ -734,7 +732,9 @@ describe('verify STORY_DONE', () => {
       execFileSync('git', ['remote', 'add', 'origin', originRoot], { cwd: projectRoot });
       execFileSync('git', ['commit', '--allow-empty', '-m', 'init', '-q'], { cwd: projectRoot });
       execFileSync('git', ['checkout', '-qb', 'story/S1'], { cwd: projectRoot });
-      execFileSync('git', ['commit', '--allow-empty', '-m', 'feat: S1', '-q'], { cwd: projectRoot });
+      execFileSync('git', ['commit', '--allow-empty', '-m', 'feat: S1', '-q'], {
+        cwd: projectRoot,
+      });
       execFileSync('git', ['push', '-q', 'origin', 'story/S1'], { cwd: projectRoot });
       const sha = execFileSync('git', ['rev-parse', 'HEAD'], {
         encoding: 'utf8',
@@ -796,9 +796,7 @@ describe('verify STORY_DONE', () => {
     // failed to match and verifyStoryDone rejected the story as
     // "shows S1 as 'null', expected 'done'". The repo's convention is
     // `<key>: done  # PR #N merged ...` for every merged story.
-    seedSprintStatus(
-      'development_status:\n  S1: done  # PR #123 merged 2026-05-15\n',
-    );
+    seedSprintStatus('development_status:\n  S1: done  # PR #123 merged 2026-05-15\n');
     const storyPath = seedStoryFileWithTasks(0, 1);
     const r = verify(
       { phase: STATES.STORY_DONE, story_key: 'S1', story_file_path: storyPath },
@@ -814,9 +812,7 @@ describe('verify STORY_DONE', () => {
   });
 
   it('passes when inline status uses quoted value + trailing comment', () => {
-    seedSprintStatus(
-      'development_status:\n  S1: "done"  # PR #99 merged\n',
-    );
+    seedSprintStatus('development_status:\n  S1: "done"  # PR #99 merged\n');
     const storyPath = seedStoryFileWithTasks(0, 1);
     const r = verify(
       { phase: STATES.STORY_DONE, story_key: 'S1', story_file_path: storyPath },
@@ -861,6 +857,39 @@ describe('verify STORY_DONE', () => {
       { projectRoot },
     );
     expect(r.ok).toBe(false);
+  });
+});
+
+describe('verify STORY_LAND', () => {
+  it('ok when git_steps_completed is true', () => {
+    const r = verify(
+      { phase: STATES.STORY_LAND, story_key: 'S1' },
+      { git_steps_completed: true },
+      { projectRoot, profile: { base_branch: 'main' } },
+    );
+    expect(r.ok).toBe(true);
+  });
+
+  it('fails when git_steps_completed is omitted and git cannot confirm the merge', () => {
+    // projectRoot is a fresh temp dir (not a git repo) so the ancestry probe
+    // returns false; with no explicit flag the land is unconfirmed.
+    const r = verify(
+      { phase: STATES.STORY_LAND, story_key: 'S1' },
+      { commit_sha: 'abc', branch: 'story/S1' },
+      { projectRoot, profile: { base_branch: 'main' } },
+    );
+    expect(r.ok).toBe(false);
+    expect(r.issues.join(' ')).toContain('git_steps_completed must be true');
+  });
+
+  it('names the base branch from the profile in the issue', () => {
+    const r = verify(
+      { phase: STATES.STORY_LAND, story_key: 'S1' },
+      {},
+      { projectRoot, profile: { base_branch: 'develop' } },
+    );
+    expect(r.ok).toBe(false);
+    expect(r.issues.join(' ')).toContain('into develop');
   });
 });
 

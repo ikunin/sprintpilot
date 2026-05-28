@@ -362,6 +362,8 @@ See [Extending](EXTENDING.md) to add more languages.
 | `git.land_when` | `ci_pass` | Under `land_as_you_go`: `no_wait` (sync merge), `ci_pass` (after CI green), or `ci_and_review` (after CI + approved review). |
 | `git.land_wait_minutes` | `30` | Max wait for CI / review under `land_as_you_go`. After this the orchestrator halts and prompts. |
 
+Under `land_as_you_go`, the orchestrator verifies the merge (`STORY_LAND` requires `git_steps_completed: true` or a confirmed `git merge-base --is-ancestor <commit_sha> origin/<base>`) and refuses to start a new story while the previous one is unlanded — auto-recovering by rewinding to the predecessor's missing `STORY_DONE` / `STORY_LAND` phase. See USAGE.md → "Land-completion guard + auto-recovery". Scoped to per-story branches (`reuse_user_branch: false`).
+
 ### Worktree
 
 | Key | Default | Description |

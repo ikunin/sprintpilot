@@ -112,6 +112,13 @@ These live in `_Sprintpilot/modules/git/config.yaml` and change what the orchest
 
 On `STORY_LAND` rebase conflicts (base moved during the story), the orchestrator auto-rebases the story branch onto the latest base. If the rebase has conflicts, the orchestrator halts with a `user_prompt`; resume reads `state.land_pending` and retries the land step.
 
+#### Land-completion guard + auto-recovery (`land_as_you_go`)
+
+Under `land_as_you_go` each story must be committed, pushed, **and merged into the base branch** before the next story starts — later stories branch from a base expected to already contain it. Two safeguards enforce this:
+
+- **`STORY_LAND` verification.** The land step is now verified like `STORY_DONE`: signal `git_steps_completed: true` only after the merge + `git push origin <base>` steps exit 0. When the flag is omitted the orchestrator probes `git merge-base --is-ancestor <commit_sha> origin/<base>` (echo `commit_sha`) and accepts when it confirms; squash merges require the explicit flag since the sha is rewritten. A bogus land "success" is rejected instead of silently advancing.
+- **Predecessor guard + auto-recovery.** Before starting a new story the orchestrator checks that the previous story actually landed (ledger confirmation, or `origin/<base>` already contains the branch). If it didn't — e.g. an interrupted session or a stray `autopilot next` skipped the commit/push/merge — the orchestrator **auto-recovers**: it rewinds the FSM to the predecessor's missing phase (`STORY_DONE` if it was never committed/pushed, `STORY_LAND` if it was pushed but never merged) so the next emission finishes that story before moving on. Recovery runs at `autopilot start` **and** on the `next`-driven path, and logs a `state_reconciled` ledger entry (`rewind_to_unlanded_predecessor`). If recovery can't run, a `user_prompt` halt (`reason: prior_story_not_landed`) names the unlanded story and the missing phase. The guard is scoped to per-story branches (`reuse_user_branch: false`); a single shared user branch carries every story so per-story land status isn't distinguishable.
+
 ### Tiered, Change-Aware Test Scope (v2.3.18+)
 
 By default, every test-running phase (`DEV_RED`, `DEV_GREEN`, `PATCH_APPLY`, `PATCH_RETEST`, `NANO_QUICK_DEV`) runs an **affected subset** rather than the full suite. The orchestrator computes the recommended command per emission using a framework adapter and threads it into the dev-story template — the LLM runs that command instead of `npm test`/`pytest`. CI remains the full-suite safety net (it already gates `STORY_LAND` under `merge_strategy: land_as_you_go`).
