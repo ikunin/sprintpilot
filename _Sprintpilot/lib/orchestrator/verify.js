@@ -95,6 +95,26 @@ function readSprintStatus(fs, projectRoot) {
   return readFileSafe(fs, p);
 }
 
+// Resolve the story file by BMad convention when neither runtime state nor
+// the signal carries `story_file_path`. bmad-create-story writes the file at
+// `_bmad-output/implementation-artifacts/<story_key>.md`, but the orchestrator
+// only learns the path from the success signal — and the LLM frequently omits
+// it (a recurring echo gap that surfaced as "story_file_path not set" verify
+// rejections, which then cascaded into phase_timeout halts). Auto-detecting
+// the on-disk file closes that gap, mirroring verifyDevRed's test_files
+// auto-detect and verifyStoryDone's git probe. Returns null when story_key is
+// unknown or the conventional file isn't on disk.
+function conventionalStoryFilePath(ctx, storyKey) {
+  if (!ctx || !ctx.projectRoot || !storyKey || typeof storyKey !== 'string') return null;
+  const p = nodePath.join(
+    ctx.projectRoot,
+    '_bmad-output',
+    'implementation-artifacts',
+    `${storyKey}.md`,
+  );
+  return fileExists(ctx.fs || nodeFs, p) ? p : null;
+}
+
 // Auto-detect test files added/modified since the story branch started.
 // Used by verifyDevRed when the LLM forgets to echo `test_files` in
 // signal.output — a recurring user pain point: the LLM did the work but
@@ -310,7 +330,10 @@ function verify(state, signalOutput, context) {
       ? state
       : {
           ...state,
-          story_file_path: state.story_file_path || out.story_file_path || null,
+          story_file_path:
+            state.story_file_path ||
+            out.story_file_path ||
+            conventionalStoryFilePath(ctx, state.story_key),
           ac_summary: state.ac_summary || out.ac_summary || null,
         };
   try {

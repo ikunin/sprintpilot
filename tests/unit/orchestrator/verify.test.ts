@@ -142,6 +142,39 @@ describe('verify CREATE_STORY', () => {
     expect(r.issues).toEqual([]);
   });
 
+  it('auto-detects the story file by convention when state AND signal both omit the path', () => {
+    // Recurring failure mode: the LLM ran bmad-create-story (file is on disk
+    // at _bmad-output/implementation-artifacts/<key>.md) but signaled success
+    // WITHOUT echoing story_file_path. Both state and signal.output are null,
+    // so the older code rejected with "story_file_path not set" — which then
+    // cascaded into a phase_timeout halt. verify() now resolves the
+    // conventional path when it exists on disk.
+    const dir = join(projectRoot, '_bmad-output', 'implementation-artifacts');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, '16-9-telegram-voice-notes.md'),
+      `---\nstory_key: 16-9-telegram-voice-notes\n---\n\n## Acceptance Criteria\n- AC1\n\n## Tasks\n- [ ] x\n`,
+      'utf8',
+    );
+    const r = verify(
+      { phase: STATES.CREATE_STORY, story_key: '16-9-telegram-voice-notes', story_file_path: null },
+      {}, // signal omitted story_file_path
+      { projectRoot },
+    );
+    expect(r.ok).toBe(true);
+    expect(r.issues).toEqual([]);
+  });
+
+  it('still rejects when neither the signal nor a conventional file provides the path', () => {
+    const r = verify(
+      { phase: STATES.CREATE_STORY, story_key: 'nonexistent-story', story_file_path: null },
+      {},
+      { projectRoot },
+    );
+    expect(r.ok).toBe(false);
+    expect(r.issues.join(' ')).toContain('story_file_path not set');
+  });
+
   it('verify_override evidence.acknowledge_missing_front_matter skips ONLY the front-matter check', () => {
     // Escape hatch for legacy stories where bmad-create-story can't or
     // won't regenerate front-matter. AC + Tasks still enforced — the

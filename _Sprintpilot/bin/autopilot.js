@@ -970,6 +970,22 @@ function composeRuntimeState(persisted, profile, projectRoot) {
     phase = flowStart;
   }
 
+  // story_file_path convention fallback. The orchestrator only learns the
+  // story file path from a create_story/quick-dev success signal, which the
+  // LLM sometimes omits — leaving story_file_path null for the rest of the
+  // cycle (verify, resume hints, test scope). When we have a story_key but no
+  // path, resolve the BMad convention `_bmad-output/implementation-artifacts/
+  // <story_key>.md` if it's on disk. Best-effort; stays null when absent.
+  if (!resolvedStoryFilePath && resolvedStoryKey && projectRoot) {
+    const conventionPath = path.join(
+      projectRoot,
+      '_bmad-output',
+      'implementation-artifacts',
+      `${resolvedStoryKey}.md`,
+    );
+    if (safeExistsSync(conventionPath)) resolvedStoryFilePath = conventionPath;
+  }
+
   return {
     phase,
     story_key: resolvedStoryKey,
