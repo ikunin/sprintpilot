@@ -401,7 +401,7 @@ describe('CLI integration', () => {
     expect(res.stderr).toMatch(/cycle detected/);
   });
 
-  it('v2.3.6: mermaid render reports png_reason="mmdc-missing" when Mermaid CLI is absent from PATH', () => {
+  it('v2.3.6: mermaid render reports svg_reason="mmdc-missing" when Mermaid CLI is absent from PATH', () => {
     seed(
       tmpRoot,
       'development_status:\n  1-1-a: ready-for-dev\n  1-2-b: backlog\n',
@@ -431,8 +431,8 @@ describe('CLI integration', () => {
     const envelope = JSON.parse(out);
     expect(envelope.wrote).toBe(true);
     expect(envelope.file).toBe(outputPath);
-    expect(envelope.png_reason).toBe('mmdc-missing');
-    expect(envelope.png_file).toBeUndefined();
+    expect(envelope.svg_reason).toBe('mmdc-missing');
+    expect(envelope.svg_file).toBeUndefined();
   });
 
   // Skipped on Windows: the shim is a POSIX shell script. The
@@ -440,7 +440,7 @@ describe('CLI integration', () => {
   // explicitly because Node's spawn doesn't auto-resolve PATHEXT), but
   // testing that path needs a Windows .cmd shim — out of scope here.
   // The mmdc-missing test above covers the cross-platform absent case.
-  (process.platform === 'win32' ? it.skip : it)('v2.3.11: mermaid render produces SVG + PNG siblings with dynamic dimensions when mmdc is on PATH', () => {
+  (process.platform === 'win32' ? it.skip : it)('mermaid render produces a sibling SVG (no PNG) when mmdc is on PATH', () => {
     seed(
       tmpRoot,
       'development_status:\n  1-1-a: ready-for-dev\n  1-2-b: backlog\n',
@@ -486,16 +486,15 @@ describe('CLI integration', () => {
     );
     const envelope = JSON.parse(out);
     expect(envelope.wrote).toBe(true);
-    // Both SVG and PNG should be reported; SVG is the preferred output
-    // for dense DAGs because it's vector and stays crisp at any zoom.
+    // Only SVG is produced — vector, crisp at any zoom, small on disk.
+    // PNG generation was removed.
     expect(envelope.svg_file).toBe(outputPath.replace(/\.mmd$/, '.svg'));
-    expect(envelope.png_file).toBe(outputPath.replace(/\.mmd$/, '.png'));
-    expect(envelope.png_reason).toBeUndefined();
+    expect(envelope.svg_reason).toBeUndefined();
     expect(existsSync(envelope.svg_file)).toBe(true);
-    expect(existsSync(envelope.png_file)).toBe(true);
-    // PNG dimensions should be reported and scaled by node count
-    // (2 nodes here → still at the minimum 2400×1800 floor).
-    expect(envelope.png_dimensions).toEqual({ width: 2500, height: 1860 });
+    // No PNG sibling or PNG metadata in the envelope.
+    expect(envelope.png_file).toBeUndefined();
+    expect(envelope.png_dimensions).toBeUndefined();
+    expect(existsSync(outputPath.replace(/\.mmd$/, '.png'))).toBe(false);
   });
 
 
