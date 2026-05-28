@@ -1,5 +1,14 @@
 # Changelog
 
+## [2.6.2] - 2026-05-29
+
+### Fixed — `create_story` "story_file_path not set" reject → phase_timeout cascade
+
+When the driver ran `bmad-create-story` (which writes the story file to `_bmad-output/implementation-artifacts/<story_key>.md`) but signaled success **without echoing `story_file_path`**, verify rejected with "story_file_path not set" even though the file was on disk — and the rejection then cascaded into a `phase_timeout_exceeded` halt. Observed recurring on a live autopilot.
+
+- **`verify.js`** now resolves the story file by BMad convention when both runtime state and the signal omit the path (mirrors `verifyDevRed`'s `test_files` auto-detect and `verifyStoryDone`'s git probe).
+- **`composeRuntimeState`** applies the same convention fallback so `story_file_path` is populated for the whole cycle (template slots, resume hints, later verifiers), not just the `create_story` check.
+
 ## [2.6.1] - 2026-05-28
 
 ### Fixed — `land_as_you_go` FSM divergence (advance without commit/push/merge)
