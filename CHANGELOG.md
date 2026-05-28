@@ -1,5 +1,14 @@
 # Changelog
 
+## [2.6.3] - 2026-05-29
+
+### Changed — DAG renders SVG only (PNG generation removed)
+
+`resolve-dag.js render` previously produced both an SVG and a PNG via mmdc. The PNG used node-count-scaled dimensions and routinely came out multi-MB (e.g. 2.6 MB on a ~130-story sprint) for no added value — every surface that shows the DAG renders SVG, which is vector (crisp at any zoom) and small. PNG generation is removed; the `.mmd` source and `.svg` render remain.
+
+- Dropped `computePngDimensions` + the `PNG_*` sizing constants; `runMmdc` no longer takes width/height/scale.
+- `runRender` envelope now reports `svg_file` / `svg_reason` / `svg_message` (the `png_*` keys are gone).
+
 ## [2.6.2] - 2026-05-29
 
 ### Fixed — `create_story` "story_file_path not set" reject → phase_timeout cascade
