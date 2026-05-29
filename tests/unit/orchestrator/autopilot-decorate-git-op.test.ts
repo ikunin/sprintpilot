@@ -158,6 +158,63 @@ describe('composeRuntimeState — migration of legacy current_bmad_step', () => 
     }
   });
 
+  it('skips terminal-but-not-done statuses (deferred/skipped/cancelled) when resolving next story', () => {
+    // Regression: a deferred parent superseded by split children was picked
+    // repeatedly because the resolver only excluded the literal `done`.
+    const { projectRoot, cleanup } = makeProjectWithSprintStatus(
+      null,
+      [
+        'development_status:',
+        '  t-22-configurable: deferred',
+        '  t-30-skip-me: skipped',
+        '  t-31-cancel-me: cancelled',
+        '  9-1-real-next: ready-for-dev',
+        '',
+      ].join('\n'),
+    );
+    try {
+      const r = composeRuntimeState(
+        { current_bmad_step: 'create_story' },
+        flatToProfile({}, 'medium'),
+        projectRoot,
+      );
+      expect(r.phase).toBe('prepare_story_branch');
+      expect(r.story_key).toBe('9-1-real-next');
+    } finally {
+      cleanup();
+    }
+  });
+
+  it('drops a persisted current_story whose sprint-status is deferred and re-resolves (loop fix)', () => {
+    // Live bug: current_story stayed pinned to a deferred story across boots
+    // because persistedStoryRejectionReason only rejected `done`, so the
+    // orchestrator looped prepare_story_branch on it forever.
+    const { projectRoot, cleanup } = makeProjectWithSprintStatus(
+      null,
+      [
+        'development_status:',
+        '  t-22-configurable: deferred',
+        '  9-1-real-next: ready-for-dev',
+        '',
+      ].join('\n'),
+    );
+    try {
+      const r = composeRuntimeState(
+        {
+          current_story: 't-22-configurable',
+          current_bmad_step: 'prepare_story_branch',
+          current_epic: 't',
+        },
+        flatToProfile({}, 'medium'),
+        projectRoot,
+      );
+      expect(r.story_key).toBe('9-1-real-next');
+      expect(r.story_key).not.toBe('t-22-configurable');
+    } finally {
+      cleanup();
+    }
+  });
+
   it('skips *-retrospective entries (regression: looksLikeStoryKey)', () => {
     const { projectRoot, cleanup } = makeProjectWithSprintStatus(
       null,

@@ -221,12 +221,24 @@ function resolveNextStoryKey(projectRoot) {
     const raw = fs.readFileSync(sprintStatusPath, 'utf8');
     const stories = parseSprintStatuses(raw);
     const remaining = remainingStoriesFrom(stories);
-    // parseStatuses returns every key under `development_status:` —
-    // including BMad's epic rollup headers (`epic-4: in-progress`).
-    // Filter them out so the orchestrator never branches on an epic
-    // identifier (which would produce `story/epic-4` instead of
-    // `story/4-8-...`).
-    const realStories = remaining.filter(looksLikeStoryKey);
+    // remainingStoriesFrom (list-remaining-stories.js) classifies anything
+    // that isn't the literal `done` as "remaining" — so a `deferred` /
+    // `skipped` / `cancelled` / `wont_do` / `abandoned` story slips through
+    // as pickable. Re-filter against the full TERMINAL_STATUSES set so the
+    // next-story picker never selects a story the user explicitly took out
+    // of scope. (Observed live: a deferred parent — superseded by its
+    // split children — was picked repeatedly, looping prepare_story_branch.)
+    //
+    // parseStatuses also returns BMad's epic rollup headers (`epic-4:
+    // in-progress`); looksLikeStoryKey drops those so the orchestrator
+    // never branches on an epic identifier (`story/epic-4`).
+    const realStories = remaining.filter(
+      (k) =>
+        looksLikeStoryKey(k) &&
+        !TERMINAL_STATUSES.has(
+          String((stories[k] && stories[k].status) || '').trim().toLowerCase(),
+        ),
+    );
     return realStories.length > 0 ? realStories[0] : null;
   } catch (_e) {
     return null;
@@ -266,6 +278,16 @@ function persistedStoryRejectionReason(key, projectRoot) {
   const status = String(stories[key].status || '').trim().toLowerCase();
   if (status === 'done') {
     return `sprint-status shows status='done'; story already complete`;
+  }
+  // Other terminal statuses (deferred / skipped / cancelled / wont_do /
+  // abandoned) mean the story was explicitly taken out of scope. Reject so a
+  // persisted current_story pointing at one is dropped and re-resolved —
+  // without this the orchestrator loops on it (observed live: a deferred
+  // parent superseded by its split children was re-picked every boot). The
+  // message is deliberately distinct from the 'done' case so the story-bound
+  // phase-skip (which only spares genuine completion) doesn't suppress it.
+  if (TERMINAL_STATUSES.has(status)) {
+    return `sprint-status shows status='${status}'; story is out of scope (terminal, not done)`;
   }
   // v2.3.0 — also reject when the user manually marked plan_status terminal
   // in sprint-plan.yaml but sprint-status hasn't caught up. Returns null
