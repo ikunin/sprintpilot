@@ -572,7 +572,7 @@ Config flag: `state_sharding: auto | always | never`. `auto` = shard only when p
 
 ## PR 4 — Nano routing: `bmad-quick-dev` per story
 
-**Goal.** When `complexity_profile: nano` is active, route each story through `bmad-quick-dev` instead of the full 7-step cycle. `bmad-quick-dev` HALTs on multi-goal input (confirmed in upstream research), so the unit of work remains **one story per call**. Quick-dev's one-shot path (`step-oneshot.md:44`) handles Implement → Review → Classify → Commit internally — quality gates preserved.
+**Goal.** When `complexity_profile: nano` is active, route each story through `bmad-quick-dev` instead of the full 7-step cycle. `bmad-quick-dev` HALTs on multi-goal input (confirmed in upstream research), so the unit of work remains **one story per call**. Quick-dev's one-shot path (`step-oneshot.md`) handles Implement → Review → Classify → Commit internally — quality gates preserved.
 
 **Files modified:**
 
@@ -633,7 +633,7 @@ Workflow.md wires this in step 4 — if `{{escalate_next}}` is set or tests fail
 ```markdown
 ## nano profile — quick flow
 
-When `complexity_profile: nano`, the autopilot routes each story through `bmad-quick-dev`. Quick-dev's one-shot path performs Implement → Review → Classify → Commit in a single skill call (BMad `step-oneshot.md:44`). No additional review is bolted on.
+When `complexity_profile: nano`, the autopilot routes each story through `bmad-quick-dev`. Quick-dev's one-shot path performs Implement → Review → Classify → Commit in a single skill call (BMad `step-oneshot.md`). No additional review is bolted on.
 ```
 
 **Tests:**

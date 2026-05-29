@@ -11,7 +11,7 @@ The per-story flow depends on the active `complexity_profile` in
 - **`small`, `medium`, `large`, `legacy`** — full mandatory 7-step BMad cycle
   (see below). Non-negotiable for these profiles.
 - **`nano`** — routes each story through `bmad-quick-dev` (one-shot
-  Implement → Review → Classify → Commit per BMad `step-oneshot.md:44`).
+  Implement → Review → Classify → Commit per BMad's `step-oneshot.md`).
   Quality gates preserved via quick-dev's internal review step.
   Autopilot does NOT invoke `bmad-create-story`, `bmad-check-implementation-readiness`,
   `bmad-dev-story`, or `bmad-code-review` under nano — quick-dev reads AC

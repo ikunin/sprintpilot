@@ -4,7 +4,7 @@
 [![npm downloads](https://img.shields.io/npm/dm/@ikunin/sprintpilot.svg?style=flat)](https://www.npmjs.com/package/@ikunin/sprintpilot)
 [![License Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg?style=flat)](LICENSE)
 [![BMad Method](https://img.shields.io/badge/BMad%20Method-v6.2%2B-green.svg?style=flat)](https://github.com/bmad-code-org/BMAD-METHOD)
-[![Node.js](https://img.shields.io/badge/node-%3E%3D18-brightgreen.svg?style=flat)](https://nodejs.org)
+[![Node.js](https://img.shields.io/badge/node-%3E%3D20.12-brightgreen.svg?style=flat)](https://nodejs.org)
 [![Tools](https://img.shields.io/badge/tools-9%20supported-orange.svg?style=flat)](#compatibility)
 
 Sprintpilot drives [BMad Method](https://github.com/bmad-code-org/BMAD-METHOD) v6 sprints to completion autonomously. One slash command turns your sprint plan into reviewed, tested, PR-ready code — story by story, with full git workflow.
@@ -362,10 +362,12 @@ Skill internals + output schemas: [docs/USAGE.md](docs/USAGE.md#multi-agent-skil
 
 ## Requirements
 
-- [BMad Method](https://github.com/bmad-code-org/BMAD-METHOD) v6.2.0+
+- [BMad Method](https://github.com/bmad-code-org/BMAD-METHOD) v6.2.1+ (tested through v6.8.0)
+- Node.js 20.12+
 - A supported AI code agent (see [Compatibility](#compatibility))
 - Git repository with at least one commit
 - Platform CLI for PR creation (optional — falls back to git_only mode)
+- BMad's own runtime prerequisites if you run a recent BMad: 6.3.0+ skill hooks invoke `_bmad/scripts/resolve_customization.py` (needs Python 3.10+ and [`uv`](https://github.com/astral-sh/uv)). Core skill logic still runs without them, but terminal `on_complete` hooks will fail.
 
 ## Documentation
 

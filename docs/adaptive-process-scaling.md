@@ -56,7 +56,7 @@ Quality gates inside each flow are unchanged. `bmad-code-review` runs wherever t
 
 ## 5. Nano flow
 
-Nano routes each story through `bmad-quick-dev`'s one-shot path, which internally performs Implement → Review → Classify → Commit (`step-oneshot.md:44`). Quick-dev **rejects multi-goal input** (`step-01-clarify-and-route.md:81-86` runs a Multi-Goal HALT check), so the unit of work is **one story per quick-dev call**, not one epic.
+Nano routes each story through `bmad-quick-dev`'s one-shot path, which internally performs Implement → Review → Classify → Commit (`step-oneshot.md`). Quick-dev **rejects multi-goal input** (`step-01-clarify-and-route.md` runs a Multi-Goal HALT check), so the unit of work is **one story per quick-dev call**, not one epic.
 
 Per story:
 
