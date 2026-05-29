@@ -49,6 +49,7 @@ const land = require('../lib/orchestrator/land');
 const testingScope = require('../lib/orchestrator/testing/scope');
 const orchSprintPlan = require('../lib/orchestrator/sprint-plan');
 const sprintPlanScript = require('../scripts/sprint-plan');
+const excludedStories = require('../lib/orchestrator/excluded-stories');
 const {
   parseStatuses: parseSprintStatuses,
   remainingFrom: remainingStoriesFrom,
@@ -232,9 +233,23 @@ function resolveNextStoryKey(projectRoot) {
     // parseStatuses also returns BMad's epic rollup headers (`epic-4:
     // in-progress`); looksLikeStoryKey drops those so the orchestrator
     // never branches on an epic identifier (`story/epic-4`).
+    //
+    // The Sprintpilot exclusion ledger is also consulted: a story parked via
+    // skip_story / remove_from_sprint stays out of scope even if BMad's
+    // sprint-status no longer shows a terminal value (e.g. a re-plan reset it
+    // to ready-for-dev). This makes the resolver authoritative about scope.
+    //
+    // Before reading the ledger, reconcile any sprint-status terminal-non-done
+    // entries into it — this captures externally-parked stories (hand-edits to
+    // sprint-status or any future BMad path writing a non-canonical terminal)
+    // so they survive a later re-plan. Idempotent and only writes when there
+    // is a new key to record.
+    excludedStories.reconcileFromSprintStatus(projectRoot, stories, TERMINAL_NON_DONE);
+    const excludedSet = excludedStories.readSet(projectRoot);
     const realStories = remaining.filter(
       (k) =>
         looksLikeStoryKey(k) &&
+        !excludedSet.has(k) &&
         !TERMINAL_STATUSES.has(
           String((stories[k] && stories[k].status) || '').trim().toLowerCase(),
         ),
@@ -269,6 +284,14 @@ function persistedStoryRejectionReason(key, projectRoot) {
   }
   if (/-retrospective$/i.test(key)) {
     return 'matches retrospective entry shape — not a story';
+  }
+  // Sprintpilot exclusion ledger wins over sprint-status: a persisted
+  // current_story that was parked via skip_story / remove_from_sprint is
+  // rejected even if BMad's sprint-status now shows it as non-terminal (e.g. a
+  // re-plan reset it to ready-for-dev). Checked before reading sprint-status
+  // so the rejection holds regardless of what BMad wrote.
+  if (excludedStories.isExcluded(projectRoot, key)) {
+    return 'in Sprintpilot exclusion ledger (skipped / removed from sprint) — out of scope';
   }
   const stories = readSprintStatuses(projectRoot);
   if (!stories) return null; // sprint-status absent → defer to caller; don't reject.
@@ -668,16 +691,29 @@ const TERMINAL_STATUSES = new Set([
   'abandoned',
 ]);
 
+// Subset of TERMINAL_STATUSES that means "explicitly out of scope" (not
+// completed). The resolver folds any sprint-status entry with one of these
+// values into the Sprintpilot exclusion ledger so a later BMad re-plan that
+// resets the status onto its canonical ladder can't reactivate it.
+const TERMINAL_NON_DONE = new Set(
+  [...TERMINAL_STATUSES].filter((s) => s !== 'done'),
+);
+
 function resolveStoriesForEpic(projectRoot, epicId) {
   if (!epicId) return [];
   const stories = readSprintStatuses(projectRoot);
   if (!stories) return [];
+  // Fold externally-parked stories into the ledger before reading it (see
+  // resolveNextStoryKey for the rationale).
+  excludedStories.reconcileFromSprintStatus(projectRoot, stories, TERMINAL_NON_DONE);
+  const excludedSet = excludedStories.readSet(projectRoot);
   const keys = Object.keys(stories);
   const out = [];
   for (const key of keys) {
     if (!looksLikeStoryKey(key)) continue;
     const derivedEpic = deriveEpicFromStoryKey(key);
     if (derivedEpic !== epicId && derivedEpic !== `epic-${epicId}`) continue;
+    if (excludedSet.has(key)) continue;
     const status = String(stories[key].status || '').trim().toLowerCase();
     if (TERMINAL_STATUSES.has(status)) continue;
     out.push(key);
@@ -2220,6 +2256,43 @@ function applySideEffects(sideEffects, runtime, profile, projectRoot) {
         // ledger entry — re-applying here would double-mutate state.
         // BMad-owned mutations (e.g. skip_story → sprint-status) still
         // live elsewhere; this CLI never touches sprint-status directly.
+        //
+        // Maintain the Sprintpilot exclusion ledger here (not sprint-status):
+        // skip_story / remove_from_sprint park stories so the resolver never
+        // re-picks them (skip_story alone doesn't mark sprint-status, and a
+        // BMad re-plan can reset a removed story's status); add_to_sprint
+        // un-parks them. Idempotent and safe to run alongside adapt's state
+        // mutation — this only touches the Sprintpilot-owned ledger file.
+        if (validated.ok && Array.isArray(validated.commands)) {
+          for (const cmd of validated.commands) {
+            if (cmd.kind === 'skip_story') {
+              if (excludedStories.recordExcluded(projectRoot, cmd.story_key, { reason: 'user_skip_story' }) > 0) {
+                ledger.append(
+                  { kind: 'story_excluded', story_key: cmd.story_key, reason: 'user_skip_story' },
+                  { projectRoot },
+                );
+              }
+            } else if (cmd.kind === 'remove_from_sprint') {
+              const added = excludedStories.recordExcluded(projectRoot, cmd.story_keys, {
+                reason: 'user_remove_from_sprint',
+              });
+              if (added > 0) {
+                ledger.append(
+                  { kind: 'story_excluded', story_keys: cmd.story_keys, reason: 'user_remove_from_sprint' },
+                  { projectRoot },
+                );
+              }
+            } else if (cmd.kind === 'add_to_sprint') {
+              const removed = excludedStories.removeExcluded(projectRoot, cmd.story_keys);
+              if (removed > 0) {
+                ledger.append(
+                  { kind: 'story_unexcluded', story_keys: cmd.story_keys, reason: 'user_add_to_sprint' },
+                  { projectRoot },
+                );
+              }
+            }
+          }
+        }
         break;
       }
       case 'record_flaky_tests': {
@@ -4994,4 +5067,8 @@ module.exports = {
   recoverUnlandedPredecessor,
   classifyUnlandedPredecessor,
   resolvePredecessorRecovery,
+  // v2.6.5 — next-story resolver + persisted-story validator (exposed so the
+  // exclusion-ledger behavior is unit-testable).
+  resolveNextStoryKey,
+  persistedStoryRejectionReason,
 };
