@@ -1058,12 +1058,20 @@ function composeRuntimeState(persisted, profile, projectRoot) {
     //   (a) the persisted YAML predates v2.4.0 and has no stamp, OR
     //   (b) composeRuntimeState changed `phase` from the persisted value
     //       (e.g. a phase reset for missing story_key, or a fresh-session
-    //       flow start) — the old stamp would track the wrong phase.
+    //       flow start) — the old stamp would track the wrong phase, OR
+    //   (c) the resolved STORY differs from the persisted one (a stalled
+    //       story was rejected/pruned and re-resolved to a new story that
+    //       happens to land on the same phase name) — keeping the old
+    //       stamp would make the NEW story's phase look instantly
+    //       budget-exhausted. Observed live: a ~5h-stalled create_story was
+    //       reconciled away, the next story inherited the stale stamp, and
+    //       its first emission fired a spurious phase_timeout_exceeded.
     // Either way, we treat "now" as the entry into the resolved phase so
     // the first emission isn't immediately budget-exhausted.
     phase_started_at:
       typeof persisted.phase_started_at === 'string' &&
-      persisted.current_bmad_step === phase
+      persisted.current_bmad_step === phase &&
+      (persisted.current_story || null) === (resolvedStoryKey || null)
         ? persisted.phase_started_at
         : new Date().toISOString(),
     // v2.4.1 — diagnostic mode state. Restored only when the phase

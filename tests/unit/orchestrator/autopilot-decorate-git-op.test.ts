@@ -215,6 +215,65 @@ describe('composeRuntimeState — migration of legacy current_bmad_step', () => 
     }
   });
 
+  it('resets phase_started_at when a stalled story is re-resolved to a different story on the same phase (spurious phase_timeout fix)', () => {
+    // Live bug: a ~5h-stalled create_story (15-9b) was reconciled away; the
+    // next story inherited the stale phase_started_at because the phase name
+    // matched, so its first emission fired a spurious phase_timeout_exceeded.
+    const { projectRoot, cleanup } = makeProjectWithSprintStatus(
+      null,
+      [
+        'development_status:',
+        '  15-9b-old: done',
+        '  6-4-next: ready-for-dev',
+        '',
+      ].join('\n'),
+    );
+    try {
+      const stale = '2020-01-01T00:00:00.000Z';
+      const r = composeRuntimeState(
+        {
+          current_story: '15-9b-old',
+          current_bmad_step: 'prepare_story_branch',
+          phase_started_at: stale,
+        },
+        flatToProfile({}, 'medium'),
+        projectRoot,
+      );
+      // 15-9b-old is done → rejected → re-resolved to 6-4-next.
+      expect(r.story_key).toBe('6-4-next');
+      // The stale stamp must NOT carry over, or 6-4 looks instantly timed out.
+      expect(r.phase_started_at).not.toBe(stale);
+      expect(Date.parse(r.phase_started_at as string)).toBeGreaterThan(
+        Date.parse('2025-01-01T00:00:00.000Z'),
+      );
+    } finally {
+      cleanup();
+    }
+  });
+
+  it('preserves phase_started_at when genuinely resuming the SAME story on the same phase', () => {
+    const { projectRoot, cleanup } = makeProjectWithSprintStatus(
+      null,
+      'development_status:\n  6-4-next: in-progress\n',
+    );
+    try {
+      const stamp = '2026-05-29T00:00:00.000Z';
+      const r = composeRuntimeState(
+        {
+          current_story: '6-4-next',
+          current_bmad_step: 'dev_green',
+          phase_started_at: stamp,
+        },
+        flatToProfile({}, 'medium'),
+        projectRoot,
+      );
+      expect(r.story_key).toBe('6-4-next');
+      expect(r.phase_started_at).toBe(stamp);
+    } finally {
+      cleanup();
+    }
+  });
+
   it('skips *-retrospective entries (regression: looksLikeStoryKey)', () => {
     const { projectRoot, cleanup } = makeProjectWithSprintStatus(
       null,
