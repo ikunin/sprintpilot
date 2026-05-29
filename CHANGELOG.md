@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.6.4] - 2026-05-29
+
+### Fixed
+
+- **Resolver no longer re-picks a terminal-but-not-done story** (`c53833f`). `resolveNextStoryKey` excludes `TERMINAL_STATUSES` (`deferred`/`skipped`/`cancelled`/`wont_do`/`abandoned`), and `persistedStoryRejectionReason` rejects a current story whose `sprint-status` is terminal-non-done. Previously a deferred story (e.g. `t-22`) could be re-selected in a loop, and a manual `skip_story` wouldn't "stick" because the resolver kept re-picking it.
+- **Spurious `phase_timeout` on story change** (`4afd9bd`). `composeRuntimeState` now resets `phase_started_at` when a *new* story lands on the *same* `current_bmad_step`; the preserve condition additionally requires the persisted story to match the resolved story. Before, a stale phase clock carried across a story boundary and tripped the per-phase wall-clock budget (the 6-4 incident).
+
 ## [2.6.3] - 2026-05-29
 
 ### Changed — DAG renders SVG only (PNG generation removed)
