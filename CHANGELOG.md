@@ -1,5 +1,26 @@
 # Changelog
 
+## [2.6.5] - 2026-05-29
+
+### Added — authoritative exclusion ledger for parked stories
+
+The next-story resolver previously relied solely on terminal values in BMad's `sprint-status.yaml` to decide what was "out of scope" — which had two failure modes: (a) `skip_story` reset runtime but never marked sprint-status, so the resolver re-picked the same story; (b) `bmad-sprint-planning` "intelligent status detection" upgrades any story with a file on disk to at least `ready-for-dev`, and its "never downgrade" rule only reasons about the canonical ladder — so a re-plan silently flipped `deferred`/`skipped`/`wont_do`/`cancelled`/`abandoned` back to `ready-for-dev`, undoing parking.
+
+The resolver is now authoritative via a Sprintpilot-owned ledger persisted independently of BMad:
+
+- **New `_bmad-output/implementation-artifacts/excluded-stories.json`** (JSON, not YAML — removals need clean replace semantics; the state-store's writer deep-merges and cannot delete a nested key).
+- **`resolveNextStoryKey`, `persistedStoryRejectionReason`, `resolveStoriesForEpic`** consult the ledger and reject excluded stories before reading sprint-status — so the rejection holds even after a BMad re-plan.
+- **`apply_user_commands` hook**: `skip_story` / `remove_from_sprint` record into the ledger; `add_to_sprint` un-records. One clean hook using validated commands already in scope; the pure applier is untouched. Emits new ledger kinds `story_excluded` / `story_unexcluded` for auditability.
+- **`reconcileFromSprintStatus`** (called inside the resolver path) folds sprint-status terminal-non-done entries into the ledger so externally-parked stories (hand-edits or any future BMad path) are also durable against a later clobber. `done` is never folded.
+
+### Changed — BMad Method compatibility
+
+Diffed against a tarball-level diff of BMad Method 6.2.0 → 6.8.0. Every `bmad-*` skill ID, `_bmad/bmm/config.yaml`, the `sprint-status.yaml` schema, and the `{implementation_artifacts}/{story_key}.md` story file path are byte-stable across the range — Sprintpilot's invoked surface is intact. Only line-anchored upstream refs and the declared floor needed updating.
+
+- `_Sprintpilot/manifest.yaml`: `bmad_compatibility` floor `>=6.2.0` → `>=6.2.1` (nano references `bmad-quick-dev/step-oneshot.md`, which first exists in 6.2.1) + comment noting "tested through v6.8.0".
+- `AGENTS.md`, `docs/adaptive-process-scaling.md`, `docs/implementation-plan.md`: de-anchor fragile upstream line refs (`step-oneshot.md:44`, `step-01-clarify-and-route.md:81-86`) to bare filenames. In 6.8.0 `:44` now points at `sync-sprint-status`, not `Classify` — the anchor was stale.
+- `README.md`: fix Node badge (`>=18` → `>=20.12`, matches our `engines`), bump the BMad requirement line to `v6.2.1+ (tested through v6.8.0)`, and document BMad's Python 3.10+ / `uv` runtime dependency for 6.3.0+ skill `on_complete` hooks.
+
 ## [2.6.4] - 2026-05-29
 
 ### Fixed
