@@ -162,7 +162,7 @@ describe('lastWithFingerprint', () => {
   });
 
   it('regression: resume divergence_accepted with fingerprint becomes the new baseline (no infinite re-acceptance loop)', () => {
-    // Scenario mirroring jarvis: a stale halt with fingerprint A. The
+    // Scenario observed live: a stale halt with fingerprint A. The
     // resumer accepts a divergence, appends a resume with fingerprint B.
     // lastWithFingerprint must surface B (the fresh baseline), not A.
     append({ kind: 'halt', phase: 'story_land', fingerprint: { sprintStatusSha: 'OLD' } }, { projectRoot });

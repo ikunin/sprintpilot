@@ -187,8 +187,8 @@ describe('autopilot start', () => {
     expect(actionEntry).toBeDefined();
   });
 
-  it('halts cleanly with sprint_plan_corrupt instead of auto-rebuilding when sprint-plan.yaml is unparseable (v2.5.1 Jarvis fix)', () => {
-    // Reproduce the Jarvis-observed scenario: a `- key: ...` entry was
+  it('halts cleanly with sprint_plan_corrupt instead of auto-rebuilding when sprint-plan.yaml is unparseable (v2.5.1)', () => {
+    // Reproduce the observed scenario: a `- key: ...` entry was
     // appended OUTSIDE the stories: list, breaking the YAML structure.
     // Pre-2.5.1, this triggered shouldAutoDerive → invoke_skill:
     // sprintpilot-plan-sprint, which would discard the entire curated

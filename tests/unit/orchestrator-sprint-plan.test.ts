@@ -238,7 +238,7 @@ describe('planStaleness', () => {
 
 // ──────────────────────────────────────────────────────────────────
 // planCorruptHaltDescriptor + shouldAutoDerive corrupt-protection
-// (v2.5.1 — Jarvis-observed bug: auto-rebuild on corrupt file)
+// (v2.5.1 — observed bug: auto-rebuild on corrupt file)
 // ──────────────────────────────────────────────────────────────────
 
 describe('planCorruptHaltDescriptor', () => {
@@ -262,7 +262,7 @@ describe('planCorruptHaltDescriptor', () => {
     expect(r!.file).toContain('sprint-plan.yaml');
   });
 
-  it('returns a descriptor for the Jarvis-observed indentation break', () => {
+  it('returns a descriptor for the observed indentation break', () => {
     // Reproduce the actual structural bug: a `- key:` entry appended
     // OUTSIDE the stories: list, breaking nesting.
     const broken = [

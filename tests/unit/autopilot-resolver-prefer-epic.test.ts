@@ -16,21 +16,21 @@ function writeSprintStatus(yaml: string) {
   writeFileSync(join(dir, 'sprint-status.yaml'), yaml, 'utf8');
 }
 
-// Mirrors the Jarvis-style hazard: orphan non-done stories in earlier epics
+// Models the orphan-earlier-epics hazard: non-done entries in earlier epics
 // sit ABOVE the active epic in document order. Without the preferEpic option
-// the resolver would silently pick 6-1 (or null after some additional filters)
-// instead of an Epic 18 story.
-const ORPHANS_BEFORE_EPIC_18 = `
+// the resolver picks the first non-terminal entry globally (here `1-1-a`),
+// not a story from the active epic.
+const ORPHANS_BEFORE_ACTIVE_EPIC = `
 development_status:
-  epic-6: in-progress
-  6-1-stale-story: backlog
-  6-2-also-stale: backlog
-  epic-17: in-progress
-  17-4-deferred-but-not-marked: backlog
-  epic-18: in-progress
-  18-1-first-done: done
-  18-2-async-delegate-tool: backlog
-  18-3-proactive-push: backlog
+  epic-1: in-progress
+  1-1-a: backlog
+  1-2-b: backlog
+  epic-2: in-progress
+  2-1-c: backlog
+  epic-3: in-progress
+  3-1-x: done
+  3-2-y: backlog
+  3-3-z: backlog
 `;
 
 beforeEach(() => {
@@ -41,58 +41,54 @@ afterEach(() => {
   rmSync(root, { recursive: true, force: true });
 });
 
-describe('resolveNextStoryKey(opts.preferEpic) — epic-scoped pick wins over orphan earlier-epic stories', () => {
+describe('resolveNextStoryKey(opts.preferEpic) — epic-scoped pick wins over orphan earlier-epic entries', () => {
   it('without preferEpic, returns the first non-terminal entry in document order (the bug)', () => {
-    writeSprintStatus(ORPHANS_BEFORE_EPIC_18);
-    expect(autopilot.resolveNextStoryKey(root)).toBe('6-1-stale-story');
+    writeSprintStatus(ORPHANS_BEFORE_ACTIVE_EPIC);
+    expect(autopilot.resolveNextStoryKey(root)).toBe('1-1-a');
   });
 
-  it('with preferEpic="18", picks the first remaining story in Epic 18 instead', () => {
-    writeSprintStatus(ORPHANS_BEFORE_EPIC_18);
-    expect(autopilot.resolveNextStoryKey(root, { preferEpic: '18' })).toBe(
-      '18-2-async-delegate-tool',
-    );
+  it('with preferEpic="3", picks the first remaining entry in that epic instead', () => {
+    writeSprintStatus(ORPHANS_BEFORE_ACTIVE_EPIC);
+    expect(autopilot.resolveNextStoryKey(root, { preferEpic: '3' })).toBe('3-2-y');
   });
 
-  it('accepts either "18" or "epic-18" as the preferEpic value', () => {
-    writeSprintStatus(ORPHANS_BEFORE_EPIC_18);
-    expect(autopilot.resolveNextStoryKey(root, { preferEpic: 'epic-18' })).toBe(
-      '18-2-async-delegate-tool',
-    );
+  it('accepts either bare number or `epic-N` form as the preferEpic value', () => {
+    writeSprintStatus(ORPHANS_BEFORE_ACTIVE_EPIC);
+    expect(autopilot.resolveNextStoryKey(root, { preferEpic: 'epic-3' })).toBe('3-2-y');
   });
 
   it('falls through to the global scan when the preferred epic is exhausted', () => {
     writeSprintStatus(`
 development_status:
-  epic-6: in-progress
-  6-1-stale-story: backlog
-  epic-18: in-progress
-  18-1-only-story: done
+  epic-1: in-progress
+  1-1-a: backlog
+  epic-3: in-progress
+  3-1-x: done
 `);
-    // Epic 18 has no non-terminal stories left → fall through to global → 6-1.
-    expect(autopilot.resolveNextStoryKey(root, { preferEpic: '18' })).toBe('6-1-stale-story');
+    // Epic 3 has no non-terminal entries left → fall through to global → 1-1-a.
+    expect(autopilot.resolveNextStoryKey(root, { preferEpic: '3' })).toBe('1-1-a');
   });
 
-  it('returns null when the preferred epic is exhausted AND there are no global stories', () => {
+  it('returns null when the preferred epic is exhausted AND there is nothing globally', () => {
     writeSprintStatus(`
 development_status:
-  epic-18: in-progress
-  18-1-done: done
-  18-2-also-done: done
+  epic-3: in-progress
+  3-1-x: done
+  3-2-y: done
 `);
-    expect(autopilot.resolveNextStoryKey(root, { preferEpic: '18' })).toBeNull();
+    expect(autopilot.resolveNextStoryKey(root, { preferEpic: '3' })).toBeNull();
   });
 
-  it('skips an excluded in-epic story and picks the next in-epic story (composes with v2.6.5 ledger)', () => {
-    writeSprintStatus(ORPHANS_BEFORE_EPIC_18);
-    excluded.recordExcluded(root, '18-2-async-delegate-tool', { reason: 'user_skip_story' });
-    expect(autopilot.resolveNextStoryKey(root, { preferEpic: '18' })).toBe('18-3-proactive-push');
+  it('skips an excluded in-epic entry and picks the next (composes with v2.6.5 ledger)', () => {
+    writeSprintStatus(ORPHANS_BEFORE_ACTIVE_EPIC);
+    excluded.recordExcluded(root, '3-2-y', { reason: 'user_skip_story' });
+    expect(autopilot.resolveNextStoryKey(root, { preferEpic: '3' })).toBe('3-3-z');
   });
 
-  it('ignored preferEpic options (empty string, undefined, non-string) take the global path', () => {
-    writeSprintStatus(ORPHANS_BEFORE_EPIC_18);
-    expect(autopilot.resolveNextStoryKey(root, { preferEpic: '' })).toBe('6-1-stale-story');
-    expect(autopilot.resolveNextStoryKey(root, { preferEpic: undefined })).toBe('6-1-stale-story');
-    expect(autopilot.resolveNextStoryKey(root, {})).toBe('6-1-stale-story');
+  it('empty / undefined / missing preferEpic falls through to the global path', () => {
+    writeSprintStatus(ORPHANS_BEFORE_ACTIVE_EPIC);
+    expect(autopilot.resolveNextStoryKey(root, { preferEpic: '' })).toBe('1-1-a');
+    expect(autopilot.resolveNextStoryKey(root, { preferEpic: undefined })).toBe('1-1-a');
+    expect(autopilot.resolveNextStoryKey(root, {})).toBe('1-1-a');
   });
 });

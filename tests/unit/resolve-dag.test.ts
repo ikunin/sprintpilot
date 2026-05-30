@@ -213,7 +213,7 @@ describe('buildEdges', () => {
   });
 
   it('v2.3.4 regression: ordering is suppressed when explicit produced edges (no fake cycle)', () => {
-    // Reproduces the jarvis epic-6 cycle: an explicit "6-1 depends on 6-3"
+    // Reproduces the observed cross-epic cycle: an explicit "6-1 depends on 6-3"
     // emits 6-3 → 6-1 (backwards against story order). With ordering's
     // linear chain 6-1 → 6-2 → 6-3 added on top, this closes a fake
     // cycle 6-3 → 6-1 → 6-2 → 6-3 that the user never declared. The fix
@@ -499,7 +499,7 @@ describe('CLI integration', () => {
 
 
   it('v2.3.5 regression: mermaid output puts "flowchart" on the first line (strict-renderer compatibility)', () => {
-    // Reproduces the jarvis report: Claude Code's chat renderer (and
+    // Reproduces the observed report: Claude Code's chat renderer (and
     // some markdown→mermaid pipelines) detect mermaid by sniffing the
     // first non-blank line for a diagram type. Leading `%%` comments
     // caused them to silently skip rendering.

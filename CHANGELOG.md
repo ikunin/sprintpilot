@@ -8,7 +8,7 @@ The next-story resolver scanned `sprint-status.yaml` top-down and returned the f
 
 - `resolveNextStoryKey(projectRoot, opts)` now accepts `opts.preferEpic`. When set, it returns the first remaining story in that epic; when the preferred epic is exhausted it falls through to the global top-down scan, so `EPIC_BOUNDARY_CHECK` can still trip retrospective + epic advance.
 - `composeRuntimeState`'s `PREPARE_STORY_BRANCH` fallback now passes `{ preferEpic: resolvedEpic }`. The composition with the v2.6.5 exclusion ledger is intact — excluded in-epic stories are skipped first.
-- `preferEpic` accepts either `18` or `epic-18` form (normalized at the resolver boundary).
+- `preferEpic` accepts either bare-number or `epic-N` form (normalized at the resolver boundary).
 
 ## [2.6.5] - 2026-05-29
 
@@ -35,8 +35,8 @@ Diffed against a tarball-level diff of BMad Method 6.2.0 → 6.8.0. Every `bmad-
 
 ### Fixed
 
-- **Resolver no longer re-picks a terminal-but-not-done story** (`c53833f`). `resolveNextStoryKey` excludes `TERMINAL_STATUSES` (`deferred`/`skipped`/`cancelled`/`wont_do`/`abandoned`), and `persistedStoryRejectionReason` rejects a current story whose `sprint-status` is terminal-non-done. Previously a deferred story (e.g. `t-22`) could be re-selected in a loop, and a manual `skip_story` wouldn't "stick" because the resolver kept re-picking it.
-- **Spurious `phase_timeout` on story change** (`4afd9bd`). `composeRuntimeState` now resets `phase_started_at` when a *new* story lands on the *same* `current_bmad_step`; the preserve condition additionally requires the persisted story to match the resolved story. Before, a stale phase clock carried across a story boundary and tripped the per-phase wall-clock budget (the 6-4 incident).
+- **Resolver no longer re-picks a terminal-but-not-done story** (`c53833f`). `resolveNextStoryKey` excludes `TERMINAL_STATUSES` (`deferred`/`skipped`/`cancelled`/`wont_do`/`abandoned`), and `persistedStoryRejectionReason` rejects a current story whose `sprint-status` is terminal-non-done. Previously a deferred story  could be re-selected in a loop, and a manual `skip_story` wouldn't "stick" because the resolver kept re-picking it.
+- **Spurious `phase_timeout` on story change** (`4afd9bd`). `composeRuntimeState` now resets `phase_started_at` when a *new* story lands on the *same* `current_bmad_step`; the preserve condition additionally requires the persisted story to match the resolved story. Before, a stale phase clock carried across a story boundary and tripped the per-phase wall-clock budget (observed live across a story boundary).
 
 ## [2.6.3] - 2026-05-29
 
@@ -285,7 +285,7 @@ The biggest open wound in v2.3.x: "I started a sprint, walked away, came back to
 
 ### Fixed
 
-- **Accepted divergence re-fired on every `autopilot start`.** When the orchestrator auto-accepted a `divergence_accepted` (e.g. `external_completion` — a story finished outside the autopilot), it did not refresh the baseline fingerprint. The next boot read the same stale `halt.fingerprint`, re-detected the same divergence, accepted it again, and so on — a silent infinite loop that never persisted progress. The resume entry now carries the freshly-computed fingerprint, and divergence detection looks up the most-recent ledger entry with ANY fingerprint (`lastWithFingerprint`) rather than only the most-recent `halt`. Caught live in jarvis-personal-assistant.
+- **Accepted divergence re-fired on every `autopilot start`.** When the orchestrator auto-accepted a `divergence_accepted` (e.g. `external_completion` — a story finished outside the autopilot), it did not refresh the baseline fingerprint. The next boot read the same stale `halt.fingerprint`, re-detected the same divergence, accepted it again, and so on — a silent infinite loop that never persisted progress. The resume entry now carries the freshly-computed fingerprint, and divergence detection looks up the most-recent ledger entry with ANY fingerprint (`lastWithFingerprint`) rather than only the most-recent `halt`. Caught live in a downstream sprint.
 
 ## [2.3.8] - 2026-05-22
 
@@ -384,7 +384,7 @@ The biggest open wound in v2.3.x: "I started a sprint, walked away, came back to
 
 ## [2.2.31] - 2026-05-17
 
-**Two paths to close out an epic when non-`done` stories remain.** Reported from a live session: the user explicitly asked to run the Epic 4 retrospective, but the state machine routed to next-story-start because deferred stories in Epic 4 (e.g. 4-7-deferred, 10-X-moved-to-future-epic) showed `backlog`/`in-progress` in sprint-status. The orchestrator counted them as remaining → `remaining_stories_in_epic > 0` → EPIC_BOUNDARY_CHECK → CREATE_STORY instead of RETROSPECTIVE. Workaround was running `bmad-retrospective` directly, bypassing the orchestrator.
+**Two paths to close out an epic when non-`done` stories remain.** Reported from a live session: the user explicitly asked to run an epic retrospective, but the state machine routed to next-story-start because deferred stories in the epic (e.g. <story-a>, <story-b>) showed `backlog`/`in-progress` in sprint-status. The orchestrator counted them as remaining → `remaining_stories_in_epic > 0` → EPIC_BOUNDARY_CHECK → CREATE_STORY instead of RETROSPECTIVE. Workaround was running `bmad-retrospective` directly, bypassing the orchestrator.
 
 BMad's official status vocabulary (`backlog`, `ready-for-dev`, `in-progress`, `review`, `done`) has no formal way to mark a story out-of-scope — users either lie that it shipped or leave it in backlog forever, which traps the orchestrator on next-story routing.
 
@@ -445,7 +445,7 @@ The divergence check was doing its job — detecting that the world had moved si
 ### Added
 
 - 3 regression tests in `state-store.test.ts`:
-  - Block-form scalar list (`story_queue: \n  - 4-6-realm\n  - 10-5-ui`) — the exact shape from the bug report.
+  - Block-form scalar list (`story_queue: \n  - <story-key-a>\n  - <story-key-b>`) — the exact shape from the bug report.
   - Block-form list of objects (`- key: value`).
   - Inline JSON form preserved (backwards-compat).
 
@@ -794,7 +794,7 @@ The orchestrator-side `pause` user-command handler stays as-is — the orchestra
 
 - **"Already done" rejection only fires at story-START phases.** v2.2.4's validator rejected stories marked `done` in sprint-status regardless of `state.phase`. But at story-bound phases (`STORY_DONE`, `STORY_LAND`, etc.), the story IS expected to be done in sprint-status — `verifyStoryDone` enforces that exact condition. Nullifying mid-record produced `branch: story/unknown` on the subsequent emission. Now: "done" rejections fire ONLY when phase ∈ {CREATE_STORY, NANO_QUICK_DEV, PREPARE_STORY_BRANCH}. Epic-rollup-header / retrospective / not-in-sprint-status rejections still fire on ALL phases (they're never legitimate state).
 
-- **Phase reset on story-key rejection.** When the validator legitimately rejects `current_story` AND `state.phase` is a story-bound phase (CHECK_READINESS through STORY_LAND), `composeRuntimeState` now resets `state.phase` to `flowStart` (CREATE_STORY or NANO_QUICK_DEV). Without this, a poisoned `current_story: epic-4` at `phase: dev_red` would null the story_key but keep `dev_red`, producing an `invoke_skill bmad-dev-story` action with no story to dev.
+- **Phase reset on story-key rejection.** When the validator legitimately rejects `current_story` AND `state.phase` is a story-bound phase (CHECK_READINESS through STORY_LAND), `composeRuntimeState` now resets `state.phase` to `flowStart` (CREATE_STORY or NANO_QUICK_DEV). Without this, a poisoned `current_story: epic-N` at `phase: dev_red` would null the story_key but keep `dev_red`, producing an `invoke_skill bmad-dev-story` action with no story to dev.
 
 ### Added
 
@@ -875,7 +875,7 @@ The decision-log reference is recommended but not required by verify itself — 
 
 ## [2.2.4] - 2026-05-15
 
-**Self-heals poisoned `current_story` state from older orchestrator versions.** Users who ran the autopilot on v2.1.3 or v2.1.4 (before the `looksLikeStoryKey` filter shipped in v2.1.5) could end up with `current_story: epic-4` (or another epic-rollup header) persisted in `autopilot-state.yaml`. Every subsequent session emitted `branch: story/epic-4` because `composeRuntimeState` trusted persisted values blindly. v2.2.4 validates persisted `current_story` against sprint-status before using it and falls through to re-resolution when it's poisoned.
+**Self-heals poisoned `current_story` state from older orchestrator versions.** Users who ran the autopilot on v2.1.3 or v2.1.4 (before the `looksLikeStoryKey` filter shipped in v2.1.5) could end up with `current_story: epic-N` (or another epic-rollup header) persisted in `autopilot-state.yaml`. Every subsequent session emitted `branch: story/epic-N` because `composeRuntimeState` trusted persisted values blindly. v2.2.4 validates persisted `current_story` against sprint-status before using it and falls through to re-resolution when it's poisoned.
 
 ### Fixed
 
@@ -894,7 +894,7 @@ The decision-log reference is recommended but not required by verify itself — 
 ### Added
 
 - 7 regression tests in `tests/unit/orchestrator/autopilot-decorate-git-op.test.ts`:
-  - epic-rollup poisoning (`current_story: epic-4`) → nullified + falls through
+  - epic-rollup poisoning (`current_story: epic-N`) → nullified + falls through
   - retrospective shape → nullified
   - key absent from sprint-status → nullified
   - key marked done in sprint-status → nullified
@@ -912,7 +912,7 @@ After upgrading: the next `autopilot next` / `autopilot start` emission auto-cle
 
 ### Fixed
 
-- **`storyStatusFromSprintStatus` regex now tolerates trailing `# comment`.** The inline-form regex anchored `\s*$` immediately after the status token, so a line like `  4-3-foo: done  # PR #99 merged 2026-05-15` failed to match `done` and the verifier reported `shows X as 'null', expected 'done'`. The BMad convention in this user's repo (and likely others) is to annotate merged stories with a PR reference inline — every merged story would trip this. Block-form `<key>:\n  status: <X>\n  ...` was already comment-tolerant via its inner regex; only inline form needed the fix. New regex: `^\s+<key>:\s*["']?([\w-]+)["']?\s*(?:#.*)?$`.
+- **`storyStatusFromSprintStatus` regex now tolerates trailing `# comment`.** The inline-form regex anchored `\s*$` immediately after the status token, so a line like `  N-N-foo: done  # PR #99 merged` failed to match `done` and the verifier reported `shows X as 'null', expected 'done'`. A common BMad convention is to annotate merged stories with a PR reference inline — every merged story would trip this. Block-form `<key>:\n  status: <X>\n  ...` was already comment-tolerant via its inner regex; only inline form needed the fix. New regex: `^\s+<key>:\s*["']?([\w-]+)["']?\s*(?:#.*)?$`.
 
 ### Added
 
@@ -986,7 +986,7 @@ An alternative fix is to pre-merge identity fields onto `runtime` before calling
 - **Natural-language entry in `sprint-autopilot-on/SKILL.md`.** The skill instructs the LLM to parse user directives like:
   - `/sprint-autopilot-on epic 4`
   - `/sprint-autopilot-on stories 3.1, 3.2, 4.5`
-  - `/sprint-autopilot-on 4-8-realm-wide-matcher-and-session-lock`
+  - `/sprint-autopilot-on <story-key>`
   - `/sprint-autopilot-on voice identity matcher` (fuzzy name match)
   - `/sprint-autopilot-on starting from 4.5` (resolve + all-subsequent)
   
@@ -1009,22 +1009,22 @@ Parallel execution (`ma.parallel_stories: true`) — the queue is the source the
 
 ## [2.1.5] - 2026-05-15
 
-**Hotfix for v2.1.4.** `resolveNextStoryKey` used BMad's `parseStatuses` directly, which returns every entry under `development_status:` — including epic rollup headers (`epic-4: in-progress`) and retrospective bookkeeping entries (`4-retrospective: pending`). The resolver picked the first non-`done` entry without filtering, so a real-world sprint emitted `git_op create_branch story/epic-4` (epic header) instead of `story/4-8-realm-wide-matcher` (the next pending story).
+**Hotfix for v2.1.4.** `resolveNextStoryKey` used BMad's `parseStatuses` directly, which returns every entry under `development_status:` — including epic rollup headers (`epic-N: in-progress`) and retrospective bookkeeping entries (`N-retrospective: pending`). The resolver picked the first non-`done` entry without filtering, so a real-world sprint emitted `git_op create_branch story/epic-N` (epic header) instead of `story/<story-key>` (the next pending story).
 
 ### Fixed
 
 - **`resolveNextStoryKey` filters non-story keys.** New `looksLikeStoryKey(key)` predicate rejects:
-  - **Epic rollup headers** — `epic-4`, bare `4`. Detected by stripping any leading `epic-` prefix and requiring at least one remaining hyphen. `epic-4` → `4` → no hyphen → reject. `epic-1-game-engine` → `1-game-engine` → has hyphen → accept.
-  - **Retrospective entries** — `4-retrospective`, `epic-4-retrospective`. Detected by `-retrospective$` suffix.
+  - **Epic rollup headers** — `epic-N`, bare `4`. Detected by stripping any leading `epic-` prefix and requiring at least one remaining hyphen. `epic-N` → `4` → no hyphen → reject. `epic-N-foo` → `1-game-engine` → has hyphen → accept.
+  - **Retrospective entries** — `N-retrospective`, `epic-N-retrospective`. Detected by `-retrospective$` suffix.
 - The resolver only picks from real stories now. If only epic headers / retrospectives remain pending (no real stories), it returns null and `composeRuntimeState` falls back to `flowStart` with the same warning as before.
 
 ### Added
 
 - 4 new regression tests in `tests/unit/orchestrator/autopilot-decorate-git-op.test.ts`:
-  - sprint-status with `epic-4`, done story, ready story, retrospective → picks the ready story not the epic
+  - sprint-status with `epic-N`, done story, ready story, retrospective → picks the ready story not the epic
   - `*-retrospective` entries are skipped
   - only epic headers + retrospectives → fall back to flowStart
-  - `epic-1-game-engine` (story key with `epic-` prefix) is accepted, not confused with the `epic-1` header
+  - `epic-N-foo` (story key with `epic-` prefix) is accepted, not confused with the `epic-N` header
 
 ## [2.1.4] - 2026-05-15
 
@@ -1141,7 +1141,7 @@ Parallel execution (`ma.parallel_stories: true`) — the queue is the source the
 ### Added (this release)
 - **`git_op` actions carry inlined argv `steps`** from `git-plan.js`. Every `git_op` emitted by `cmdStart`/`cmdNext`/`cmdRecord` is decorated with the planned step sequence (`git add`, `git commit`, `git push`). The LLM executes `action.steps` verbatim instead of interpreting an abstract `op` — fixes live-LLM sessions silently skipping `git push` after STORY_DONE.
 - **Phase 2 `_bmad-output/` base-branch sync** in `commit_and_push_story`. After pushing the story branch, the orchestrator runs `switch <base> → checkout <branch> -- _bmad-output → add → commit --allow-empty → push <base> → switch <branch>`. BMad planning and bookkeeping artifacts land on `main` per story so `git log main` is the canonical sprint audit trail.
-- **`git.branch_prefix: 'story/'`** new profile knob. Branch naming aligned to `<branch_prefix>epic-<id>` for epic granularity (e.g. `story/epic-1`) — matches what the nano e2e test asserts on.
+- **`git.branch_prefix: 'story/'`** new profile knob. Branch naming aligned to `<branch_prefix>epic-<id>` for epic granularity (e.g. `story/epic-N`) — matches what the nano e2e test asserts on.
 - **`verify.js` enforces `git_steps_completed: true`** on STORY_DONE. A signal with `commit_sha` + `branch` but missing `git_steps_completed` now fails verify with a clear message — catches commit-without-push.
 - **Nano-aware boot phase.** Fresh sessions under `implementation_flow: quick` (nano) now start at `NANO_QUICK_DEV` so the first emitted action is `invoke_skill: bmad-quick-dev`. Previously hardcoded to `CREATE_STORY` regardless of profile.
 - **Branch reuse: `git.reuse_user_branch: false` (default)**. When `true`, autopilot detects the current non-base branch on boot and commits **every** story onto it. No per-story or per-epic branches are created. One PR opens at sprint-end. Useful for feature-branch workflows.
