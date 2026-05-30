@@ -1,5 +1,15 @@
 # Changelog
 
+## [2.6.6] - 2026-05-30
+
+### Fixed — resolver prefers the current epic
+
+The next-story resolver scanned `sprint-status.yaml` top-down and returned the first non-terminal entry regardless of which epic owned it. When the autopilot was already inside a later epic but earlier epics had orphan non-done stories (user-deferred stories whose status was hand-cleared back to `backlog`, or epics the user explicitly skipped without marking every story terminal), the resolver silently jumped to the earlier-epic orphan — causing a cross-epic mismatch downstream and, in some paths, parking at `prepare_story_branch_no_story_key`. The workaround was always `autopilot start --stories <story-key> --force` to populate `story_queue` manually.
+
+- `resolveNextStoryKey(projectRoot, opts)` now accepts `opts.preferEpic`. When set, it returns the first remaining story in that epic; when the preferred epic is exhausted it falls through to the global top-down scan, so `EPIC_BOUNDARY_CHECK` can still trip retrospective + epic advance.
+- `composeRuntimeState`'s `PREPARE_STORY_BRANCH` fallback now passes `{ preferEpic: resolvedEpic }`. The composition with the v2.6.5 exclusion ledger is intact — excluded in-epic stories are skipped first.
+- `preferEpic` accepts either `18` or `epic-18` form (normalized at the resolver boundary).
+
 ## [2.6.5] - 2026-05-29
 
 ### Added — authoritative exclusion ledger for parked stories
