@@ -209,8 +209,31 @@ function safeExistsSync(p) {
 //   - all stories are done (sprint complete)
 //   - the file can't be parsed
 //   - the only non-done entries are epic rollups (no real stories yet)
-function resolveNextStoryKey(projectRoot) {
+//
+// `opts.preferEpic` — when set, restrict the scan to stories in that epic
+// FIRST. This stops the resolver from silently jumping to an orphan
+// non-done story from an earlier epic when the autopilot is already
+// inside a later epic (very common when prior epics have stragglers, e.g.
+// user-deferred stories whose status was hand-cleared back to `backlog`,
+// or epics the user explicitly skipped without marking every story
+// terminal). Falls through to the global top-down scan when the
+// preferred epic is exhausted, so EPIC_BOUNDARY_CHECK can still trip
+// retrospective + epic advance.
+function resolveNextStoryKey(projectRoot, opts = {}) {
   if (!projectRoot) return null;
+  if (opts && typeof opts.preferEpic === 'string' && opts.preferEpic) {
+    // Accept either `18` or `epic-18` — composeRuntimeState's resolvedEpic
+    // is normally the bare-number form derived from a story key, but the
+    // persisted value can be the `epic-N` form depending on how it was
+    // first set. resolveStoriesForEpic's matcher expects the bare form.
+    const epicMatch = opts.preferEpic.match(/^epic-(.+)$/);
+    const normalizedEpic = epicMatch ? epicMatch[1] : opts.preferEpic;
+    const epicStories = resolveStoriesForEpic(projectRoot, normalizedEpic);
+    if (epicStories.length > 0) return epicStories[0];
+    // Fall through: the current epic is exhausted; allow the global scan
+    // to pick up stragglers (or return null so EPIC_BOUNDARY_CHECK routes
+    // to retrospective and adapt.advanceState picks the next epic).
+  }
   const sprintStatusPath = path.join(
     projectRoot,
     '_bmad-output',
@@ -969,7 +992,13 @@ function composeRuntimeState(persisted, profile, projectRoot) {
     resolvedEpic = deriveEpicFromStoryKey(resolvedStoryKey) || resolvedEpic;
   }
   if (phase === STATES.PREPARE_STORY_BRANCH && !resolvedStoryKey) {
-    const next = resolveNextStoryKey(projectRoot);
+    // Pass `resolvedEpic` so the resolver prefers stories in the current
+    // epic — without this it scans sprint-status top-down and picks the
+    // first non-terminal entry, which is wrong when the autopilot is on
+    // (say) epic 18 but earlier epics still have orphan `backlog`
+    // stories. When the current epic is exhausted, the resolver falls
+    // through to the global scan automatically.
+    const next = resolveNextStoryKey(projectRoot, { preferEpic: resolvedEpic });
     if (next) {
       resolvedStoryKey = next;
       resolvedEpic = deriveEpicFromStoryKey(next) || resolvedEpic;
