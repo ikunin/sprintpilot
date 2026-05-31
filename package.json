@@ -31,7 +31,7 @@
     "bmad-method-addon"
   ],
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=20.12.0"
   },
   "scripts": {
     "prepare": "node scripts/setup-git-hooks.mjs"
