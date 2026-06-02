@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [2.6.7] - 2026-06-02
 
 ### Fixed — `/sprintpilot-plan-sprint` honors focus + scheduling intent
 
