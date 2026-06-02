@@ -2,6 +2,30 @@
 
 ## [Unreleased]
 
+### Fixed — `/sprintpilot-plan-sprint` honors focus + scheduling intent
+
+`/sprintpilot-plan-sprint` on an existing plan was silently additive: it inferred deps for the requested epic and appended them at the end of the queue, leaving previously-pending stories from earlier epics ahead. Typing `/sprintpilot-plan-sprint epic 21` produced a plan in which `epic-21` landed at queue position 19, and the autopilot picked up an unrelated leftover (`t-28-memory-export-and-import`) on the next start. Two underlying bugs:
+
+1. **Step 3 short-circuited curation when nothing was stale.** User-direct invocation of the slash command should always reach the curation prompt — the user typed the command for a reason. Fixed: Step 3's `stale: false` row now requires `intent.mode === 'auto'` to skip curation; `'user-direct'` and `'replan'` always continue to Step 10 → 11.
+2. **No contract slot for "focus" intent.** The skill had nowhere to capture *"focus on epic 21"* and translate it into a scoping or prioritization decision.
+
+New design:
+
+- **Step 0 — Capture Invocation Intent.** Parses focus (`focus_epics: [...]`, `focus_stories: [...]`) and optional `scheduling` from `template_slots`, the skill argument string (`/sprintpilot-plan-sprint epic 21`), or the surrounding chat message ("focus on epic 21"). Echoes the resolved intent back to the user as an "are-you-sure" line before proceeding.
+- **Step 11a — Scheduling question (conditional).** When focus is set and scheduling is not preset, the skill ASKS the user to pick one of four modes: `top` (bump focus to head of queue, keep others below), `focus_only` (exclude all non-focus pending), `append` (legacy default — focus runs last), `custom` (no preset; hand-pick in 11b). Silently picking `append` was the buggy behavior.
+- **Step 11b — Focus-aware curation.** Default selection and consequences statement adapt to the scheduling choice. The user still has full per-story override via `[a:KEY]` / `[r:KEY]`.
+- **Step 13 — Priority computation honors scheduling.** `top` uses a two-pass topological sort (focus stories assigned `1..N` first, others `N+1..M` second) with dependency edges still enforced — an upstream from a non-focus epic that a focus story needs gets pulled into the first pass.
+
+Files: `_Sprintpilot/skills/sprintpilot-plan-sprint/workflow.md` (new Step 0, Step 3 row tightened, Step 11 split into 11a + 11b, Step 13 priority rule), `_Sprintpilot/skills/sprintpilot-plan-sprint/SKILL.md` (Invocation modes updated; new "Scheduling contract" section), `docs/sprint-planning.md` (Invocation, Step 11a, Step 11b documented for end users).
+
+### Added — `replan_sprint` carries focus + scheduling intent
+
+The mid-flight `replan_sprint` user-input command now accepts optional `focus_epics: string[]`, `focus_stories: string[]`, and `scheduling: 'top' | 'focus_only' | 'append' | 'custom'` fields alongside the existing `reason`. They are validated at the user-commands schema layer, persisted into `replan_requested` by the applier, and threaded through `template_slots` when the autopilot consumes the request on the next `cmdStart` — so the planner's Step 0 sees the intent without the user having to re-type it.
+
+Auto-derive (background plan-staleness reconciliation) also infers `focus_epics` when the staleness `missing_keys` cleanly belong to a single epic — the common case after `bmad-sprint-planning` adds a new epic. Multi-epic additions are left as broad refresh (no inferred focus), so the heuristic never invents focus that wasn't there. The planner still asks the scheduling question — auto-derive doesn't presume.
+
+Files: `_Sprintpilot/lib/orchestrator/user-commands.js` (schema + validation), `_Sprintpilot/lib/orchestrator/user-command-applier.js` (persist into `replan_requested`), `_Sprintpilot/bin/autopilot.js` (consume into `template_slots`; new `inferFocusEpicsFromStoryKeys` helper exported for tests), `docs/sprint-planning.md` (mid-flight commands table updated). Coverage: `tests/unit/orchestrator/user-commands-plan.test.ts` (+9 cases), `tests/unit/infer-focus-epics.test.ts` (new file, 8 cases).
+
 ### Changed — `gemini-cli` skills install at `.agents/skills/`
 
 The `gemini-cli` tool's skills install directory moved from `.gemini/skills/` to `.agents/skills/`, aligning with the BMad installer and the AGENTS-directory convention that other Gemini-family tooling now reads. `GEMINI.md` (the system-prompt file) is unchanged.

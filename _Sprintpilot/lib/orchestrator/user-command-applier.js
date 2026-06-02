@@ -258,11 +258,19 @@ function applyOne(state, profile, cmd) {
       // and emits the invoke_skill action. Halt now so the autopilot
       // stops at the current story boundary; the user (or the LLM
       // session) restarts to drive the skill.
+      //
+      // Focus + scheduling fields carry intent from this mid-flight
+      // command through to the planner skill's Step 0 — so a re-plan
+      // triggered by "focus on epic 21 at the top" doesn't have to be
+      // re-typed in the next session.
       newState = {
         ...state,
         replan_requested: {
           reason: cmd.reason || null,
           requested_at: new Date().toISOString(),
+          focus_epics: cmd.focus_epics || null,
+          focus_stories: cmd.focus_stories || null,
+          scheduling: cmd.scheduling || null,
         },
         halt_requested: {
           reason: cmd.reason || 'user_replan_sprint',

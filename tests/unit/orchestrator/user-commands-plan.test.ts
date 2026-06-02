@@ -197,6 +197,49 @@ describe('validateOne replan_sprint', () => {
   it('rejects a non-string reason', () => {
     expect(validateOne({ kind: 'replan_sprint', reason: 42 }).ok).toBe(false);
   });
+
+  it('accepts focus_epics + scheduling', () => {
+    expect(
+      validateOne({
+        kind: 'replan_sprint',
+        focus_epics: ['21'],
+        scheduling: 'top',
+      }).ok,
+    ).toBe(true);
+  });
+
+  it('accepts focus_stories', () => {
+    expect(
+      validateOne({
+        kind: 'replan_sprint',
+        focus_stories: ['21-3-add-auth', '21-4-router'],
+      }).ok,
+    ).toBe(true);
+  });
+
+  it('rejects focus_epics with an empty array', () => {
+    expect(validateOne({ kind: 'replan_sprint', focus_epics: [] }).ok).toBe(false);
+  });
+
+  it('rejects focus_epics with a non-array value', () => {
+    expect(validateOne({ kind: 'replan_sprint', focus_epics: '21' }).ok).toBe(false);
+  });
+
+  it('rejects focus_epics entries that fail the regex', () => {
+    expect(
+      validateOne({ kind: 'replan_sprint', focus_epics: ['valid', 'has space'] }).ok,
+    ).toBe(false);
+  });
+
+  it('rejects an unknown scheduling mode', () => {
+    expect(validateOne({ kind: 'replan_sprint', scheduling: 'whatever' }).ok).toBe(false);
+  });
+
+  it('accepts every valid scheduling mode', () => {
+    for (const mode of ['top', 'focus_only', 'append', 'custom']) {
+      expect(validateOne({ kind: 'replan_sprint', scheduling: mode }).ok).toBe(true);
+    }
+  });
 });
 
 // ──────────────────────────────────────────────────────────────────
@@ -269,5 +312,30 @@ describe('applyOne — plan-aware kinds', () => {
     expect(r.effects).toHaveLength(1);
     expect(r.effects[0].kind).toBe('halt');
     expect(r.effects[0].reason).toBe('user_replan_sprint');
+  });
+
+  it('replan_sprint carries focus_epics / focus_stories / scheduling into replan_requested', () => {
+    const r = applyOne(baseState, baseProfile, {
+      kind: 'replan_sprint',
+      reason: 'focus on next epic',
+      focus_epics: ['21'],
+      focus_stories: ['21-3-add-auth'],
+      scheduling: 'top',
+    });
+    expect(r.newState.replan_requested).toMatchObject({
+      reason: 'focus on next epic',
+      focus_epics: ['21'],
+      focus_stories: ['21-3-add-auth'],
+      scheduling: 'top',
+    });
+  });
+
+  it('replan_sprint nulls out absent focus / scheduling fields', () => {
+    const r = applyOne(baseState, baseProfile, { kind: 'replan_sprint' });
+    expect(r.newState.replan_requested).toMatchObject({
+      focus_epics: null,
+      focus_stories: null,
+      scheduling: null,
+    });
   });
 });

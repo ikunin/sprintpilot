@@ -43,6 +43,65 @@ naming the missing file and the BMad skill that produces it
 
 ---
 
+## Step 0 — Capture Invocation Intent
+
+<action>Determine the user's planning intent BEFORE reading any artifacts.
+Three orthogonal signals contribute:
+
+1. **`template_slots`** (when the orchestrator invoked the skill):
+   - `auto: true` → background staleness reconciliation; preserve prior curation.
+   - `replan: true` → user issued `replan_sprint`; treat as a full rebuild.
+   - `focus_epics: [<id>, ...]` *(optional)* → user wants these epics emphasized.
+   - `focus_stories: [<key>, ...]` *(optional)* → user wants these specific stories emphasized.
+   - `scheduling: 'top' | 'focus_only' | 'append' | 'custom'` *(optional)* → explicit scheduling override; if omitted, Step 11 will ASK the user.
+
+2. **Skill argument string** (when the user typed `/sprintpilot-plan-sprint <args>`):
+   - `epic <id>` / `epic-<id>` / bare `<id>` → `focus_epics: ["<id>"]`.
+   - Multiple comma-separated IDs → all of them in `focus_epics`.
+   - A specific story key (e.g. `21-3-add-auth`) → `focus_stories: ["21-3-add-auth"]`.
+   - `rebuild` / `from scratch` → force a full re-inference.
+
+3. **Surrounding chat message** (when the user typed the slash command
+   alongside a natural-language directive in the same turn):
+   - "focus on epic 21" / "only epic 21" / "narrow to epic 21" / "plan for epic 21"
+     → `focus_epics: ["21"]`
+   - "prioritize 21-3 and 21-4" → `focus_stories: ["21-3", "21-4"]`
+   - "skip / exclude epic X" → leave for per-story curation in Step 11; do NOT
+     auto-translate to `focus_epics` (that's a scope directive, not an exclusion).
+   - "rebuild from scratch" / "re-plan everything" → `rebuild: true`.
+
+Resolve these signals into an `intent` object kept in scratch state for
+the rest of the workflow:
+```
+intent = {
+  mode:           'user-direct' | 'auto' | 'replan',
+  focus_epics:    string[] | null,    // e.g. ["21"]
+  focus_stories:  string[] | null,    // e.g. ["21-3-add-auth"]
+  scheduling:     'top' | 'focus_only' | 'append' | 'custom' | null,
+  rebuild:        boolean,
+  raw_directive:  string | null       // user's verbatim text, for echo-back
+}
+```
+If `focus_epics` or `focus_stories` references an ID/key that is NOT in
+`epics.md` / `sprint-status.yaml`, halt with a `user_prompt` listing the
+valid IDs and asking the user to pick one — do NOT guess.</action>
+
+<action>Echo the resolved intent back to the user in one line BEFORE
+proceeding, so a misparse is caught immediately:
+
+| Resolved intent | Echo |
+|---|---|
+| `focus_epics: ["21"]`, `scheduling: null` | "Planning intent: focus on epic 21 — Step 11 will ask how to schedule it (top / focus-only / append / custom)." |
+| `focus_epics: ["21"]`, `scheduling: 'top'` | "Planning intent: focus on epic 21, scheduled at the top of the queue (other pending stories preserved, ranked below)." |
+| `focus_epics: ["21"]`, `scheduling: 'focus_only'` | "Planning intent: focus on epic 21 ONLY — all other pending stories will be excluded from this sprint (they remain in the plan as `plan_status: excluded` for context)." |
+| no focus, no plan | "Planning intent: fresh plan, all non-done stories included by default." |
+| no focus, plan exists | "Planning intent: refresh existing plan — you'll be prompted to re-curate the included set in Step 11." |
+
+This echo is the user's "are you sure" moment. They can correct in chat
+before the skill proceeds.</action>
+
+---
+
 ## Step 1 — Load Inputs
 
 <action>Verify the three required artifacts exist:
@@ -100,7 +159,7 @@ Decision matrix:
 
 | stale | reason | action |
 |---|---|---|
-| false | — | Skip Step 4 entirely (plan is fresh). Go to Step 5 unless invoked via /sprintpilot-plan-sprint with a "rebuild from scratch" intent. |
+| false | — | Skip Step 4 entirely (plan is fresh). For `intent.mode === 'auto'` you may go directly to Step 5 / 13. For `'user-direct'` or `'replan'` you MUST still proceed to Step 10 → Step 11 — the user invoked the slash command on purpose; the only way for them to (re-)scope, prioritize, or focus the sprint is via Step 11's prompts. Skipping curation on a non-stale plan is the bug that caused users to type `/sprintpilot-plan-sprint epic 21` and get their queue topped by an unrelated leftover story. |
 | true | `missing` | Run Step 4 for EVERY epic in epics.md. |
 | true | `migration_needed` | Step 2 should have handled this — re-check; if still missing, run Step 4 for every epic. |
 | true | `added_stories` | Run Step 4 only for the epics whose stories appear in `missing_keys`. |
@@ -320,20 +379,83 @@ Report the path to the user:
 
 ---
 
-## Step 11 — Curation
+## Step 11 — Schedule + Curate
 
-<action>Ask the user which stories belong in this sprint plan:
-> "Which stories do you want to run in this sprint?
->  Default: ALL non-done stories.
->  [Enter] accept default  [e] edit selection  [a:KEY] add  [r:KEY] remove"
+This step has TWO sub-prompts. The first (11a) only fires when the user
+expressed a focus (`intent.focus_epics` or `intent.focus_stories`) and
+didn't pre-set `intent.scheduling`. The second (11b) is the curation
+prompt, with the default selection driven by the scheduling choice.
 
-`Default: ALL non-done` means every story in sprint-status whose
-status is not `done`. Excluded stories carry `plan_status: excluded`
-in the plan — they remain visible in the file for context (e.g., as
-upstreams of included stories) but are NOT picked by the queue resolver.</action>
+### Step 11a — Scheduling question (conditional)
+
+<action>If `intent.focus_epics` or `intent.focus_stories` is set AND
+`intent.scheduling` is null, ASK the user how the focus should be scheduled.
+This is REQUIRED — do not assume. The four modes are mutually exclusive
+and produce visibly different plans:
+
+> "You asked to focus on epic 21. How should it be scheduled relative
+>  to the 14 other pending stories in the existing plan?
+>
+>    [1] **Top-prioritize epic 21** *(recommended for "do this next")* —
+>        bump epic-21 stories to priorities 1..N at the head of the
+>        queue; keep the other 14 pending stories below (they still
+>        run after the epic-21 batch).
+>    [2] **Focus only on epic 21** — exclude the other 14 pending
+>        stories from this sprint. They stay in the plan as
+>        `plan_status: excluded` for DAG context but the autopilot
+>        won't run them. Pick this for a single-epic mini-sprint.
+>    [3] **Append epic 21 at end** — keep current priorities; epic 21
+>        runs last after every existing pending story. Today's default
+>        behavior. Rarely what you want when you say 'focus on X'.
+>    [4] **Custom** — proceed to per-story curation (11b) with no
+>        scheduling preset; pick stories individually."
+
+Wait for the user's choice. Echo it back in one line:
+> "Scheduling: top-prioritize epic 21. Stepping into curation..."
+
+Persist the choice into `intent.scheduling`. From here forward the
+curation default + Step 13 priority computation honor this directive.</action>
+
+### Step 11b — Curation
+
+<action>Ask the user to confirm or edit the selection. The default
+**changes based on `intent.scheduling`**:
+
+| `intent.scheduling` | Default selection | What happens on Enter |
+|---|---|---|
+| `null` (no focus) or `append` | ALL non-done stories included | Same as the legacy behavior — everything pending gets `plan_status: pending`. |
+| `top` | ALL non-done stories included; focus stories will be moved to the head in Step 13 | Same set as `append`, but priority recomputation in Step 13 puts focus-epic/story entries first. |
+| `focus_only` | ONLY focus-epic / focus-story entries included; all OTHER previously-pending stories default to `excluded` | Sprint narrows to the focus set; other stories stay visible in the plan as `excluded` for context. |
+| `custom` | ALL non-done stories included | User edits the selection by hand. |
+
+Show the prompt with the count of stories that would change and the
+scheduling line:
+
+> "Curation — scheduling: **top-prioritize epic 21**.
+>  Default selection: 14 epic-21 stories (focus) + 14 other pending (kept).
+>  Priorities will be reordered so epic-21 stories run first.
+>
+>    [Enter] accept default  [e] edit selection  [a:KEY] add  [r:KEY] remove"
+
+For `focus_only` make the consequences explicit:
+
+> "Curation — scheduling: **focus only on epic 21**.
+>  Default selection: 14 epic-21 stories included; 14 other previously-pending
+>  stories will be EXCLUDED from this sprint (they stay in the plan as
+>  `plan_status: excluded` for DAG context but the autopilot won't run them).
+>
+>    [Enter] accept default  [e] edit selection  [a:KEY] add  [r:KEY] remove"
+
+`Default: ALL non-done` means every story in sprint-status whose status
+is not `done`. Excluded stories carry `plan_status: excluded` in the plan
+— they remain visible in the file for context (e.g., as upstreams of
+included stories) but are NOT picked by the queue resolver.</action>
 
 <action>On `e` (edit), present a numbered list with `[x]` for included
-and `[ ]` for excluded; the user toggles entries by number.</action>
+and `[ ]` for excluded; the user toggles entries by number. The user can
+also override individual entries via `[a:KEY]` (re-include something the
+scheduling default excluded) or `[r:KEY]` (exclude something the default
+included).</action>
 
 ---
 
@@ -375,10 +497,21 @@ and the validator treats them as terminal.</action>
 - `epics: []` — per-epic metadata captured in Step 1 (id, title)
 - `stories: []` — per-story entries with `key`, `epic`, `title`,
   `plan_status` (`pending` for included, `excluded` for excluded),
-  `issue_id` (from Step 7), `priority` (1-indexed in topological order),
+  `issue_id` (from Step 7), `priority` (see priority rule below),
   `upstream` (denormalized from `plan.dependencies.stories.<key>.depends_on`),
   `cross_epic_upstream` (denormalized from `plan.cross_epic_deps`),
   `added_by: 'skill'`, `added_at`
+
+**Priority rule (driven by `intent.scheduling`):**
+
+| `intent.scheduling` | Priority computation |
+|---|---|
+| `null` / `append` / `custom` | 1-indexed in topological order across the full included set. Today's default. |
+| `top` | Two-pass topological sort: first pass over focus-epic / focus-story stories (assigned priorities `1..N`), second pass over the remaining included stories (assigned `N+1..M`). Both passes still respect dependency edges — an upstream from a non-focus epic that a focus story needs gets pulled into the first pass so the focus story isn't blocked. |
+| `focus_only` | Equivalent to `top` with all non-focus entries excluded; priorities run `1..N` across the focus set only. |
+
+The priority ordering is what the autopilot queue resolver consumes — so
+"top" really does mean the focus epic runs first.
 - `dependencies`, `cross_epic_deps`, `overrides`, `notes` — preserved
   from Steps 4-7
 - `status.last_run_outcome: 'success'`, `status.last_run_at: <now>`,

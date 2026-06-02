@@ -35,20 +35,45 @@ reorder validator) will reject.
 
 The skill responds to three callers:
 
-1. **User-direct:** `/sprintpilot-plan-sprint` with no arguments.
-   Build a plan from scratch (or refresh existing one).
+1. **User-direct:** `/sprintpilot-plan-sprint [<focus>] [<scheduling>]`.
+   Build a plan from scratch OR refresh + (re-)curate an existing one.
+   Optional focus / scheduling hints:
+   - `/sprintpilot-plan-sprint epic 21` → `focus_epics: ["21"]`
+   - `/sprintpilot-plan-sprint 21-3-add-auth, 21-4-router` → `focus_stories: [...]`
+   - `/sprintpilot-plan-sprint rebuild` → force full re-inference
+   - Natural-language ("focus on epic 21", "prioritize 21-3") works too —
+     Step 0 parses it from the surrounding chat message.
 2. **Auto-derive:** the autopilot emits
    `invoke_skill: sprintpilot-plan-sprint` with
    `template_slots: { auto: true, reason, missing_keys?, removed_keys? }`
    when a plan is missing/stale and the user opted in via
-   `autopilot.auto_plan_on_start: true`.
+   `autopilot.auto_plan_on_start: true`. Preserves prior curation.
 3. **Replan:** the autopilot emits the same action with
    `template_slots: { replan: true, reason }` after the user issued
-   `user_input { kind: 'replan_sprint' }` mid-flight.
+   `user_input { kind: 'replan_sprint' }` mid-flight. Treated as a full
+   rebuild.
 
-In every mode the skill follows the same 14-step workflow — only the
-"present results" tone differs (auto/replan modes assume the user wants
-a brief summary; user-direct mode is more conversational).
+In every mode the skill follows the same workflow — only the "present
+results" tone differs (auto mode assumes the user wants a brief summary;
+user-direct and replan modes are more conversational and ALWAYS reach
+the curation step, even when nothing has gone stale).
+
+### Scheduling contract
+
+When the user signals focus (`focus_epics` or `focus_stories`), the skill
+ASKS how the focus should be scheduled relative to existing pending
+stories — it does NOT assume. Step 11a presents four options:
+
+| Mode | Behavior |
+|---|---|
+| `top` | Bump focus stories to the head of the queue; keep other pending stories below. The "do this next" mode. |
+| `focus_only` | Exclude all non-focus pending stories from this sprint (they stay in the plan as `plan_status: excluded` for context). The "single-epic mini-sprint" mode. |
+| `append` | Keep current priorities; focus stories run last. Today's legacy behavior — rarely what a user wants when they say "focus on X". |
+| `custom` | Skip the preset, drop into per-story curation in Step 11b. |
+
+If the orchestrator emits `template_slots.scheduling`, the skill honors
+it without prompting. If not, Step 11a is mandatory — silently picking
+`append` (the historical default) is the bug fixed in this revision.
 
 ### When NOT to invoke
 

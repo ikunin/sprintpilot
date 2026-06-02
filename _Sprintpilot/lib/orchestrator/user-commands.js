@@ -42,9 +42,14 @@
 //   remove_from_sprint { story_keys: string[], mark_status?: 'skipped'|'deferred' }
 //     Mark stories with plan_status=skipped (default) or 'deferred'.
 //     Downstream-in-plan stories get a warning side effect.
-//   replan_sprint { reason?: string }
+//   replan_sprint { reason?: string, focus_epics?: string[],
+//                   focus_stories?: string[],
+//                   scheduling?: 'top'|'focus_only'|'append'|'custom' }
 //     Halt at next story_done boundary and emit invoke_skill for
-//     /sprintpilot-plan-sprint. The skill rebuilds the plan from scratch.
+//     /sprintpilot-plan-sprint. Optional focus_epics / focus_stories +
+//     scheduling carry the user's intent through to the skill's Step 0
+//     so a re-plan triggered by *"focus on epic 21 at the top"* doesn't
+//     have to be re-typed once the next session starts.
 //
 // Validation returns { ok: true, command } | { ok: false, errors: string[] }.
 
@@ -69,8 +74,10 @@ const COMMAND_KINDS = [
 ];
 
 const STORY_KEY_RE = /^[A-Za-z0-9._-]{1,64}$/;
+const EPIC_ID_RE = /^[A-Za-z0-9._-]{1,32}$/;
 const DECISION_ID_RE = /^[A-Za-z0-9._-]{1,64}$/;
 const VALID_REMOVE_STATUSES = ['skipped', 'deferred'];
+const VALID_SCHEDULING_MODES = ['top', 'focus_only', 'append', 'custom'];
 
 function isPlainObject(v) {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -196,6 +203,39 @@ function validateOne(cmd) {
     case 'replan_sprint': {
       if ('reason' in cmd && cmd.reason !== undefined && typeof cmd.reason !== 'string') {
         errors.push('replan_sprint.reason must be string when present');
+      }
+      if ('focus_epics' in cmd && cmd.focus_epics !== undefined && cmd.focus_epics !== null) {
+        if (!Array.isArray(cmd.focus_epics) || cmd.focus_epics.length === 0) {
+          errors.push('replan_sprint.focus_epics must be a non-empty array when present');
+        } else {
+          for (const id of cmd.focus_epics) {
+            if (!nonEmptyString(id) || !EPIC_ID_RE.test(id)) {
+              errors.push(
+                `replan_sprint.focus_epics entry ${JSON.stringify(id)} must match [A-Za-z0-9._-]{1,32}`,
+              );
+            }
+          }
+        }
+      }
+      if ('focus_stories' in cmd && cmd.focus_stories !== undefined && cmd.focus_stories !== null) {
+        if (!Array.isArray(cmd.focus_stories) || cmd.focus_stories.length === 0) {
+          errors.push('replan_sprint.focus_stories must be a non-empty array when present');
+        } else {
+          for (const k of cmd.focus_stories) {
+            if (!nonEmptyString(k) || !STORY_KEY_RE.test(k)) {
+              errors.push(
+                `replan_sprint.focus_stories entry ${JSON.stringify(k)} must match [A-Za-z0-9._-]{1,64}`,
+              );
+            }
+          }
+        }
+      }
+      if ('scheduling' in cmd && cmd.scheduling !== undefined && cmd.scheduling !== null) {
+        if (!VALID_SCHEDULING_MODES.includes(cmd.scheduling)) {
+          errors.push(
+            `replan_sprint.scheduling must be one of ${VALID_SCHEDULING_MODES.join(', ')}`,
+          );
+        }
       }
       break;
     }

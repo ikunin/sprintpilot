@@ -43,26 +43,62 @@ If any is missing the skill halts with a `user_prompt` naming the missing file a
 ## Invocation
 
 ```
-/sprintpilot-plan-sprint
+/sprintpilot-plan-sprint                                  # no focus — full re-curation
+/sprintpilot-plan-sprint epic 21                          # focus on epic 21
+/sprintpilot-plan-sprint 21-3-add-auth, 21-4-router       # focus on specific stories
+/sprintpilot-plan-sprint rebuild                          # force full re-inference
 ```
 
-No arguments — the skill is fully interactive in chat. It will:
+You can also state intent in the chat message that accompanies the slash command — *"focus on epic 21"*, *"prioritize 21-3 and 21-4"*, *"rebuild from scratch"*. Step 0 parses the natural-language directive and echoes back its interpretation before proceeding, so a misparse is caught immediately.
+
+The skill will then:
 
 1. Load the three input artifacts.
 2. Pipe LLM-derived dependency envelopes through `infer-dependencies.js dry-run` per epic (server-side validated: schema, unknown-key, self-dep, cross-epic-isolation, missing-rationale, cycle checks).
 3. Repeat for cross-epic edges.
 4. Present the inferred DAG inline.
-5. **Ask you which stories to include** (see Curation below).
-6. Run DAG-consistency validation on your selection.
-7. Atomically write `sprint-plan.yaml` and refresh `sprint-plan-dag.mmd`.
+5. **If you signaled focus, ask how it should be scheduled** (Step 11a — see below).
+6. **Ask you to confirm or edit the selection** (Step 11b — see Curation below).
+7. Run DAG-consistency validation on your selection.
+8. Atomically write `sprint-plan.yaml` and refresh `sprint-plan-dag.mmd`.
 
 On three consecutive validation failures (for any epic), the skill writes `sprint-plan.yaml.partial` + a `.sprint-plan-validation-failed` sentinel and halts so you can inspect.
 
+> **User-direct invocation always re-curates.** Whether or not the underlying plan is "stale," typing `/sprintpilot-plan-sprint` is itself a signal that you want to (re-)scope the active sprint. The skill will always reach Step 11 on user-direct invocation. Auto-derive (background staleness reconciliation) is the only path that silently preserves the existing curation.
+
 ---
 
-## The curation step
+## The scheduling question (Step 11a)
 
-This is the part most users want to understand. After the DAG is inferred, you get this prompt:
+When you signaled focus (`epic 21`, `focus on epic 21`, specific story keys, …), the skill asks how the focus should be scheduled relative to the other pending stories already in the plan. You pick one:
+
+| Mode | When to use | Effect |
+|---|---|---|
+| **`top`** — top-prioritize | "Do this next, then continue with the rest" | Focus stories get priorities `1..N` at the head of the queue; other pending stories run after. |
+| **`focus_only`** — focus only | "Single-epic mini-sprint; ignore the rest for now" | Non-focus pending stories become `plan_status: excluded` for this sprint. They stay in the plan for DAG context but the autopilot won't pick them. |
+| **`append`** — append at end | Rarely the right choice when you said "focus" | Today's legacy behavior — focus stories run last after every existing pending story. |
+| **`custom`** — custom | Want to hand-pick beyond the presets | Skip the preset; drop straight into per-story curation in Step 11b. |
+
+If you didn't signal focus, the scheduling question is skipped and you go straight to curation.
+
+## The curation step (Step 11b)
+
+After the DAG is inferred (and the scheduling question is answered, if applicable), you get this prompt — the default reflects your scheduling choice:
+
+```
+Curation — scheduling: top-prioritize epic 21.
+Default selection: 14 epic-21 stories (focus) + 14 other pending (kept).
+Priorities will be reordered so epic-21 stories run first.
+
+  [Enter]  accept default
+  [e]      edit selection (toggle individual stories by number)
+  [a:KEY]  add a specific story
+  [r:KEY]  remove a specific story
+```
+
+(For `focus_only`, the prompt makes the "14 other will be EXCLUDED" consequence explicit.)
+
+If you didn't signal focus, the default is the legacy "ALL non-done stories":
 
 ```
 Which stories do you want to run in this sprint?
@@ -149,7 +185,9 @@ After the plan exists, you usually don't need to re-run the full skill. Speak na
 | Add stories to the active plan | `add_to_sprint { story_keys: [...], position?, issue_ids? }` |
 | Remove stories (mark `skipped` / `deferred`) | `remove_from_sprint { story_keys: [...], mark_status? }` |
 | Reorder execution priority | `reorder_queue { order: [...] }` *(DAG-validated)* |
-| Rebuild the plan from scratch | `replan_sprint { reason? }` |
+| Rebuild the plan from scratch | `replan_sprint { reason?, focus_epics?: [...], focus_stories?: [...], scheduling?: 'top'\|'focus_only'\|'append'\|'custom' }` |
+
+The optional `focus_epics` / `focus_stories` / `scheduling` on `replan_sprint` carry intent through to the planner's Step 0 — so *"replan focusing on epic 21 at the top"* doesn't have to be re-typed in the next session. When `scheduling` is omitted, the planner still asks the scheduling question (Step 11a).
 
 Reorders that violate the DAG don't silently apply — they surface as a `plan_reorder_rejected` halt with `suggestion` strings (e.g. *"insert `1-1-bootstrap` before `1-3-add-auth`"*).
 

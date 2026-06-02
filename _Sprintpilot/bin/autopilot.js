@@ -758,6 +758,33 @@ function deriveEpicFromStoryKey(storyKey) {
   return null;
 }
 
+// Inspect a list of story keys (typically auto-derive `missing_keys`)
+// and return a focus_epics array IF every parseable key resolves to the
+// same epic ID. Otherwise return null — multiple epics in the missing
+// set is "broad addition," not "focus," and the planner shouldn't pretend
+// it is. Epic-marker keys ("epic-21", "epic-21-retrospective") are
+// normalized to their bare epic ID so a mix of marker + stories from one
+// epic still counts as single-epic focus.
+function inferFocusEpicsFromStoryKeys(keys) {
+  if (!Array.isArray(keys) || keys.length === 0) return null;
+  const epics = new Set();
+  for (const k of keys) {
+    if (typeof k !== 'string' || !k) continue;
+    let epic = null;
+    const epicMarker = k.match(/^epic-([A-Za-z0-9_]+)(?:-|$)/);
+    if (epicMarker) {
+      epic = epicMarker[1];
+    } else {
+      epic = deriveEpicFromStoryKey(k);
+    }
+    if (!epic) return null;
+    epics.add(epic);
+    if (epics.size > 1) return null;
+  }
+  if (epics.size !== 1) return null;
+  return Array.from(epics);
+}
+
 function persistState(updates, profile, projectRoot, story) {
   return stateStore.write(updates, profile, { projectRoot, story });
 }
@@ -3247,6 +3274,16 @@ function cmdStart(opts) {
         replan: true,
         reason: requested.reason || 'user_requested',
         requested_at: requested.requested_at || null,
+        // Pass focus / scheduling through to the skill's Step 0 when the
+        // mid-flight `replan_sprint` command carried them. The skill's
+        // intent contract treats these as authoritative and skips Step 11a.
+        ...(Array.isArray(requested.focus_epics) && requested.focus_epics.length > 0
+          ? { focus_epics: requested.focus_epics }
+          : {}),
+        ...(Array.isArray(requested.focus_stories) && requested.focus_stories.length > 0
+          ? { focus_stories: requested.focus_stories }
+          : {}),
+        ...(requested.scheduling ? { scheduling: requested.scheduling } : {}),
       },
     };
     persisted.replan_requested = null;
@@ -3364,6 +3401,12 @@ function cmdStart(opts) {
   // missing plan falls back to sprint-status execution order.
   const autoDerive = orchSprintPlan.shouldAutoDerive({ projectRoot, profile, opts });
   if (autoDerive.auto_derive) {
+    // QoL: when staleness fires because added stories all belong to one
+    // epic (the usual case after `bmad-sprint-planning` adds a new epic),
+    // pass focus_epics through so the planner's Step 0 has a real intent
+    // to echo back instead of "refresh existing plan." The skill still
+    // asks the scheduling question — auto-derive doesn't presume.
+    const inferredFocusEpics = inferFocusEpicsFromStoryKeys(autoDerive.missing_keys);
     const inviteAction = {
       type: 'invoke_skill',
       skill: 'sprintpilot-plan-sprint',
@@ -3372,6 +3415,7 @@ function cmdStart(opts) {
         reason: autoDerive.reason,
         ...(autoDerive.missing_keys ? { missing_keys: autoDerive.missing_keys } : {}),
         ...(autoDerive.removed_keys ? { removed_keys: autoDerive.removed_keys } : {}),
+        ...(inferredFocusEpics ? { focus_epics: inferredFocusEpics } : {}),
       },
     };
     ledger.append(
@@ -5090,6 +5134,8 @@ module.exports = {
   // v2.6.0 — resume mid-skill hint decoration + git-diff probe
   decorateResumeHint,
   collectChangedFilesSincePhaseStart,
+  // Planner focus inference (exposed for unit tests).
+  inferFocusEpicsFromStoryKeys,
   // land_as_you_go completion guard + auto-recovery (commit + push + merge
   // before the next story).
   guardLandAsYouGoPredecessor,
