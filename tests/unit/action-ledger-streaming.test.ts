@@ -276,6 +276,32 @@ describe('autopilot progress CLI', () => {
     });
   });
 
+  it('--json carries a next_summary line derived from the resume pointer + queue', () => {
+    seedProjectWithStatus();
+    seedPlan([
+      { key: '21-1-x', plan_status: 'pending', priority: 1 },
+      { key: '21-2-y', plan_status: 'pending', priority: 2 },
+    ]);
+    // Seed the resume pointer the way a paused mid-sprint session would.
+    writeFileSync(
+      join(tmpRoot, '_bmad-output', 'implementation-artifacts', 'autopilot-state.yaml'),
+      [
+        'current_story: "21-1-x"',
+        'current_epic: "21"',
+        'current_bmad_step: create_story',
+        'story_queue: ["21-1-x", "21-2-y"]',
+        '',
+      ].join('\n'),
+    );
+    const out = execFileSync(
+      'node',
+      [AUTOPILOT, 'progress', '--project-root', tmpRoot, '--json'],
+      { encoding: 'utf8' },
+    );
+    const parsed = JSON.parse(out);
+    expect(parsed.next_summary).toBe('NEXT: 21-1-x · step create_story · #1 of 2 in epic 21');
+  });
+
   it('--story <key> narrows output to the specified story', () => {
     seedProjectWithStatus();
     seedPlan([

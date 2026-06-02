@@ -13,11 +13,22 @@ This file is the **≤150-line** authoritative workflow.
 Repeat until the orchestrator emits `halt`:
 
 1. `node _Sprintpilot/bin/autopilot.js next` → JSON Action.
+   - The envelope carries a `next_summary` string (e.g.
+     `NEXT: 21-1-http-mcp-wrapper-for-memory · step create_story · #1 of 18 in epic 21`).
+     **Surface it to the user verbatim, on its own line, before you start
+     executing the action.** This is the single authoritative "what runs
+     next" statement — the user must never have to cross-reference
+     `autopilot-state.yaml` / `sprint-plan.yaml` / the ledger to learn what
+     the autopilot is about to do. `next_summary` may be `null` (nothing
+     meaningful to announce, e.g. a pure `noop`) — skip the line then.
 2. Execute the Action per the dispatch table below.
 3. While executing, scan the host chat for user interjections. If
    present, record them via a `user_input` signal (step 4) and re-loop.
 4. `node _Sprintpilot/bin/autopilot.js record --signal <json>` → JSON
-   `{ action, verdict, phase, profile }`. Use the new action.
+   `{ action, verdict, phase, profile, next_summary }`. Use the new action,
+   and surface its `next_summary` line to the user the same way as step 1
+   (verbatim, on its own line, before executing) so every step announces
+   what comes next.
 5. If `verdict: prompted` → ask the user the question in `action.prompt`.
    Apply their answer as a `user_input` signal and re-loop.
 6. If `action.type: halt` → STOP. The orchestrator already wrote

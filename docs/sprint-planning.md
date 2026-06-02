@@ -61,6 +61,7 @@ The skill will then:
 6. **Ask you to confirm or edit the selection** (Step 11b — see Curation below).
 7. Run DAG-consistency validation on your selection.
 8. Atomically write `sprint-plan.yaml` and refresh `sprint-plan-dag.mmd`.
+9. **Close with the authoritative `NEXT:` line** — read from `autopilot progress`, not hand-computed — e.g. `NEXT: 21-1-http-mcp-wrapper-for-memory · step create_story · #1 of 18 in epic 21 — run /sprint-autopilot-on to begin.` This reconciles "I planned epic 21 first" with "the autopilot will actually start 21-1" into one statement, so you don't have to trust the plan order and the resume pointer separately.
 
 On three consecutive validation failures (for any epic), the skill writes `sprint-plan.yaml.partial` + a `.sprint-plan-validation-failed` sentinel and halts so you can inspect.
 
@@ -234,7 +235,7 @@ The plan is archived to `.archive/sprint-plan-<plan_id>.yaml`. Choose:
 |---|---|
 | `/sprintpilot-sprint-progress` | One-shot health check. Classifies the sprint as `HEALTHY` / `STALLED` / `NEEDS-INPUT` / `EXHAUSTED` / `NO-PLAN` based on the last 40 ledger entries and recommends exactly one next action. Pass a story key to drill in (`/sprintpilot-sprint-progress 1-3-add-auth`). |
 | `/sprintpilot-dependency-graph` | Render the DAG. Formats: `mermaid` *(default, inline + `.mmd` file)*, `graphviz` *(`.dot`, requires `dot` in PATH)*, `text` *(topological tree)*, `layers` *(JSON `[[layer1], [layer2], …]`)*, `json` *(raw `{nodes, edges, epic}`)*. Per-epic scope: `… mermaid epic 1`. |
-| `autopilot progress` *(CLI)* | Live terminal snapshot. `--json` for IDE / dashboard integration; `--story <key>` for one-story detail. When `sprint-plan.yaml` has an `issue_tracker` block, output cross-references your tracker IDs inline. |
+| `autopilot progress` *(CLI)* | Live terminal snapshot. Leads with the authoritative `NEXT:` line (what `/sprint-autopilot-on` will run next). `--json` for IDE / dashboard integration (carries `next_summary`); `--story <key>` for one-story detail. When `sprint-plan.yaml` has an `issue_tracker` block, output cross-references your tracker IDs inline. |
 
 ---
 

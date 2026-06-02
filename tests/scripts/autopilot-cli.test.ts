@@ -110,6 +110,17 @@ describe('autopilot start', () => {
     expect(parsed.action.skill).toBe('bmad-create-story');
   });
 
+  it('emits a human-readable next_summary alongside the action', () => {
+    const r = runCli(['start']);
+    expect(r.status).toBe(0);
+    const parsed = JSON.parse(r.stdout);
+    // The authoritative "what runs next" line — surfaced to the user so they
+    // never have to cross-reference autopilot-state / sprint-plan / ledger.
+    expect(typeof parsed.next_summary).toBe('string');
+    expect(parsed.next_summary).toMatch(/^NEXT: /);
+    expect(parsed.next_summary).toContain('step create_story');
+  });
+
   it('logs that lint_enabled is active (v2.2.24+: post-green-gates.js wired into verifyDevGreen)', () => {
     // v2.2.24: lint_enabled now actually runs scripts/post-green-gates.js
     // during DEV_GREEN verify. The v2.2.23 "experimental warning" ledger

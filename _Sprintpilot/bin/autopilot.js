@@ -785,6 +785,61 @@ function inferFocusEpicsFromStoryKeys(keys) {
   return Array.from(epics);
 }
 
+// Compose a single human-readable line stating exactly what the autopilot
+// will do next, derived from the SAME runtime + emitted action the driver
+// receives — so there is one authoritative "what happens when I press go"
+// statement instead of forcing the user to cross-reference autopilot-state,
+// sprint-plan, and the ledger. Surfaced in the start/next JSON envelope
+// (`next_summary`) and by `autopilot progress`. Returns null when there is
+// nothing meaningful to say (caller omits the line).
+//
+// `queue` (optional) is the persisted, ordered story_queue. When present it
+// is used to render the in-epic position ("#1 of 18 in epic 21").
+function formatNextStorySummary(runtime, action, queue) {
+  if (!runtime) return null;
+
+  // A halt / user_prompt action is a STOP, not forward motion — say so
+  // plainly rather than implying the next story is about to run.
+  if (action && (action.type === 'halt' || action.type === 'user_prompt')) {
+    const reason =
+      action.reason || (action.prompt ? String(action.prompt).split('\n')[0].trim() : null);
+    return reason ? `PAUSED: ${reason}` : 'PAUSED: autopilot is awaiting input.';
+  }
+
+  if (runtime.sprint_is_complete) {
+    return 'Sprint complete — no stories remain to process.';
+  }
+
+  const key = runtime.story_key || null;
+  const step = runtime.phase || runtime.current_bmad_step || null;
+
+  // No resolved story yet (e.g. a fresh-sprint CREATE_STORY boot — the
+  // create-story step is what establishes the key). Still tell the user
+  // what's about to run rather than going silent: name the operation.
+  if (!key) {
+    if (action && action.type === 'invoke_skill' && action.skill) {
+      return `NEXT: ${action.skill}${step ? ` · step ${step}` : ''}`;
+    }
+    return null;
+  }
+
+  const epic = runtime.current_epic || deriveEpicFromStoryKey(key);
+  const parts = [`NEXT: ${key}`];
+  if (step) parts.push(`step ${step}`);
+  if (epic) {
+    let pos = null;
+    let total = null;
+    if (Array.isArray(queue) && queue.length > 0) {
+      const sameEpic = queue.filter((k) => deriveEpicFromStoryKey(k) === epic);
+      total = sameEpic.length;
+      const idx = sameEpic.indexOf(key);
+      pos = idx >= 0 ? idx + 1 : null;
+    }
+    parts.push(pos && total ? `#${pos} of ${total} in epic ${epic}` : `epic ${epic}`);
+  }
+  return parts.join(' · ');
+}
+
 function persistState(updates, profile, projectRoot, story) {
   return stateStore.write(updates, profile, { projectRoot, story });
 }
@@ -3509,7 +3564,10 @@ function cmdStart(opts) {
   ledger.append({ kind: 'action_emitted', phase: runtime.phase, action }, { projectRoot });
   persistRuntimeState(runtime, profile, projectRoot);
   if (profile.coalesce_state_writes) stateStore.flush(profile, { projectRoot, story: runtime.story_key });
-  process.stdout.write(`${JSON.stringify({ action, phase: runtime.phase }, null, 2)}\n`);
+  const nextSummary = formatNextStorySummary(runtime, action, persisted.story_queue);
+  process.stdout.write(
+    `${JSON.stringify({ action, phase: runtime.phase, next_summary: nextSummary }, null, 2)}\n`,
+  );
   return 0;
 }
 
@@ -3613,7 +3671,10 @@ function cmdNext(opts) {
   if (action.type === 'invoke_skill' && action.skill) {
     logSkillTiming(projectRoot, 'start', runtime.story_key || 'sprint', action.skill, profile);
   }
-  process.stdout.write(`${JSON.stringify({ action, phase: runtime.phase }, null, 2)}\n`);
+  const nextSummary = formatNextStorySummary(runtime, action, persisted.story_queue);
+  process.stdout.write(
+    `${JSON.stringify({ action, phase: runtime.phase, next_summary: nextSummary }, null, 2)}\n`,
+  );
   return 0;
 }
 
@@ -3940,16 +4001,11 @@ function cmdRecord(opts) {
     );
   }
 
-  const payload = {
-    action: decorateHaltContext(
-      decorateReviewDepth(
-        decorateTestScope(
-          decorateRunScript(
-            decorateGitOp(result.nextAction, result.newState, result.newProfile, projectRoot),
-            result.newState,
-            result.newProfile,
-            projectRoot,
-          ),
+  const recordAction = decorateHaltContext(
+    decorateReviewDepth(
+      decorateTestScope(
+        decorateRunScript(
+          decorateGitOp(result.nextAction, result.newState, result.newProfile, projectRoot),
           result.newState,
           result.newProfile,
           projectRoot,
@@ -3959,11 +4015,25 @@ function cmdRecord(opts) {
         projectRoot,
       ),
       result.newState,
+      result.newProfile,
       projectRoot,
     ),
+    result.newState,
+    projectRoot,
+  );
+  const payload = {
+    action: recordAction,
     verdict: result.verdict,
     phase: result.newState.phase,
     profile: result.newProfile.name,
+    // Same authoritative "what runs next" line the start/next envelopes
+    // carry — so the orchestrator can surface it after every step, not
+    // just at boot. Derived from the post-signal state + emitted action.
+    next_summary: formatNextStorySummary(
+      result.newState,
+      recordAction,
+      result.newState.story_queue,
+    ),
   };
   process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`);
   return 0;
@@ -4207,7 +4277,22 @@ function buildRichStatus(projectRoot, persisted, opts) {
     profileName = null;
   }
 
+  // Single authoritative "what runs next" line — same composer the
+  // start/next envelopes use, so `autopilot progress` agrees with them
+  // byte-for-byte. Built from a minimal runtime view of persisted state.
+  const nextSummary = formatNextStorySummary(
+    {
+      story_key: persisted.current_story || null,
+      phase: phase,
+      current_epic: persisted.current_epic || null,
+      sprint_is_complete: persisted.sprint_is_complete === true,
+    },
+    haltActive ? { type: 'halt', reason: tail.reason || null } : null,
+    persisted.story_queue,
+  );
+
   return {
+    next_summary: nextSummary,
     story: persisted.current_story || null,
     story_queue_head: Array.isArray(persisted.story_queue) && persisted.story_queue.length > 0
       ? persisted.story_queue[0]
@@ -4232,6 +4317,9 @@ function buildRichStatus(projectRoot, persisted, opts) {
 
 function renderStatusHuman(s) {
   const lines = [];
+  // Lead with the authoritative next-action line so a human glancing at
+  // `autopilot progress` sees "what runs next" without decoding the rest.
+  if (s.next_summary) lines.push(s.next_summary);
   lines.push(`story=${s.story || '-'}  phase=${s.current_phase || '-'}  profile=${s.profile_name || '-'}`);
   if (s.time_in_phase_minutes !== null) {
     lines.push(`time-in-phase: ${s.time_in_phase_minutes}m  (since ${s.phase_started_at || '?'})`);
@@ -4816,11 +4904,33 @@ function cmdProgress(opts) {
     }
   }
 
+  // Authoritative "what runs next" line — same composer the start/next/
+  // record envelopes use, so a planner skill (or a user) reading
+  // `progress` gets the identical statement the autopilot will act on.
+  // Halt is detected from the raw ledger tail so a paused sprint reads
+  // "PAUSED: …" rather than implying forward motion.
+  const progressTail = recentEvents.length > 0 ? recentEvents[recentEvents.length - 1] : null;
+  const progressHaltAction =
+    progressTail && progressTail.kind === 'halt'
+      ? { type: 'halt', reason: progressTail.reason || null }
+      : null;
+  const nextSummary = formatNextStorySummary(
+    {
+      story_key: persisted.current_story || null,
+      phase: persisted.current_bmad_step || null,
+      current_epic: persisted.current_epic || null,
+      sprint_is_complete: persisted.sprint_is_complete === true,
+    },
+    progressHaltAction,
+    persisted.story_queue,
+  );
+
   const out = {
     project_root: projectRoot,
     plan_present: plan !== null,
     plan_id: plan ? plan.plan_id : null,
     issue_tracker: plan ? plan.issue_tracker || null : null,
+    next_summary: nextSummary,
     current_story: filterStory,
     current_step: currentStep,
     current_issue_id: currentIssueId,
@@ -4874,6 +4984,9 @@ function cmdProgress(opts) {
 
   // Human-readable rendering (line-append, CI-safe — no ANSI codes).
   const lines = [];
+  // Lead with the authoritative next-action line so the answer to "what
+  // runs next?" is the first thing on screen.
+  if (out.next_summary) lines.push(out.next_summary);
   if (!out.plan_present) {
     lines.push('Sprint plan: (none) — running in sprint-status order');
   } else {
@@ -5136,6 +5249,8 @@ module.exports = {
   collectChangedFilesSincePhaseStart,
   // Planner focus inference (exposed for unit tests).
   inferFocusEpicsFromStoryKeys,
+  // Authoritative "what runs next" line composer (exposed for unit tests).
+  formatNextStorySummary,
   // land_as_you_go completion guard + auto-recovery (commit + push + merge
   // before the next story).
   guardLandAsYouGoPredecessor,

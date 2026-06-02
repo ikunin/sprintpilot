@@ -1,5 +1,18 @@
 # Changelog
 
+## [Unreleased]
+
+### Added — authoritative "what runs next" line (`next_summary`)
+
+After planning or starting a sprint, the user had no single, plain statement of what the autopilot would do next — the truth was split across `autopilot-state.yaml` (resume pointer), `sprint-plan.yaml` (priority order), and `ledger.jsonl`, forcing manual cross-referencing whenever anything looked ambiguous.
+
+- **New `formatNextStorySummary(runtime, action, queue)`** in `_Sprintpilot/bin/autopilot.js` — one pure composer, the single source of truth for the line. Renders e.g. `NEXT: 21-1-http-mcp-wrapper-for-memory · step create_story · #1 of 18 in epic 21`. Special cases: a halt/user_prompt action → `PAUSED: <reason>`; sprint complete → explicit completion line; a fresh CREATE_STORY boot with no resolved story yet → names the operation (`NEXT: bmad-create-story · step create_story`) instead of going silent. In-epic position (`#N of M`) counts only same-epic queue entries, so a mixed queue never inflates the denominator.
+- **Wired into every emission surface** so the line is consistent everywhere: the `start` and `next` JSON envelopes (`next_summary` field), the `record` envelope (so each step of the loop announces what's next), and `autopilot progress` (both `--json` and the human render, which now leads with it).
+- **Orchestrator contract** (`workflow.orchestrator.md`): the driver now surfaces `next_summary` to the user verbatim, on its own line, before executing — on both the `next` (step 1) and `record` (step 4) results.
+- **Planner skill** (`sprintpilot-plan-sprint/workflow.md`): its final report ends with the NEXT line, read from the read-only `autopilot progress --json` rather than hand-computed, so "I planned epic 21 first" and "the autopilot will start 21-1" are reconciled into one statement.
+
+Backward-compatible: `next_summary` is an additive envelope field; existing consumers that read `{action, phase}` are unaffected. Coverage: `tests/unit/next-story-summary.test.ts` (new, 11 cases), `tests/scripts/autopilot-cli.test.ts` (+1: `start` envelope carries it), `tests/unit/action-ledger-streaming.test.ts` (+1: `progress --json` carries it).
+
 ## [2.6.7] - 2026-06-02
 
 ### Fixed — `/sprintpilot-plan-sprint` honors focus + scheduling intent

@@ -550,9 +550,28 @@ node _Sprintpilot/scripts/resolve-dag.js render --format mermaid --project-root 
 > Run `/sprint-autopilot-on` to begin execution, or
 > `/sprintpilot-plan-sprint` again to refine."</action>
 
+<action>End the report with the single authoritative "what runs next"
+line, read straight from the autopilot so it matches exactly what
+`/sprint-autopilot-on` will do — never hand-compute it. Run the
+read-only progress command and surface its `next_summary`:
+```
+node _Sprintpilot/bin/autopilot.js progress --json --project-root <root>
+```
+Echo the `next_summary` field verbatim as the closing line, e.g.:
+> **NEXT:** `21-1-http-mcp-wrapper-for-memory` · step `create_story` · #1 of 18 in epic 21 — run `/sprint-autopilot-on` to begin.
+
+This closes the loop between "I planned epic 21 first" and "the autopilot
+will actually start 21-1": the user sees one reconciled statement instead
+of having to trust the plan ordering and the resume pointer separately.
+`progress` is read-only — it never mutates state or emits a skill action,
+so it's safe to call here. If `next_summary` is null (e.g. the plan is
+empty or the next pick can't resolve yet), say so plainly rather than
+inventing a story key.</action>
+
 <action>If invoked via `template_slots.auto: true` or `replan: true`,
 keep the summary shorter (1-2 sentences) and return cleanly so the
-autopilot session resumes; do not block on confirmation.</action>
+autopilot session resumes; do not block on confirmation. Still include
+the NEXT line — it's the most useful single line for the user.</action>
 
 ---
 

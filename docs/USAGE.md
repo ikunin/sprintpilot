@@ -56,7 +56,7 @@ Single-story layers continue sequentially (no benefit from parallelism). Cross-e
 
 Flow control is owned by `_Sprintpilot/bin/autopilot.js` — a deterministic Node.js state machine that enforces the BMad 7-step sequence. Each turn:
 
-1. The skill body calls `node _Sprintpilot/bin/autopilot.js next` → JSON Action.
+1. The skill body calls `node _Sprintpilot/bin/autopilot.js next` → JSON Action. The envelope also carries `next_summary` — a plain-language `NEXT: <story> · step <phase> · #N of M in epic <e>` line that the LLM surfaces to you verbatim before acting, so every turn states what's about to run. (`start` and `record` carry the same field; `record`'s reflects the post-signal state.)
 2. The LLM executes the Action (`invoke_skill` / `run_script` / `git_op` / `parallel_batch` / `user_prompt` / `halt`) — for `git_op`, it runs the pre-planned argv steps verbatim, no shell interpolation.
 3. The LLM signals the outcome via `autopilot record --signal <json>` (`success` / `failure` / `blocked` / `propose_alternative` / `user_input` / `verify_override`).
 4. `verify.js` enforces BMad bookkeeping (acceptance-criteria bullets exist, task boxes flipped to `[x]`, `commit_sha` + `branch` reported, `git_steps_completed: true` after every `git push`). A failed verify produces a `verify_rejected` ledger entry and the orchestrator re-emits the same action with the issues threaded into the template slot — up to the per-profile reject budget, then it pauses for the user.
@@ -629,10 +629,11 @@ While the autopilot is running, send these as `user_input` signals from chat. Th
 
 ### `autopilot progress` CLI
 
-Snapshot view of where the autopilot is. When `sprint-plan.yaml` has an `issue_tracker` block configured + per-story `issue_id` fields, those are surfaced inline so the output cross-references back to your Jira / Linear / GitHub / GitLab tickets:
+Snapshot view of where the autopilot is. The first line is always the authoritative **`NEXT:`** statement — exactly what `/sprint-autopilot-on` will do on its next step, so you never have to cross-reference `autopilot-state.yaml`, `sprint-plan.yaml`, and the ledger to figure out what runs next. When `sprint-plan.yaml` has an `issue_tracker` block configured + per-story `issue_id` fields, those are surfaced inline so the output cross-references back to your Jira / Linear / GitHub / GitLab tickets:
 
 ```
 $ node _Sprintpilot/bin/autopilot.js progress
+NEXT: 1-3-add-auth · step dev_green · #3 of 8 in epic 1
 Sprint plan: plan_id=abc-123
 Progress: 3/8 done, 5 pending
 Bar: [===========                   ] 37%
@@ -643,11 +644,11 @@ Recent step events:
   [143] 14:23:12 step_started — 1-3-add-auth [PROJ-101] / dev_green
 ```
 
-When no issue tracker is configured, the `Issue tracking:` line and `[<id>]` brackets are silently omitted — output is unchanged from before.
+The `NEXT:` line adapts to context: a paused sprint shows `PAUSED: <reason>`, a finished sprint shows `Sprint complete — no stories remain to process.`, and the in-epic position (`#3 of 8`) counts only same-epic stories in the queue. When no issue tracker is configured, the `Issue tracking:` line and `[<id>]` brackets are silently omitted — output is otherwise unchanged.
 
 Modes:
 - Default: human-readable single snapshot.
-- `--json`: machine-readable (for IDE extensions / dashboards). Adds `issue_tracker`, `current_issue_id`, `issue_tracking` (coverage stats), and an `issue_id` field on every `recent_events[]` entry.
+- `--json`: machine-readable (for IDE extensions / dashboards). Carries `next_summary` (the same `NEXT:` line), plus `issue_tracker`, `current_issue_id`, `issue_tracking` (coverage stats), and an `issue_id` field on every `recent_events[]` entry.
 - `--story <key>`: narrow to one story's detail. Renders a labeled block including `Issue ID:` (or `(not set)` when null).
 
 ```

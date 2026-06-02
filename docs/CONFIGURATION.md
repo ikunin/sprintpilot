@@ -245,7 +245,7 @@ These persist in both `_Sprintpilot/lib/orchestrator/state-store.js` (in-memory 
 | Flag | Subcommand | Effect |
 |---|---|---|
 | `--no-auto-plan` | `start` | Suppresses the auto-derive trigger for this one invocation. Useful when a plan is stale but you want to run sprint-status order this session and re-plan later. |
-| `--json` | `progress` | Machine-readable JSON output (for IDE extensions / dashboards). Carries `issue_tracker`, `current_issue_id`, `issue_tracking` (coverage stats: `{provider, project_key, base_url, total, linked, coverage}`), and per-`recent_events[].issue_id` when set. Null when no `sprint-plan.yaml` issue_tracker block is configured. |
+| `--json` | `progress` | Machine-readable JSON output (for IDE extensions / dashboards). Carries `next_summary` (the authoritative "what runs next" line, same as the `start`/`next`/`record` envelopes), `issue_tracker`, `current_issue_id`, `issue_tracking` (coverage stats: `{provider, project_key, base_url, total, linked, coverage}`), and per-`recent_events[].issue_id` when set. Null when no `sprint-plan.yaml` issue_tracker block is configured. |
 | `--once` | `progress` | Single snapshot to stdout (default mode — flag is for forward compatibility with a future `--watch` mode). |
 | `--story <key>` | `progress` | Narrow output to a single story's plan entry. Renders a labeled detail block including `Issue ID:` (or `(not set)`). Falls back to `plan.stories[<key>].current_step` when no autopilot session is currently running. |
 | `--format mermaid\|graphviz` | `resolve-dag render` | Render format. Mermaid (default) is GitHub-renderable with no system deps. Graphviz requires `dot` in PATH — falls back to mermaid with a stderr notice if missing. |
