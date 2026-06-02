@@ -1,5 +1,17 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed — upgrade "preserved" config footer is now honest + re-pasteable
+
+When the installer's YAML merge orphans a user key (a key with no active line in the freshly-copied bundled file to patch into — e.g. `autopilot.phase_timeout_minutes.*`, which the bundled config ships only as commented examples), it appends a footer breadcrumb. The old footer had two problems: it claimed "verify these still apply" (implying they might be active, when they're actually **inactive** — commented out), and it wrote the keys in **flat dot-path** form (`# autopilot.phase_timeout_minutes.create_story: 25`). Uncommenting that produced a top-level dotted key the resolver never reads — a trap.
+
+- **`mergeYamlConfig`** (`lib/core/config-merger.js`) now renders orphans as commented **nested YAML**, grouped by shared dot-path prefix, so uncommenting and merging the block into the matching section yields valid, *effective* config. The header states plainly the values are **NOT currently in effect** and how to re-apply.
+- New `renderOrphanBlock` helper builds the nested tree from dot-paths (two leaves under one parent collapse into one block instead of repeated flat paths).
+- Coverage: `tests/unit/config-merger.test.ts` — updated the footer assertion and added a prefix-grouping + uncomment-round-trip test.
+
+No behavior change to which keys are preserved vs. patched — only the footer's format and wording. Nothing is silently destroyed (orphans were, and remain, preserved as comments).
+
 ## [2.7.2] - 2026-06-03
 
 ### Fixed — `session_story_limit` never halted under `land_as_you_go`

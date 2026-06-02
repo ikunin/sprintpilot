@@ -140,12 +140,51 @@ describe('mergeYamlConfig', () => {
     expect(r.text).toContain('merge_strategy: land_as_you_go');
   });
 
-  it('appends unknown user keys under a "Preserved from prior install" footer', () => {
+  it('appends unknown user keys under a "Preserved from prior install" footer (re-pasteable nested YAML)', () => {
     const user = ['git:', '  custom_knob: 42'].join('\n');
     const r = mergeYamlConfig(bundled, user, {});
     expect(r.orphans).toEqual(['git.custom_knob']);
-    expect(r.text).toContain('# Preserved from prior install — verify these still apply:');
-    expect(r.text).toContain('# git.custom_knob: 42');
+    expect(r.text).toContain('# Preserved from prior install');
+    expect(r.text).toContain('NOT currently in effect');
+    // Nested, commented form — NOT the old flat `# git.custom_knob: 42`.
+    expect(r.text).toContain('# git:');
+    expect(r.text).toContain('#   custom_knob: 42');
+    expect(r.text).not.toContain('# git.custom_knob: 42');
+  });
+
+  it('groups orphans that share a dot-path prefix into one nested block', () => {
+    const user = [
+      'autopilot:',
+      '  phase_timeout_minutes:',
+      '    create_story: 25',
+      '    check_readiness: 15',
+    ].join('\n');
+    const r = mergeYamlConfig(bundled, user, {});
+    expect(r.orphans).toEqual([
+      'autopilot.phase_timeout_minutes.create_story',
+      'autopilot.phase_timeout_minutes.check_readiness',
+    ]);
+    // One shared parent chain, two leaves — not two repeated flat paths.
+    expect(r.text).toContain('# autopilot:');
+    expect(r.text).toContain('#   phase_timeout_minutes:');
+    expect(r.text).toContain('#     create_story: 25');
+    expect(r.text).toContain('#     check_readiness: 15');
+    // Uncommenting (strip leading "# ") yields valid, correctly-nested YAML.
+    const footerYaml = r.text
+      .split('\n')
+      .filter(
+        (l) =>
+          /^#(?: |$)/.test(l) &&
+          !l.includes('Preserved') &&
+          !l.includes('in effect') &&
+          !l.includes('re-apply') &&
+          !l.includes('matching section'),
+      )
+      .map((l) => l.replace(/^# ?/, ''))
+      .join('\n');
+    expect(footerYaml).toContain('autopilot:');
+    expect(footerYaml).toContain('  phase_timeout_minutes:');
+    expect(footerYaml).toContain('    create_story: 25');
   });
 
   it('falls back when bundled text is non-string', () => {
