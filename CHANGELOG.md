@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [2.7.2] - 2026-06-03
 
 ### Fixed — `session_story_limit` never halted under `land_as_you_go`
 
