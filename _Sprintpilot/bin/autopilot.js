@@ -4001,38 +4001,84 @@ function cmdRecord(opts) {
     );
   }
 
+  // Boundary settle. At STORY_DONE → EPIC_BOUNDARY_CHECK, adapt.advanceState
+  // intentionally clears story_key and relies on composeRuntimeState to
+  // re-resolve the queue head on the NEXT emission (see adapt.js). But
+  // cmdRecord emits its action straight from result.newState, so the advance
+  // that lands on a new-story-start phase hands back an UNDER-RESOLVED action
+  // (story_key null) — forcing the orchestrator to re-fetch `next` just to
+  // settle on the queue head. Re-run the resolver here so record's emitted
+  // action already names the next story, matching what the follow-up `next`
+  // would produce and eliminating the re-fetch.
+  //
+  // Response-only: we do NOT re-persist or re-emit ledger events. The next
+  // emission's composeRuntimeState resolves the (null) persisted story_key
+  // the same way, so persisted-state semantics are untouched. Guarded to the
+  // advanced-into-new-story-start-with-no-story_key case AND to a resolution
+  // that keeps the same phase — so every other transition is byte-for-byte
+  // identical to before.
+  let emitState = result.newState;
+  let emitAction = result.nextAction;
+  const NEW_STORY_START_PHASES = [
+    STATES.CREATE_STORY,
+    STATES.PREPARE_STORY_BRANCH,
+    STATES.NANO_QUICK_DEV,
+  ];
+  if (
+    result.verdict === 'advanced' &&
+    NEW_STORY_START_PHASES.includes(result.newState.phase) &&
+    !result.newState.story_key
+  ) {
+    const settled = composeRuntimeState(loadState(projectRoot), result.newProfile, projectRoot);
+    if (settled && settled.story_key && settled.phase === result.newState.phase) {
+      emitState = settled;
+      emitAction = stateMachine.nextAction(settled, result.newProfile);
+      ledger.append(
+        {
+          kind: 'state_reconciled',
+          detail: {
+            reason: 'boundary_story_resolved',
+            phase: settled.phase,
+            story_key: settled.story_key,
+          },
+        },
+        { projectRoot },
+      );
+    }
+  }
+
   const recordAction = decorateHaltContext(
     decorateReviewDepth(
       decorateTestScope(
         decorateRunScript(
-          decorateGitOp(result.nextAction, result.newState, result.newProfile, projectRoot),
-          result.newState,
+          decorateGitOp(emitAction, emitState, result.newProfile, projectRoot),
+          emitState,
           result.newProfile,
           projectRoot,
         ),
-        result.newState,
+        emitState,
         result.newProfile,
         projectRoot,
       ),
-      result.newState,
+      emitState,
       result.newProfile,
       projectRoot,
     ),
-    result.newState,
+    emitState,
     projectRoot,
   );
   const payload = {
     action: recordAction,
     verdict: result.verdict,
-    phase: result.newState.phase,
+    phase: emitState.phase,
     profile: result.newProfile.name,
     // Same authoritative "what runs next" line the start/next envelopes
     // carry — so the orchestrator can surface it after every step, not
-    // just at boot. Derived from the post-signal state + emitted action.
+    // just at boot. Derived from the (boundary-settled) post-signal state.
     next_summary: formatNextStorySummary(
-      result.newState,
+      emitState,
       recordAction,
-      result.newState.story_queue,
+      emitState.story_queue,
     ),
   };
   process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`);

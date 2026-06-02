@@ -1,5 +1,15 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed — `record` at a story/epic boundary now emits a resolved next-story action
+
+At a story boundary, `adapt.advanceState` intentionally clears `story_key` (and pops the queue) and relies on `composeRuntimeState` to re-resolve the next queue head on the following emission. But `cmdRecord` emitted its action straight from the post-transition state without re-running that resolver — so the action it handed back across a boundary was under-resolved (`story_key: null`), forcing the orchestrator to re-fetch `next` just to settle on the next story. Observed live as a recurring "transient resolver hiccup; re-fetching next" at every epic/story boundary.
+
+- **`cmdRecord`** now re-runs `composeRuntimeState` when a signal advances into a new-story-start phase (`CREATE_STORY` / `PREPARE_STORY_BRANCH` / `NANO_QUICK_DEV`) with `story_key` cleared, and emits the resolved action — matching exactly what the follow-up `next` would produce. The re-fetch is no longer needed. This also fixes `next_summary` at boundaries (it previously fell back to the operation name because the underlying `story_key` was null).
+- **Response-only + tightly scoped:** no re-persist, no re-emitted phase-transition events, and the resolve is gated to the under-resolved boundary case *with no phase change* — so every other transition is byte-for-byte identical. A `state_reconciled` ledger entry (`reason: boundary_story_resolved`) records when it fires.
+- Coverage: `tests/scripts/autopilot-cli.test.ts` (+1 — a `record` at `epic_boundary_check` with a popped queue must emit an action + `next_summary` naming the next story; verified to fail without the fix).
+
 ## [2.7.0] - 2026-06-02
 
 ### Added — authoritative "what runs next" line (`next_summary`)

@@ -110,6 +110,35 @@ describe('autopilot start', () => {
     expect(parsed.action.skill).toBe('bmad-create-story');
   });
 
+  it('record at an epic boundary emits a RESOLVED next-story action (no re-fetch needed)', () => {
+    // Reproduces the "transient resolver hiccup": adapt clears story_key at
+    // the boundary and relies on composeRuntimeState to re-resolve the queue
+    // head. cmdRecord must run that resolver itself so its emitted action
+    // already names the next story — eliminating the mandatory `next`
+    // re-fetch. (git.enabled:false → boundary lands on CREATE_STORY.)
+    mkdirSync(join(projectRoot, '_bmad-output', 'implementation-artifacts'), { recursive: true });
+    writeFileSync(
+      join(projectRoot, '_bmad-output', 'implementation-artifacts', 'sprint-status.yaml'),
+      'development_status:\n  1-1-a: done\n  1-2-b: ready-for-dev\n',
+    );
+    writeFileSync(
+      join(projectRoot, '_bmad-output', 'implementation-artifacts', 'autopilot-state.yaml'),
+      [
+        'current_bmad_step: epic_boundary_check',
+        'current_epic: "1"',
+        'story_queue: ["1-2-b"]',
+        '',
+      ].join('\n'),
+    );
+    const r = runCli(['record', '--signal', JSON.stringify({ status: 'success' })]);
+    expect(r.status).toBe(0);
+    const parsed = JSON.parse(r.stdout);
+    // The emitted action must already target 1-2-b, and the next_summary
+    // must name it — not the under-resolved operation fallback.
+    expect(parsed.next_summary).toContain('1-2-b');
+    expect(JSON.stringify(parsed.action)).toContain('1-2-b');
+  });
+
   it('emits a human-readable next_summary alongside the action', () => {
     const r = runCli(['start']);
     expect(r.status).toBe(0);
