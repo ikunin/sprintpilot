@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [2.7.3] - 2026-06-03
 
 ### Fixed — upgrade "preserved" config footer is now honest + re-pasteable
 
