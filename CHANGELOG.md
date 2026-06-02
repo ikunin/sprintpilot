@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [2.7.1] - 2026-06-02
 
 ### Fixed — `record` at a story/epic boundary now emits a resolved next-story action
 
