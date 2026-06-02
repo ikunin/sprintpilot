@@ -1,5 +1,16 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed — `session_story_limit` never halted under `land_as_you_go`
+
+The per-session `session_stories_completed` counter only incremented on the `STORY_DONE → EPIC_BOUNDARY_CHECK` transition (adapt.js). Under `land_as_you_go`, the path is `STORY_DONE → STORY_LAND → EPIC_BOUNDARY_CHECK` — `STORY_LAND` is interposed — so that block never fired, the counter stayed at `0`, and `state-machine.js#nextAction` never emitted the `session_story_limit_reached` halt. The autopilot would drive past the configured limit (e.g. 3 stories on `medium`) without auto-halting. Observed live: three landed stories, counter still `0`.
+
+(Story progression itself was unaffected — `composeRuntimeState` advances by rejecting now-merged/done stories independently of this counter, which is why the sprint moved forward while the counter didn't.)
+
+- **`adapt.advanceState`** now increments `session_stories_completed` when *entering* `EPIC_BOUNDARY_CHECK` from either story-completion phase (`STORY_DONE` for stacked, `STORY_LAND` for land), so both flows count exactly once. The queue-pop / story-identity clear stays gated to the stacked `STORY_DONE → EPIC_BOUNDARY_CHECK` transition (unchanged) — under land mode that progression is already handled by `composeRuntimeState`.
+- Coverage: `tests/unit/orchestrator/adapt.test.ts` — added the `STORY_LAND → EPIC_BOUNDARY_CHECK` increment case (verified to fail without the fix) and a no-double-count assertion for the stacked path.
+
 ## [2.7.1] - 2026-06-02
 
 ### Fixed — `record` at a story/epic boundary now emits a resolved next-story action

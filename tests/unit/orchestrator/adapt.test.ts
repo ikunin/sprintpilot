@@ -954,13 +954,44 @@ describe('advanceState — session_stories_completed counter', () => {
     expect(r.newState.session_stories_completed).toBe(1);
   });
 
-  it('does NOT increment on transitions that are not STORY_DONE → EPIC_BOUNDARY_CHECK', () => {
+  it('does NOT increment on transitions that are not into EPIC_BOUNDARY_CHECK', () => {
     const r = interpretSignal(
       st(STATES.DEV_RED, { session_stories_completed: 2 }),
       { status: 'success' },
       medium(),
     );
     expect(r.newState.session_stories_completed).toBe(2);
+  });
+
+  it('increments on STORY_LAND → EPIC_BOUNDARY_CHECK (land_as_you_go path)', () => {
+    // Regression: under land_as_you_go the boundary is reached via
+    // STORY_DONE → STORY_LAND → EPIC_BOUNDARY_CHECK. The counter must still
+    // increment here — gating it on STORY_DONE → EPIC_BOUNDARY_CHECK alone
+    // left it stuck at 0 under land mode, so the session_story_limit halt
+    // never fired.
+    const r = interpretSignal(
+      st(STATES.STORY_LAND, { session_stories_completed: 2 }),
+      { status: 'success' },
+      medium(),
+    );
+    expect(r.newState.phase).toBe(STATES.EPIC_BOUNDARY_CHECK);
+    expect(r.newState.session_stories_completed).toBe(3);
+  });
+
+  it('increments exactly once on the stacked path (no double-count)', () => {
+    // STORY_DONE → EPIC_BOUNDARY_CHECK must increment by exactly 1, not 2 —
+    // the pop/clear block and the counter condition both match this
+    // transition, so the counter must live in only one of them.
+    const r = interpretSignal(
+      st(STATES.STORY_DONE, { session_stories_completed: 2 }),
+      {
+        status: 'success',
+        output: { commit_sha: 'abc', branch: 'story/S1', git_steps_completed: true },
+      },
+      medium(),
+    );
+    expect(r.newState.phase).toBe(STATES.EPIC_BOUNDARY_CHECK);
+    expect(r.newState.session_stories_completed).toBe(3);
   });
 });
 

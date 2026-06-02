@@ -827,9 +827,23 @@ function advanceState(state, profile, newPhase, signal) {
     // test_scope_hint is story-scoped; clear at the story boundary.
     next.test_scope_hint = null;
     next.test_files = null;
-    // session_story_limit: increment per-session completion counter so
-    // state-machine.js#nextAction can emit the halt at the next
-    // emission. The counter resets on cmdStart (new session boundary).
+  }
+
+  // session_story_limit: increment the per-session completion counter when a
+  // story COMPLETES, i.e. when we enter EPIC_BOUNDARY_CHECK. Two flows reach
+  // it and BOTH count as one completed story:
+  //   stacked:        STORY_DONE → EPIC_BOUNDARY_CHECK
+  //   land_as_you_go: STORY_DONE → STORY_LAND → EPIC_BOUNDARY_CHECK
+  // This was previously folded into the STORY_DONE→EPIC_BOUNDARY block above,
+  // so under land_as_you_go (STORY_LAND interposed) it never fired — the
+  // counter stayed 0 and state-machine.js#nextAction never emitted the
+  // session_story_limit halt. Gating on "entering EPIC_BOUNDARY_CHECK from a
+  // story-completion phase" covers both flows exactly once. The counter
+  // resets on cmdStart (new session boundary).
+  if (
+    newPhase === STATES.EPIC_BOUNDARY_CHECK &&
+    (state.phase === STATES.STORY_DONE || state.phase === STATES.STORY_LAND)
+  ) {
     next.session_stories_completed = (state.session_stories_completed || 0) + 1;
   }
 
