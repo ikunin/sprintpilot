@@ -115,10 +115,12 @@ npx @ikunin/sprintpilot@latest install --tools <tool> --force
 | `roo` | `.roo/skills/` | VS Code extension |
 | `trae` | `.trae/skills/` | Trae IDE |
 | `kiro` | `.kiro/skills/` | Kiro IDE |
-| `gemini-cli` | `.gemini/skills/` | Gemini CLI (Google) |
+| `gemini-cli` | `.agents/skills/` | Gemini CLI (Google) |
 | `github-copilot` | `.github/copilot/skills/` | GitHub Copilot |
 
 All tools use the same universal SKILL.md format.
+
+> **`gemini-cli` upgraders:** the skills install directory moved from `.gemini/skills/` to `.agents/skills/` (aligns with the BMad installer + the AGENTS spec). The installer auto-detects a pre-rename install — it sweeps `.gemini/skills/sprint-autopilot-*` and `.gemini/skills/sprintpilot-*` into `.agents/.sprintpilot-backups/<name>.<timestamp>/` and lands fresh skills at the new location. Your own user-defined skills under `.gemini/skills/` and `GEMINI.md` are not touched. After confirming the migration, you can delete the now-empty Sprintpilot footprint under `.gemini/` by hand.
 
 ## Step 4: Verify and Start
 

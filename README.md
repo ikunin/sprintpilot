@@ -187,18 +187,31 @@ Full handoff report format + ledger semantics: [docs/USAGE.md](docs/USAGE.md#han
 
 ## Skills
 
+**Autopilot:**
+
 | Command | What it does |
 |---|---|
 | `/sprint-autopilot-on` | Engage autonomous sprint execution |
 | `/sprint-autopilot-off` | Disengage and show status |
 | `/sprintpilot-update` | Check for updates and install the latest version |
+
+**Sprint planning + visibility** ([reference](docs/sprint-planning.md) · [walkthrough](docs/USAGE.md#sprint-planning--dag-aware-execution-v230)):
+
+| Command | What it does |
+|---|---|
+| `/sprintpilot-plan-sprint` | Build (or refresh) the authoritative `sprint-plan.yaml` — infers per-epic + cross-epic dependencies from `epics.md` + `architecture.md`, presents the DAG, lets you curate which stories run this sprint, persists atomically. Opt-in; default `autopilot start` still runs sprint-status order. |
+| `/sprintpilot-sprint-progress` | One-shot health check — classifies the sprint as `HEALTHY` / `STALLED` / `NEEDS-INPUT` / `EXHAUSTED` / `NO-PLAN` and suggests the next action. |
+| `/sprintpilot-dependency-graph` | Render the DAG: `mermaid` (default, inline + `.mmd` file), `graphviz` (`.dot`), `text`, `layers` (JSON), `json`. |
+
+**Multi-agent analysis** ([internals](docs/USAGE.md#multi-agent-skills)):
+
+| Command | What it does |
+|---|---|
 | `/sprintpilot-codebase-map` | 5-stream brownfield codebase analysis |
 | `/sprintpilot-assess` | Tech debt, dependency audit, migration assessment |
 | `/sprintpilot-reverse-architect` | Extract architecture document from existing code |
 | `/sprintpilot-migrate` | 12-step legacy migration planning |
 | `/sprintpilot-research` | Parallel web research fan-out |
-
-Multi-agent skill internals: [docs/USAGE.md](docs/USAGE.md#multi-agent-skills).
 
 ## Compatibility
 
@@ -209,7 +222,7 @@ Multi-agent skill internals: [docs/USAGE.md](docs/USAGE.md#multi-agent-skills).
 | Claude Code | `.claude/skills/` | Roo Code | `.roo/skills/` |
 | Cursor | `.cursor/skills/` | Trae | `.trae/skills/` |
 | Windsurf | `.windsurf/skills/` | Kiro | `.kiro/skills/` |
-| Gemini CLI | `.gemini/skills/` | GitHub Copilot | `.github/copilot/skills/` |
+| Gemini CLI | `.agents/skills/` | GitHub Copilot | `.github/copilot/skills/` |
 | Cline | `.cline/skills/` | | |
 
 Non-interactive: `--tools <tool1>,<tool2>` (or `all`). Valid values: `claude-code`, `cursor`, `windsurf`, `gemini-cli`, `cline`, `roo`, `trae`, `kiro`, `github-copilot`.
@@ -373,6 +386,7 @@ Skill internals + output schemas: [docs/USAGE.md](docs/USAGE.md#multi-agent-skil
 
 - [Installation Guide](docs/INSTALLATION.md)
 - [Usage Guide](docs/USAGE.md) — handoff report, user commands, multi-agent skill internals, troubleshooting
+- [Sprint Planning Reference](docs/sprint-planning.md) — focused guide to `/sprintpilot-plan-sprint`: curation, validation, mid-flight commands, companion skills
 - [Architecture](docs/ARCHITECTURE.md) — state machine, action / signal vocabulary, verify contracts
 - [Configuration Reference](docs/CONFIGURATION.md) — every setting, default, profile override
 - [Extending (Platforms & Languages)](docs/EXTENDING.md)

@@ -1,5 +1,22 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed — `gemini-cli` skills install at `.agents/skills/`
+
+The `gemini-cli` tool's skills install directory moved from `.gemini/skills/` to `.agents/skills/`, aligning with the BMad installer and the AGENTS-directory convention that other Gemini-family tooling now reads. `GEMINI.md` (the system-prompt file) is unchanged.
+
+- **`lib/core/tool-registry.js`**: `'gemini-cli'` mapped to `.agents` (was `.gemini`).
+- **`detectInstalledTools`** now also flags `gemini-cli` when legacy `.gemini/skills/sprint-autopilot-*` or `.gemini/skills/sprintpilot-*` directories are present, so an upgrade in a pre-rename project is still auto-detected without the user passing `--tools gemini-cli`.
+- **New `evictLegacyGeminiSprintpilotSkills`**: when installing `gemini-cli`, sweeps Sprintpilot-namespace dirs (`SPRINTPILOT_SKILL_PREFIXES`: `sprint-autopilot-` / `sprintpilot-`) out of `.gemini/skills/`, backing each one up to `.agents/.sprintpilot-backups/<name>.<timestamp>/` before removing the legacy copy. Idempotent. Honors `--dry-run`. User-defined skills under `.gemini/skills/` and any unrelated dot-dir contents are strictly untouched; the eviction only runs when `gemini-cli` is in the selected tool set.
+- **Docs**: `README.md` and `docs/INSTALLATION.md` updated to show `.agents/skills/`; INSTALLATION includes a one-paragraph upgrader note.
+
+### Added — sprint-planning documentation
+
+- **New `docs/sprint-planning.md`**: focused single-page reference for `/sprintpilot-plan-sprint` — covers prerequisites, invocation, curation step (included vs excluded + three common patterns + natural-language), validation pass, mid-flight commands, auto-derive, plan-exhausted halt, companion skills (`/sprintpilot-sprint-progress`, `/sprintpilot-dependency-graph`), legacy `dependencies.yaml` migration, concurrency. Cross-links to the long-form walkthrough in `USAGE.md` for worked examples.
+- **`README.md`**: Skills table grouped into Autopilot / Sprint planning + visibility / Multi-agent analysis. The three previously-undocumented v2.3.0+ skills (`/sprintpilot-plan-sprint`, `/sprintpilot-sprint-progress`, `/sprintpilot-dependency-graph`) now have one-line descriptions and link to both the reference and walkthrough. New entry in the Documentation list.
+- **`docs/USAGE.md`**: long-form planning section gets a header callout pointing to the new reference.
+
 ## [2.6.6] - 2026-05-30
 
 ### Fixed — resolver prefers the current epic

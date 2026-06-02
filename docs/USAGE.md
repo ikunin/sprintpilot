@@ -480,6 +480,8 @@ Orphan worktrees from a crashed session are flagged. The `--worktrees-dir .workt
 
 ## Sprint Planning + DAG-Aware Execution (v2.3.0)
 
+> **Quick reference:** the focused single-page guide is [`docs/sprint-planning.md`](./sprint-planning.md). This section is the long-form walkthrough with worked examples and migration notes.
+
 ### Default behavior (no plan, no setup)
 
 `autopilot start` runs stories in **sprint-status.yaml order** — exactly as it has since v1.0.5. No `sprint-plan.yaml`, no LLM-driven inference, no skill invocations. Greenfield projects upgrading from v2.2.x see zero behavior change.
