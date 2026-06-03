@@ -3,8 +3,18 @@ name: CI
 on:
   push:
     branches: [main]
+  # Not on every `synchronize` push to an open PR — only when a PR opens or
+  # becomes review-ready. Intermediate WIP pushes are skipped; push-to-main
+  # re-runs the full matrix authoritatively after merge.
   pull_request:
     branches: [main]
+    types: [opened, reopened, ready_for_review]
+
+# Supersede in-flight runs for the same ref so a burst of pushes to main
+# doesn't pile up 3-OS matrices — only the latest commit's run survives.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:

@@ -5,13 +5,15 @@ name: Security
 #   • trivy    — deps (vuln) + misconfig + fs secrets → BLOCKS on fixable HIGH/CRITICAL
 #   • semgrep  — SAST                                 → report-only (SARIF → Security tab)
 #
-# Runs on every push/PR AND weekly: most CVEs are disclosed against deps you
-# never touched, so a push-only scan would miss them — the schedule catches up.
+# Runs on push-to-main, at PR open/reopen/ready (not every WIP push), AND
+# weekly: most CVEs are disclosed against deps you never touched, so a
+# push-only scan would miss them — the schedule catches up.
 on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
+    types: [opened, reopened, ready_for_review]
   schedule:
     - cron: '0 6 * * 1' # Mondays 06:00 UTC — catch newly-disclosed CVEs in unchanged deps
   workflow_dispatch:
