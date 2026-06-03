@@ -58,6 +58,12 @@ const CRITICAL_KEYS = new Set([
   'consecutive_identical_rejections',
 ]);
 
+// Prototype-pollution guard. State keys are machine-generated field names;
+// a segment like `__proto__` / `constructor` / `prototype` can only reach a
+// dotted-path setter from a malformed or crafted state file, so we drop the
+// write rather than let it walk into the prototype chain.
+const UNSAFE_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
 const KIND_DIR = {
   state: '.autopilot-state',
   'decision-log': '.decision-log',
@@ -279,6 +285,10 @@ function parseValue(raw) {
 
 function setByDottedPath(obj, key, value) {
   const parts = key.split('.');
+  // Prototype-pollution guard: never let any path segment reach into the
+  // prototype chain. Drop the whole write — a state field is never legitimately
+  // named __proto__ / constructor / prototype.
+  if (parts.some((p) => UNSAFE_KEYS.has(p))) return obj;
   let cur = obj;
   for (let i = 0; i < parts.length - 1; i++) {
     const p = parts[i];
@@ -516,7 +526,12 @@ function main() {
         log.error('--json must be a JSON object');
         process.exit(1);
       }
-      Object.assign(partial, parsed);
+      // Guarded shallow copy instead of Object.assign — drop dangerous keys
+      // so a crafted `--json '{"__proto__":…}'` can't reach the prototype.
+      for (const k of Object.keys(parsed)) {
+        if (UNSAFE_KEYS.has(k)) continue;
+        partial[k] = parsed[k];
+      }
     }
     if (opts.field !== undefined) {
       const eq = opts.field.indexOf('=');

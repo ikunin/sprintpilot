@@ -169,6 +169,27 @@ describe('setByDottedPath + getByDottedPath', () => {
     setByDottedPath(o, 'a.b', 2);
     expect(getByDottedPath(o, 'a.b')).toBe(2);
   });
+
+  // Prototype-pollution guard (security scan hardening).
+  it('drops a write whose path contains __proto__ — no prototype pollution', () => {
+    const o: Record<string, unknown> = {};
+    setByDottedPath(o, '__proto__.polluted', 'x');
+    setByDottedPath(o, 'constructor.prototype.polluted2', 'y');
+    setByDottedPath(o, 'a.__proto__.b', 'z');
+    // Object.prototype must be untouched.
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+    expect(({} as Record<string, unknown>).polluted2).toBeUndefined();
+    expect(({} as Record<string, unknown>).b).toBeUndefined();
+    // The guarded writes are dropped, not partially applied.
+    expect(o.a).toBeUndefined();
+  });
+
+  it('yamlLoad ignores a crafted __proto__ key — no prototype pollution', () => {
+    const polluted = yamlLoad('__proto__: {"polluted": true}\ncurrent_story: s1');
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+    // Legitimate keys still parse.
+    expect(polluted.current_story).toBe('s1');
+  });
 });
 
 describe('stripTrailingComment + firstTopLevelColon', () => {

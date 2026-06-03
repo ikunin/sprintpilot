@@ -66,6 +66,28 @@ describe('write (legacy direct path)', () => {
     const entries = fs.readdirSync(dir);
     expect(entries.filter((e: string) => e.includes('.tmp.'))).toEqual([]);
   });
+
+  // Prototype-pollution guard (security scan hardening). Exercises deepMerge
+  // (write path) and parseYamlNarrow (read path).
+  it('does not pollute Object.prototype via a __proto__ key in updates', () => {
+    write(
+      { __proto__: { polluted: true }, current_story: 'S1' } as Record<string, unknown>,
+      NO_COALESCE,
+      { projectRoot },
+    );
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+    expect(read({ projectRoot }).current_story).toBe('S1');
+  });
+
+  it('does not pollute Object.prototype when reading a crafted state file', () => {
+    const fs = require('node:fs');
+    const p = resolveStatePath(projectRoot);
+    mkdirSync(join(projectRoot, '_bmad-output', 'implementation-artifacts'), { recursive: true });
+    fs.writeFileSync(p, '__proto__:\n  polluted: true\ncurrent_story: S2\n', 'utf8');
+    const state = read({ projectRoot });
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+    expect(state.current_story).toBe('S2');
+  });
 });
 
 describe('write (coalesce path)', () => {

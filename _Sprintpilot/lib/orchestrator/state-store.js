@@ -49,10 +49,17 @@ function isPlainObject(v) {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
 }
 
+// Prototype-pollution guard. State keys are machine-generated field names;
+// __proto__ / constructor / prototype can only appear from a malformed or
+// crafted state file, so we drop them rather than let them reach the
+// prototype chain. Mirrors state-shard.js#UNSAFE_KEYS.
+const UNSAFE_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
 function deepMerge(target, source) {
   if (!isPlainObject(source)) return source;
   const out = isPlainObject(target) ? { ...target } : {};
   for (const key of Object.keys(source)) {
+    if (UNSAFE_KEYS.has(key)) continue; // prototype-pollution guard
     const sv = source[key];
     const tv = out[key];
     if (isPlainObject(sv) && isPlainObject(tv)) out[key] = deepMerge(tv, sv);
@@ -188,6 +195,9 @@ function parseYamlNarrow(text) {
       // Skip rather than corrupt the array.
       continue;
     }
+    // Prototype-pollution guard: a crafted `__proto__:` / `constructor:` line
+    // would otherwise write into the prototype chain via top.container[key].
+    if (UNSAFE_KEYS.has(key)) continue;
     if (rest === '') {
       const child = {};
       top.container[key] = child;
