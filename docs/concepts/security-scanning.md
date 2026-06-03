@@ -259,6 +259,21 @@ Adapters must be unit-testable without their binary installed in CI: record a **
 - **Container images.** Image scanning needs a built image — out of scope for the per-story inner loop; fits CI or an explicit opt-in target.
 - **License / SAST noise.** License "violations" and some SAST rules are policy, not bugs — keep informational unless the user defines an explicit policy.
 
+## Open decisions (settle before implementing)
+
+Calls to make before the Phase 1 PR. Each has a leaning, not a verdict.
+
+| Decision | Options | Leaning + rationale |
+|---|---|---|
+| **Default merge strategy** | `first_available` / `run_all` | `first_available` — fast, deterministic, no overlap; `run_all` is an opt-in for teams that want redundant coverage. |
+| **Default gating mode** | `gate_on: new` / `all` | `new` — gating on `all` makes the feature unusable on any repo with pre-existing debt (halts on story 1). `all` is opt-in for greenfield. |
+| **Config home** | fold into `modules/git/config.yaml` / dedicated `modules/security/config.yaml` | Start folded under `git.security` (mirrors `git.lint`, one fewer file); promote to its own module only if it outgrows a block. |
+| **Default `severity_threshold`** | `CRITICAL` / `HIGH` / `MEDIUM` | `HIGH` for the gate; record everything below for visibility. Profiles can tighten (`large` → `CRITICAL` blocking). |
+| **`feed_to_review` default** | on / off | Off in Phase 1 (record-only). On from Phase 2 for `large` only — routing findings into triage changes the cycle's behavior, so it's opt-in per profile. |
+| **First-class scan classes for Phase 1** | secret / vuln / iac / all | Ship the driver + Trivy covering `vuln + secret` first (highest signal, lowest noise); add `iac`/`sast`/`license` once normalization fixtures exist. |
+| **Suppression scope** | per-project / per-epic / per-sprint | Per-project ledger (like `excluded-stories.json`) — a suppressed finding stays suppressed until explicitly revisited, surfaced in the retro metrics. |
+| **nano behavior** | skip / opt-in at commit gate | Skip by default (nano is throwaway scope); honor `security.enabled` if the user sets it explicitly. |
+
 ## Non-goals
 
 - Bundling any scanner binary (all stay external, user-installed).
