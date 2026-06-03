@@ -129,7 +129,7 @@ jobs:
       # ── FULL: whole tree — gate + full SARIF inventory ──────────────────
       - name: Trivy scan (FULL, gate)
         if: needs.scope.outputs.full == 'true'
-        uses: aquasecurity/trivy-action@v0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: fs
           scanners: vuln,secret,misconfig
@@ -141,7 +141,7 @@ jobs:
           format: table
       - name: Trivy scan (FULL, SARIF)
         if: needs.scope.outputs.full == 'true'
-        uses: aquasecurity/trivy-action@v0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: fs
           scanners: vuln,secret,misconfig
@@ -183,7 +183,7 @@ jobs:
           echo "Staged ${count} changed file(s) for scanning."
       - name: Trivy scan (SCOPED, gate)
         if: needs.scope.outputs.full != 'true' && steps.changed.outputs.count != '0'
-        uses: aquasecurity/trivy-action@v0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: fs
           scan-ref: scan-scope
