@@ -159,7 +159,7 @@ function main() {
         writeLockExclusive(lockFile, id);
         log.out(`ACQUIRED_STALE:${id}`);
         return;
-      } catch (e) {
+      } catch (_e) {
         // Another acquirer either won the stale takeover race, OR released
         // their lock in the meantime. Re-read and handle both cases.
         const fresh = readLockInfo(lockFile, staleSeconds);

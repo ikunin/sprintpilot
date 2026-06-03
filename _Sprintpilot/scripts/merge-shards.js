@@ -178,8 +178,8 @@ function compareStamps(a, b) {
       // fall through to wall
     }
   }
-  const aw = a && a.wall ? Date.parse(a.wall) : 0;
-  const bw = b && b.wall ? Date.parse(b.wall) : 0;
+  const aw = a?.wall ? Date.parse(a.wall) : 0;
+  const bw = b?.wall ? Date.parse(b.wall) : 0;
   if (aw > bw) return 1;
   if (aw < bw) return -1;
   return 0;
@@ -363,7 +363,7 @@ function archiveShardsToLayer(projectRoot, layerId, snapshotsByKind) {
     if (!fs.existsSync(src)) continue;
     const destDir = path.join(base, KIND_DIR[kind]);
     fs.mkdirSync(destDir, { recursive: true });
-    const snapshots = (snapshotsByKind && snapshotsByKind[kind]) || {};
+    const snapshots = snapshotsByKind?.[kind] || {};
     for (const story of Object.keys(snapshots)) {
       const file = path.join(src, `${story}.yaml`);
       if (!fs.existsSync(file)) continue;

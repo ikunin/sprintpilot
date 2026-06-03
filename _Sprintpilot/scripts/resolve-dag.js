@@ -177,7 +177,7 @@ function edgesFromExplicit(depsDoc, nodes) {
   if (depsDoc.stories && typeof depsDoc.stories === 'object' && !Array.isArray(depsDoc.stories)) {
     for (const key of Object.keys(depsDoc.stories)) {
       const entry = depsDoc.stories[key];
-      const deps = entry && entry.depends_on;
+      const deps = entry?.depends_on;
       if (!Array.isArray(deps)) continue;
       for (const dep of deps) {
         if (!nodeSet.has(dep) || !nodeSet.has(key)) continue;

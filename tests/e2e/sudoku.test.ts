@@ -85,7 +85,7 @@ const LLM_E2E_ENABLED = RUN_LLM_E2E && RUN_LLM_E2E_FULL;
 let project: TempProject;
 let devServer: ChildProcess | null = null;
 let devServerUrl: string | null = null;
-let devServerLogPath: string | null = null;
+let _devServerLogPath: string | null = null;
 
 // Shared with greenfield via tests/e2e/harness/git-utils.ts. The shared
 // version filters branch matches against the current sprint's story keys
@@ -436,7 +436,7 @@ describe.skipIf(!HAS_CLAUDE || !LLM_E2E_ENABLED)('Sudoku web game (parallel disp
     mkdirSync(logDir, { recursive: true });
     const logPath = join(logDir, 'dev.log');
     const errPath = join(logDir, 'dev.err');
-    devServerLogPath = logPath;
+    _devServerLogPath = logPath;
 
     console.log('[Sudoku] Starting dev server (detached)...');
     const child = spawn('npm', ['run', 'dev'], {

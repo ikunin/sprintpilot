@@ -28,7 +28,7 @@ async function resolveVersion() {
 }
 
 function bail(err) {
-  if (err && err.stack) {
+  if (err?.stack) {
     console.error(err.stack);
   } else if (err) {
     console.error(String(err));

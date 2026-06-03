@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 const fs = require('node:fs');
-const path = require('node:path');
+const _path = require('node:path');
 
 const { parseArgs } = require('../lib/runtime/args');
 const { tryGit, tryGitStdout, gitStdout } = require('../lib/runtime/git');

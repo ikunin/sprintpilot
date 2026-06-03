@@ -4,7 +4,7 @@
 // removeStories, reorder, setIssueId, setIssueTracker, refreshBmadStatus,
 // archive, and the shared `mutate` helper.
 
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';

@@ -25,7 +25,6 @@ const {
   markPhase,
   readMarker,
   markerPath,
-  clearMarker,
 } = logTimingMod as {
   STORY_RE: RegExp;
   PHASE_RE: RegExp;

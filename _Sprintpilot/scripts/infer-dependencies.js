@@ -232,8 +232,7 @@ function validateCrossEpicEnvelope(envelope, { projectRoot, plan }) {
 
   // Build the set of edges already inferred per-epic so we can flag duplicates.
   const perEpicEdges = new Set();
-  const planStories =
-    plan && plan.dependencies && plan.dependencies.stories ? plan.dependencies.stories : {};
+  const planStories = plan?.dependencies?.stories ? plan.dependencies.stories : {};
   for (const key of Object.keys(planStories)) {
     const depsList = planStories[key]?.depends_on;
     if (!Array.isArray(depsList)) continue;
@@ -557,7 +556,7 @@ function applyEnvelopeToPlan(envelope, plan, { projectRoot, epic }) {
   const epicKeys = new Set(Object.keys(byKey));
 
   const prevStories =
-    plan.dependencies && plan.dependencies.stories && typeof plan.dependencies.stories === 'object'
+    plan.dependencies?.stories && typeof plan.dependencies.stories === 'object'
       ? { ...plan.dependencies.stories }
       : {};
 

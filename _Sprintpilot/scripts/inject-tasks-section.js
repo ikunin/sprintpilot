@@ -180,7 +180,7 @@ function extractAcceptanceCriteria(body, sectionName) {
     if (/^\s*$/.test(line)) continue;
     for (const re of acEntryRes) {
       const m = line.match(re);
-      if (m && m[1]) {
+      if (m?.[1]) {
         const text = m[1].replace(/\s+/g, ' ').trim();
         if (text) entries.push(text);
         break;

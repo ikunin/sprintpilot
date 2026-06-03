@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 const { parseArgs } = require('../lib/runtime/args');
-const { tryRun, run } = require('../lib/runtime/spawn');
+const { tryRun } = require('../lib/runtime/spawn');
 const { tryGitStdout } = require('../lib/runtime/git');
 const { extractUrl, headLines } = require('../lib/runtime/text');
 const { postJson } = require('../lib/runtime/http');
@@ -402,14 +402,7 @@ async function main() {
 // On non-github platforms (or when CLI is missing), exits 2 (SKIPPED) so
 // land.js can surface a user_prompt rather than blocking on a feature
 // we can't deliver.
-async function runChecksMode({
-  platform,
-  branch,
-  baseBranch,
-  waitMinutes,
-  requireApprovedReview,
-  baseUrl,
-}) {
+async function runChecksMode({ platform, branch, waitMinutes, requireApprovedReview }) {
   // `platform` has already been resolved (auto → concrete) in main(),
   // so we only branch on concrete provider strings here.
   if (platform === 'github') {

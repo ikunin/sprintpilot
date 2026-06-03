@@ -28,7 +28,6 @@ const RESOLVE_DAG = join(REPO_ROOT, '_Sprintpilot', 'scripts', 'resolve-dag.js')
 const {
   applyEnvelopeToPlan,
   mergeLegacyIntoPlan,
-  readLegacyDependencies,
   diffEdges,
   scaffoldCrossEpicPrompt,
   validateCrossEpicEnvelope,
@@ -69,7 +68,6 @@ const {
 const {
   readDependencies,
   edgesFromCrossEpic,
-  edgesFromExplicit,
   buildDag,
   planStatusByKey,
   bucketEdges,

@@ -119,7 +119,7 @@ async function runStep(step) {
   }
 
   const retry = step.retry || {};
-  const retryEnabled = retry && retry.on && retry.on !== 'never';
+  const retryEnabled = retry?.on && retry.on !== 'never';
   const maxAttempts =
     retryEnabled && Number.isInteger(retry.attempts) && retry.attempts > 0 ? retry.attempts : 1;
   const backoffMs = retryEnabled ? retry.backoff_ms : null;

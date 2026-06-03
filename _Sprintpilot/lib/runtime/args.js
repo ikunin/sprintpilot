@@ -61,7 +61,7 @@ function parseArgs(argv, { booleanFlags = [], positionalActions = null } = {}) {
       continue;
     }
 
-    if (actionSet && actionSet.has(token)) {
+    if (actionSet?.has(token)) {
       actions.push(token);
     } else {
       positional.push(token);

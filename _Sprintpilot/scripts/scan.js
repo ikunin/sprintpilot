@@ -21,8 +21,8 @@
  * to disable. Negation patterns (`!pattern`) are logged to stderr and skipped.
  */
 
-const fs = require('fs');
-const path = require('path');
+const fs = require('node:fs');
+const path = require('node:path');
 const { parseArgs } = require('../lib/runtime/args');
 const log = require('../lib/runtime/log');
 

@@ -50,7 +50,7 @@ const { STATES } = sm as { STATES: Record<string, string> };
 const T0 = '2026-05-27T10:00:00.000Z';
 const T1 = '2026-05-27T10:00:01.000Z';
 const T2 = '2026-05-27T10:00:02.000Z';
-const T3 = '2026-05-27T10:00:03.000Z';
+const _T3 = '2026-05-27T10:00:03.000Z';
 const T4 = '2026-05-27T10:30:00.000Z';
 
 function actionEmitted(phase: string, ts = T1, skill = 'bmad-dev-story'): LedgerEntry {

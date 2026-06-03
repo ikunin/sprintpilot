@@ -428,7 +428,7 @@ describe('cmdStart plan-aware flows (Round 4 coverage)', () => {
   // Helper: run cmdStart and capture the JSON action it emits. Returns
   // the parsed JSON or null if the output couldn't be parsed (which
   // would itself be a bug worth catching).
-  function runAutopilotStart(): {
+  function _runAutopilotStart(): {
     stdout: string;
     stderr: string;
     action: Record<string, unknown> | null;

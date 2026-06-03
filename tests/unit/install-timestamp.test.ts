@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 // Extract timestamp() from install.js by re-requiring after stubbing Date —
 // install.js is a CommonJS module with `timestamp` only in closure scope.

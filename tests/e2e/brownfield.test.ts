@@ -13,15 +13,11 @@ import { execSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import {
-  assertDirectoryExists,
-  assertFileExists,
-  assertFileNotEmpty,
-} from './harness/assertions.js';
-import { runClaude, runSkill } from './harness/claude-runner.js';
+import { assertFileExists, assertFileNotEmpty } from './harness/assertions.js';
+import { runClaude } from './harness/claude-runner.js';
 import { costTracker } from './harness/cost-tracker.js';
 
-const FIXTURES_DIR = join(import.meta.dirname, 'fixtures/brownfield');
+const _FIXTURES_DIR = join(import.meta.dirname, 'fixtures/brownfield');
 const ADDON_SOURCE = join(import.meta.dirname, '../../_Sprintpilot');
 
 /** Model to use — override via BMAD_TEST_MODEL env var (e.g. "haiku", "opus") */

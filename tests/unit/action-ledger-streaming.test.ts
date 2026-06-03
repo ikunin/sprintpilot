@@ -7,8 +7,8 @@
 //     maxIdleMs, handles afterSeq filtering, respects AbortSignal.
 //   - readSince() filter behavior.
 
-import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -20,7 +20,7 @@ import sprintPlanMod from '../../_Sprintpilot/scripts/sprint-plan.js';
 
 type LedgerEntry = { seq: number; ts: string; kind: string; [k: string]: unknown };
 
-const { VALID_KINDS, append, read, readSince, tail } = ledgerMod as {
+const { VALID_KINDS, append, readSince, tail } = ledgerMod as {
   VALID_KINDS: string[];
   append: (entry: Record<string, unknown>, ctx: { projectRoot: string }) => LedgerEntry;
   read: (ctx: { projectRoot: string }, opts?: { limit?: number }) => LedgerEntry[];
@@ -36,11 +36,7 @@ const { VALID_KINDS, append, read, readSince, tail } = ledgerMod as {
   ) => AsyncIterable<LedgerEntry>;
 };
 
-const {
-  write: writePlan,
-  emptyPlan,
-  planPath,
-} = sprintPlanMod as {
+const { write: writePlan, emptyPlan } = sprintPlanMod as {
   write: (plan: Record<string, unknown>, ctx: { projectRoot: string }) => string;
   emptyPlan: (opts?: { source?: string }) => Record<string, unknown>;
   planPath: (root: string) => string;

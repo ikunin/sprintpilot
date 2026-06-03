@@ -6,7 +6,7 @@ const path = require('node:path');
 const { parseArgs } = require('../lib/runtime/args');
 const { tryRun } = require('../lib/runtime/spawn');
 const { tryGitStdout } = require('../lib/runtime/git');
-const { splitLines, countLines, headLines } = require('../lib/runtime/text');
+const { splitLines, countLines } = require('../lib/runtime/text');
 const log = require('../lib/runtime/log');
 
 function help() {
@@ -35,7 +35,11 @@ function normalizeLintersConfig(raw) {
   // and they share linters).
   for (const k of Object.keys(out)) {
     const seen = new Set();
-    out[k] = out[k].filter((x) => (seen.has(x) ? false : (seen.add(x), true)));
+    out[k] = out[k].filter((x) => {
+      if (seen.has(x)) return false;
+      seen.add(x);
+      return true;
+    });
   }
   return out;
 }
@@ -266,7 +270,7 @@ async function detectAndLint(files, lintersConfig) {
   const chunks = [];
   for (const [lang, langFiles] of byLang) {
     let out;
-    if (lintersConfig && lintersConfig[lang]) {
+    if (lintersConfig?.[lang]) {
       // User configured linters for this language — use their list.
       const configured = await lintWithConfig(lang, langFiles, lintersConfig[lang]);
       // null = none of the configured linters installed → fall back to

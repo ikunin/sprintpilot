@@ -195,7 +195,7 @@ describe('autopilot start', () => {
     );
     const lines = readFileSync(ledgerPath, 'utf8').trim().split('\n');
     const entries = lines.map((l) => JSON.parse(l));
-    const notice = entries.find((e) => e.detail && e.detail.parallel_stories_notice);
+    const notice = entries.find((e) => e.detail?.parallel_stories_notice);
     expect(notice).toBeDefined();
   });
 

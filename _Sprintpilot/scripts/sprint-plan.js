@@ -479,7 +479,7 @@ function addStories(entries, { projectRoot, position = 'end' }) {
     throw new Error('addStories requires a non-empty array of entries');
   }
   return mutate(projectRoot, (plan) => {
-    const seenKeys = new Set(plan.stories.map((s) => s && s.key));
+    const seenKeys = new Set(plan.stories.map((s) => s?.key));
     const now = new Date().toISOString();
     const newEntries = [];
     for (const raw of entries) {
@@ -735,7 +735,7 @@ function refreshBmadStatus({ projectRoot }) {
     // Stories
     for (let i = 0; i < next.stories.length; i++) {
       const entry = next.stories[i];
-      if (!entry || !entry.key) continue;
+      if (!entry?.key) continue;
       const observed = bmad.has(entry.key) ? bmad.get(entry.key) : null;
       if (observed !== entry.bmad_status) {
         entry.bmad_status = observed;
@@ -760,7 +760,7 @@ function refreshBmadStatus({ projectRoot }) {
     // otherwise. This is a heuristic; users can override via direct YAML edit.
     for (let i = 0; i < next.epics.length; i++) {
       const epic = next.epics[i];
-      if (!epic || !epic.id) continue;
+      if (!epic?.id) continue;
       const epicStories = next.stories.filter(
         (s) => s && (s.epic === epic.id || String(s.epic) === String(epic.id)),
       );
@@ -848,7 +848,7 @@ function reorder(newOrder, { projectRoot }) {
   }
   return mutate(projectRoot, (plan) => {
     const byKey = new Map();
-    for (const s of plan.stories) if (s && s.key) byKey.set(s.key, s);
+    for (const s of plan.stories) if (s?.key) byKey.set(s.key, s);
     const unknown = [];
     // M1 (v2.3.0) — keys whose plan_status is terminal (done / skipped /
     // excluded) are rejected upfront. Reordering them is a UX trap: the
@@ -890,7 +890,7 @@ function reorder(newOrder, { projectRoot }) {
       throw err;
     }
     // Append any plan entries the caller omitted, preserving relative order.
-    const appended = plan.stories.filter((s) => s && s.key && !seen.has(s.key));
+    const appended = plan.stories.filter((s) => s?.key && !seen.has(s.key));
     plan.stories = [...ordered, ...appended];
     reassignPriorities(plan.stories);
     return plan;
@@ -952,7 +952,7 @@ async function runRead(projectRoot) {
     process.stdout.write(JSON.stringify({ exists: false, plan: null }) + '\n');
     return 0;
   }
-  if (result && result.error) {
+  if (result?.error) {
     process.stdout.write(JSON.stringify({ exists: true, plan: null, ...result }) + '\n');
     return 1;
   }
@@ -960,7 +960,7 @@ async function runRead(projectRoot) {
   return 0;
 }
 
-async function runValidate(projectRoot) {
+async function runValidate(_projectRoot) {
   const stdin = await readStdin();
   const parsed = parseStdinPlan(stdin);
   if (!parsed.ok) {

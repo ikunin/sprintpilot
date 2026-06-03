@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -195,21 +195,21 @@ describe('pickAdapter registry', () => {
   it('returns vitest for a vitest-only project', () => {
     writePackageJson({ vitest: '^3.0.0' });
     const a = pickAdapter(projectRoot);
-    expect(a && a.NAME).toBe('vitest');
+    expect(a?.NAME).toBe('vitest');
   });
 
   it('returns jest when vitest is absent', () => {
     writePackageJson({ jest: '^29.0.0' });
-    expect((pickAdapter(projectRoot) || {}).NAME).toBe('jest');
+    expect(pickAdapter(projectRoot)?.NAME).toBe('jest');
   });
 
   it('prefers vitest over jest when both are present', () => {
     writePackageJson({ vitest: '^3.0.0', jest: '^29.0.0' });
-    expect((pickAdapter(projectRoot) || {}).NAME).toBe('vitest');
+    expect(pickAdapter(projectRoot)?.NAME).toBe('vitest');
   });
 
   it('falls through to generic for empty projects', () => {
-    expect((pickAdapter(projectRoot) || {}).NAME).toBe('generic');
+    expect(pickAdapter(projectRoot)?.NAME).toBe('generic');
   });
 
   it('survives projectRoot = null without throwing', () => {

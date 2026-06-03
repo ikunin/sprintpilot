@@ -28,7 +28,7 @@ function help() {
 }
 
 function buildPlan(snapshot, opts) {
-  if (!snapshot || !snapshot.active_pr) {
+  if (!snapshot?.active_pr) {
     return { steps: [], skipped: true, reason: 'no active_pr in snapshot' };
   }
   const base = opts.base || snapshot.base_branch || 'main';

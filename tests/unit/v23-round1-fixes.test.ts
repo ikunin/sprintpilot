@@ -7,16 +7,7 @@
 // real risk is two `node autopilot.js …` invocations).
 
 import { execFileSync, spawnSync } from 'node:child_process';
-import {
-  appendFileSync,
-  existsSync,
-  lstatSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -27,11 +18,7 @@ import adaptMod from '../../_Sprintpilot/lib/orchestrator/adapt.js';
 // @ts-expect-error — CommonJS
 import profileRules from '../../_Sprintpilot/lib/orchestrator/profile-rules.js';
 // @ts-expect-error — CommonJS
-import dagMod from '../../_Sprintpilot/lib/orchestrator/sprint-plan.js';
-// @ts-expect-error — CommonJS
 import applierMod from '../../_Sprintpilot/lib/orchestrator/user-command-applier.js';
-// @ts-expect-error — CommonJS
-import inferMod from '../../_Sprintpilot/scripts/infer-dependencies.js';
 // @ts-expect-error — CommonJS
 import resolveDagMod from '../../_Sprintpilot/scripts/resolve-dag.js';
 // @ts-expect-error — CommonJS
@@ -51,7 +38,6 @@ const {
   emptyPlan,
   write: writePlan,
   read: readPlan,
-  planPath,
   lockPath,
   reorder,
   archive,

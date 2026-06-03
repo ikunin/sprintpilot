@@ -14,7 +14,7 @@ const { validateOne, COMMAND_KINDS } = userCommands as {
   COMMAND_KINDS: string[];
 };
 
-const { apply, applyOne } = applierMod as {
+const { applyOne } = applierMod as {
   applyOne: (
     state: Record<string, unknown>,
     profile: Record<string, unknown>,
