@@ -1,0 +1,121 @@
+name: Security
+
+# Layered scanning, enforced server-side (cannot be bypassed with --no-verify):
+#   • secrets  — gitleaks over full history          → BLOCKS (a leak is critical)
+#   • trivy    — deps (vuln) + misconfig + fs secrets → BLOCKS on fixable HIGH/CRITICAL
+#   • semgrep  — SAST                                 → report-only (SARIF → Security tab)
+#
+# Runs on every push/PR AND weekly: most CVEs are disclosed against deps you
+# never touched, so a push-only scan would miss them — the schedule catches up.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: '0 6 * * 1' # Mondays 06:00 UTC — catch newly-disclosed CVEs in unchanged deps
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write # upload SARIF to the Security tab
+
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: true
+
+# Dependency / transient trees we don't scan as our code. Kept in sync with
+# .gitleaks.toml allowlist and .semgrepignore. NOTE: _Sprintpilot/ is NOT
+# excluded — it is the product source in this repo.
+env:
+  VENDORED_SKIP_DIRS: 'node_modules,.worktrees,_bmad,_bmad-output'
+
+jobs:
+  # ─── Secrets — BLOCKING ────────────────────────────────────────────────
+  secrets:
+    name: Secrets (gitleaks)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history so a secret committed anytime is caught
+      - name: Install gitleaks
+        run: |
+          VERSION=8.30.1
+          curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${VERSION}/gitleaks_${VERSION}_linux_x64.tar.gz" \
+            | tar -xz gitleaks
+          sudo install -m 0755 gitleaks /usr/local/bin/gitleaks
+          gitleaks version
+      - name: Scan git history
+        run: gitleaks git . --no-banner --redact --config .gitleaks.toml
+
+  # ─── Dependencies + misconfig + fs secrets — BLOCKING on fixable H/C ────
+  trivy:
+    name: Trivy (vuln + misconfig)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      # Gate: fail the build only on HIGH/CRITICAL that actually have a fix
+      # available (ignore-unfixed) — actionable signal, low false-fail rate.
+      - name: Trivy scan (gate)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: fs
+          scanners: vuln,secret,misconfig
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: '1'
+          trivyignores: .trivyignore
+          skip-dirs: ${{ env.VENDORED_SKIP_DIRS }}
+          format: table
+
+      # Full inventory (all severities, non-blocking) → Security tab.
+      - name: Trivy scan (SARIF)
+        if: always()
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: fs
+          scanners: vuln,secret,misconfig
+          ignore-unfixed: false
+          exit-code: '0'
+          trivyignores: .trivyignore
+          skip-dirs: ${{ env.VENDORED_SKIP_DIRS }}
+          format: sarif
+          output: trivy.sarif
+      - name: Upload Trivy SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy.sarif
+          category: trivy
+
+  # ─── SAST — REPORT-ONLY (tune, then promote to blocking) ────────────────
+  semgrep:
+    name: Semgrep (SAST)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install Semgrep
+        run: pip install semgrep
+      # Report-only: SAST carries a higher false-positive rate, so we surface
+      # findings in the Security tab without failing the build. Promote to a
+      # gate (--error) once the ruleset is tuned and FPs are suppressed via
+      # .semgrepignore / inline `// nosemgrep` comments.
+      - name: Semgrep scan
+        run: |
+          semgrep scan \
+            --config p/default --config p/security-audit --config p/secrets \
+            --sarif --output semgrep.sarif --metrics=off || true
+      - name: Upload Semgrep SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: semgrep.sarif
+          category: semgrep

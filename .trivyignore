@@ -1,0 +1,19 @@
+# Trivy ignore file — accepted/suppressed findings.
+# Docs: https://trivy.dev/docs/configuration/filtering/#by-finding-ids
+#
+# One ID per line (CVE-…, GHSA-…, AVD-… misconfig IDs, or secret rule IDs).
+# Add an `# expires:` / rationale comment so suppressions are reviewable and
+# don't become permanent blind spots.
+#
+# NOTE: dependency / vendored trees (node_modules, _bmad*, .worktrees) are
+# excluded via `skip-dirs` in .github/workflows/security.yml rather than by
+# listing their CVEs here — that keeps this file scoped to deliberate,
+# our-code suppressions only.
+#
+# Example:
+#   # Accepted 2026-06-03: transitive, dev-only, not shipped in the npm
+#   #   tarball (package.json "files" ships bin/ lib/ _Sprintpilot/ only).
+#   #   Re-evaluate when <pkg> releases a fix.
+#   CVE-0000-00000
+
+# (no accepted findings — root + tests lockfiles scan clean)

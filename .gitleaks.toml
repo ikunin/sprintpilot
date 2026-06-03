@@ -1,0 +1,34 @@
+# gitleaks configuration — secret scanning (local pre-push gate + CI).
+# Docs: https://github.com/gitleaks/gitleaks
+#
+# We extend gitleaks' built-in ruleset (AWS keys, GitHub/GitLab tokens, JWTs,
+# private-key blocks, generic high-entropy secrets, …) and add a project
+# allowlist for paths that legitimately contain example/placeholder material,
+# are BMad-installed (not ours), or are deliberate test fixtures.
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Project-wide allowlist"
+# Regexes matched against the file path.
+paths = [
+  # Dependencies — never our secrets.
+  '''(^|/)node_modules/''',
+  # Per-story worktrees (transient checkouts of our own tree).
+  '''(^|/)\.worktrees/''',
+  # BMad-Method install + its skill resources (gitignored; not Sprintpilot's
+  # code). Their docs/manifests carry EXAMPLE tokens and content hashes that
+  # trip `generic-api-key`. Scanned upstream, not here.
+  '''(^|/)_bmad/''',
+  '''(^|/)_bmad-output/''',
+  '''(^|/)\.claude/''',
+  # Committed, secret-free env template (real .env* is gitignored).
+  '''(^|/)\.env\.example$''',
+  # Deliberate test fixtures: these exercise Sprintpilot's OWN secret
+  # detection (commit-time screen + scanner), so they intentionally embed
+  # fake private-key blocks and sample GitHub/Slack tokens. They are never
+  # live credentials. (Triaged 2026-06-03.)
+  '''(^|/)tests/unit/secrets\.test\.ts$''',
+  '''(^|/)tests/scripts/stage-and-commit\.test\.ts$''',
+]

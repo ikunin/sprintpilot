@@ -1,0 +1,24 @@
+# Paths Semgrep skips (gitignore-style syntax).
+# Semgrep already honours .gitignore; this adds dependency/build output and
+# transient trees so scans stay fast and the report stays signal-dense.
+#
+# NOTE: do NOT exclude _Sprintpilot/ — in THIS repo it is the product source
+# (the orchestrator, scripts, runtime), exactly the code we want scanned.
+# (In a consumer repo _Sprintpilot/ is an installed addon and would be excluded.)
+
+# Dependencies / build output
+node_modules/
+dist/
+build/
+*.min.js
+
+# Transient / generated trees
+.worktrees/
+_bmad/
+_bmad-output/
+
+# Binary / non-source
+*.png
+*.jpg
+*.pdf
+*.svg

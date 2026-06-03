@@ -4,6 +4,7 @@
 # broken pushes are rejected locally before they ever reach CI.
 #
 # Ordered checks:
+#   0. Secret-leak gate — gitleaks over the pushed commit range (BLOCKS)
 #   1. Biome CI mode — format + lint, strict
 #   2. Fast test suite — unit + scripts (same as CI)
 #
@@ -17,6 +18,13 @@ set -e
 
 ROOT="$(git rev-parse --show-toplevel)"
 cd "$ROOT"
+
+# 0. Secret-leak gate — runs FIRST (cheapest check, highest-severity failure).
+# Range-aware: scripts/secret-scan.sh reads the pre-push stdin and scans only
+# the commits being pushed, so a leaked credential never reaches the remote.
+# stdin is forwarded automatically (this hook's stdin IS the pre-push refs).
+echo "pre-push: secret scan (gitleaks)"
+scripts/secret-scan.sh
 
 # Install test devDependencies (Biome + vitest) if missing.
 if [ ! -x tests/node_modules/.bin/biome ]; then

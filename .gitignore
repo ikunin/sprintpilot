@@ -15,6 +15,11 @@ _bmad-output/
 # Node
 node_modules/
 
+# Secrets — never commit real env files; keep a committed template only.
+.env
+.env.*
+!.env.example
+
 # Claude Code runtime state
 .claude/scheduled_tasks.lock
 
