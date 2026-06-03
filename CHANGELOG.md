@@ -1,5 +1,24 @@
 # Changelog
 
+## [2.7.4] - 2026-06-03
+
+### Added — layered security scanning
+
+- **CI security gates** — a layered scanning pipeline in GitHub Actions (gitleaks secret detection, Trivy vulnerability scan, Semgrep static analysis) following the portable security playbook, with governance files (`.gitleaks.toml`, `.trivyignore`, `.semgrepignore`) scoping each tool. The `.claude` config tree is git-tracked and explicitly exempted from secret scanning.
+- **Local pre-push secret scanning** — `secret-scan.sh` runs gitleaks as the first check in the `.githooks/pre-push` hook, catching secrets before they leave the machine.
+
+### Fixed — prototype-pollution guard on state writes
+
+- **`setByDottedPath`** (`state-store.js`) now refuses to write through `__proto__` / `constructor` / `prototype` segments (`UNSAFE_KEYS` guard), closing a prototype-pollution vector in the YAML dotted-path parser — the single chokepoint for `autopilot-state.yaml` writes. Coverage added in `tests/unit` for the guard.
+
+### Changed — lint scope clean
+
+- Cleared the remaining Biome warnings across the linted scope (auto-fixes plus targeted `biome.json` rule scoping for test-only idioms such as null-assertions). `biome ci` now exits 0; the pre-push hook passes without bypass. No shipped-code behavior change.
+
+### Docs
+
+- Added the pluggable security-scanning concept (Trivy as the reference adapter) with an "Open decisions" section, and made the README's autonomous BMad workflow, git ops, and sprint-planning sections more prominent.
+
 ## [2.7.3] - 2026-06-03
 
 ### Fixed — upgrade "preserved" config footer is now honest + re-pasteable
