@@ -1,13 +1,21 @@
 name: Security
 
-# Layered scanning, enforced server-side (cannot be bypassed with --no-verify):
-#   • secrets  — gitleaks over full history          → BLOCKS (a leak is critical)
-#   • trivy    — deps (vuln) + misconfig + fs secrets → BLOCKS on fixable HIGH/CRITICAL
-#   • semgrep  — SAST                                 → report-only (SARIF → Security tab)
+# Two-tier "scope-gate" model — review only what changed per push, sweep
+# everything weekly:
 #
-# Runs on push-to-main, at PR open/reopen/ready (not every WIP push), AND
-# weekly: most CVEs are disclosed against deps you never touched, so a
-# push-only scan would miss them — the schedule catches up.
+#   • PR open/reopen/ready  +  push-to-main  → SCOPED (review the diff only)
+#       - gitleaks : the pushed / PR commit range, not full history
+#       - trivy    : vuln + secret + misconfig over the changed files only
+#       - semgrep  : new findings vs the base commit (--baseline-commit)
+#
+#   • Weekly schedule  +  manual dispatch    → FULL (the whole repo)
+#       - gitleaks : entire git history
+#       - trivy    : all dependencies + misconfig + fs secrets
+#       - semgrep  : full-tree SAST
+#
+# Why a weekly FULL run: most CVEs are disclosed against deps you never
+# touched, so a change-scoped scan can't see them — the weekly sweep catches
+# up. Per-change runs stay cheap by only ever looking at the diff.
 on:
   push:
     branches: [main]
@@ -15,7 +23,7 @@ on:
     branches: [main]
     types: [opened, reopened, ready_for_review]
   schedule:
-    - cron: '0 6 * * 1' # Mondays 06:00 UTC — catch newly-disclosed CVEs in unchanged deps
+    - cron: '0 6 * * 1' # Mondays 06:00 UTC — FULL sweep for newly-disclosed CVEs
   workflow_dispatch:
 
 permissions:
@@ -33,15 +41,54 @@ env:
   VENDORED_SKIP_DIRS: 'node_modules,.worktrees,_bmad,_bmad-output'
 
 jobs:
+  # ─── Resolve scan mode + the diff range once; share via job outputs ─────
+  # full=true  → schedule / manual dispatch (whole-repo sweep)
+  # full=false → push / PR (scoped to base..head)
+  scope:
+    name: Resolve scan scope
+    runs-on: ubuntu-latest
+    outputs:
+      full: ${{ steps.mode.outputs.full }}
+      base: ${{ steps.range.outputs.base }}
+      head: ${{ steps.range.outputs.head }}
+    steps:
+      - id: mode
+        env:
+          EVENT: ${{ github.event_name }}
+        run: |
+          if [ "$EVENT" = "schedule" ] || [ "$EVENT" = "workflow_dispatch" ]; then
+            echo "full=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "full=false" >> "$GITHUB_OUTPUT"
+          fi
+      - id: range
+        # SHAs come from the event payload via env (never interpolated into a
+        # shell word) so there is no command-injection surface.
+        env:
+          EVENT: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          PUSH_AFTER: ${{ github.sha }}
+        run: |
+          if [ "$EVENT" = "pull_request" ]; then
+            echo "base=$PR_BASE" >> "$GITHUB_OUTPUT"
+            echo "head=$PR_HEAD" >> "$GITHUB_OUTPUT"
+          else
+            echo "base=$PUSH_BEFORE" >> "$GITHUB_OUTPUT"
+            echo "head=$PUSH_AFTER" >> "$GITHUB_OUTPUT"
+          fi
+
   # ─── Secrets — BLOCKING ────────────────────────────────────────────────
   secrets:
     name: Secrets (gitleaks)
+    needs: scope
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0 # full history so a secret committed anytime is caught
+          fetch-depth: 0 # full history: needed for the range scan AND the full sweep
       - name: Install gitleaks
         run: |
           VERSION=8.30.1
@@ -49,20 +96,39 @@ jobs:
             | tar -xz gitleaks
           sudo install -m 0755 gitleaks /usr/local/bin/gitleaks
           gitleaks version
-      - name: Scan git history
+
+      - name: Scan full history (FULL)
+        if: needs.scope.outputs.full == 'true'
         run: gitleaks git . --no-banner --redact --config .gitleaks.toml
+
+      - name: Scan changed commits only (SCOPED)
+        if: needs.scope.outputs.full != 'true'
+        env:
+          BASE: ${{ needs.scope.outputs.base }}
+          HEAD: ${{ needs.scope.outputs.head }}
+        run: |
+          if [ -z "$BASE" ] || printf '%s' "$BASE" | grep -qE '^0+$'; then
+            echo "No usable base ref (first push / force-push) — falling back to full history."
+            gitleaks git . --no-banner --redact --config .gitleaks.toml
+          else
+            echo "Scanning commit range ${BASE}..${HEAD}"
+            gitleaks git . --no-banner --redact --config .gitleaks.toml --log-opts="${BASE}..${HEAD}"
+          fi
 
   # ─── Dependencies + misconfig + fs secrets — BLOCKING on fixable H/C ────
   trivy:
     name: Trivy (vuln + misconfig)
+    needs: scope
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # need base..head reachable for the scoped diff
 
-      # Gate: fail the build only on HIGH/CRITICAL that actually have a fix
-      # available (ignore-unfixed) — actionable signal, low false-fail rate.
-      - name: Trivy scan (gate)
+      # ── FULL: whole tree — gate + full SARIF inventory ──────────────────
+      - name: Trivy scan (FULL, gate)
+        if: needs.scope.outputs.full == 'true'
         uses: aquasecurity/trivy-action@0.28.0
         with:
           scan-type: fs
@@ -73,10 +139,8 @@ jobs:
           trivyignores: .trivyignore
           skip-dirs: ${{ env.VENDORED_SKIP_DIRS }}
           format: table
-
-      # Full inventory (all severities, non-blocking) → Security tab.
-      - name: Trivy scan (SARIF)
-        if: always()
+      - name: Trivy scan (FULL, SARIF)
+        if: needs.scope.outputs.full == 'true'
         uses: aquasecurity/trivy-action@0.28.0
         with:
           scan-type: fs
@@ -87,34 +151,87 @@ jobs:
           skip-dirs: ${{ env.VENDORED_SKIP_DIRS }}
           format: sarif
           output: trivy.sarif
-      - name: Upload Trivy SARIF
-        if: always()
+      - name: Upload Trivy SARIF (FULL)
+        if: needs.scope.outputs.full == 'true'
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: trivy.sarif
           category: trivy
 
+      # ── SCOPED: copy just the changed files into scan-scope/, scan that ──
+      - name: Stage changed files (SCOPED)
+        if: needs.scope.outputs.full != 'true'
+        id: changed
+        env:
+          BASE: ${{ needs.scope.outputs.base }}
+          HEAD: ${{ needs.scope.outputs.head }}
+        run: |
+          mkdir -p scan-scope
+          if [ -z "$BASE" ] || printf '%s' "$BASE" | grep -qE '^0+$'; then
+            git diff --name-only --diff-filter=ACMR HEAD~1 HEAD > changed.txt || true
+          else
+            git diff --name-only --diff-filter=ACMR "$BASE" "$HEAD" > changed.txt || true
+          fi
+          count=0
+          while IFS= read -r f; do
+            [ -n "$f" ] && [ -f "$f" ] || continue
+            mkdir -p "scan-scope/$(dirname "$f")"
+            cp "$f" "scan-scope/$f"
+            count=$((count + 1))
+          done < changed.txt
+          echo "count=$count" >> "$GITHUB_OUTPUT"
+          echo "Staged ${count} changed file(s) for scanning."
+      - name: Trivy scan (SCOPED, gate)
+        if: needs.scope.outputs.full != 'true' && steps.changed.outputs.count != '0'
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: fs
+          scan-ref: scan-scope
+          scanners: vuln,secret,misconfig
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: '1'
+          trivyignores: .trivyignore
+          format: table
+
   # ─── SAST — REPORT-ONLY (tune, then promote to blocking) ────────────────
   semgrep:
     name: Semgrep (SAST)
+    needs: scope
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # --baseline-commit needs the base commit present
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
       - name: Install Semgrep
         run: pip install semgrep
-      # Report-only: SAST carries a higher false-positive rate, so we surface
-      # findings in the Security tab without failing the build. Promote to a
-      # gate (--error) once the ruleset is tuned and FPs are suppressed via
-      # .semgrepignore / inline `// nosemgrep` comments.
-      - name: Semgrep scan
+
+      # Report-only in both modes: SAST carries a higher false-positive rate,
+      # so we surface findings in the Security tab without failing the build.
+      # Promote to a gate (--error) once the ruleset is tuned and FPs are
+      # suppressed via .semgrepignore / inline `// nosemgrep` comments.
+      - name: Semgrep scan (FULL tree)
+        if: needs.scope.outputs.full == 'true'
         run: |
           semgrep scan \
             --config p/default --config p/security-audit --config p/secrets \
             --sarif --output semgrep.sarif --metrics=off || true
+      - name: Semgrep scan (SCOPED — new findings vs base)
+        if: needs.scope.outputs.full != 'true'
+        env:
+          BASE: ${{ needs.scope.outputs.base }}
+        run: |
+          BASELINE_ARG=""
+          if [ -n "$BASE" ] && ! printf '%s' "$BASE" | grep -qE '^0+$'; then
+            BASELINE_ARG="--baseline-commit ${BASE}"
+          fi
+          semgrep scan \
+            --config p/default --config p/security-audit --config p/secrets \
+            $BASELINE_ARG --sarif --output semgrep.sarif --metrics=off || true
       - name: Upload Semgrep SARIF
         if: always()
         uses: github/codeql-action/upload-sarif@v3
