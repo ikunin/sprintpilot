@@ -7,21 +7,32 @@
 [![Node.js](https://img.shields.io/badge/node-%3E%3D20.12-brightgreen.svg?style=flat)](https://nodejs.org)
 [![Tools](https://img.shields.io/badge/tools-9%20supported-orange.svg?style=flat)](#compatibility)
 
-Sprintpilot drives [BMad Method](https://github.com/bmad-code-org/BMAD-METHOD) v6 sprints to completion autonomously. One slash command turns your sprint plan into reviewed, tested, PR-ready code — story by story, with full git workflow.
+Sprintpilot drives [BMad Method](https://github.com/bmad-code-org/BMAD-METHOD) v6 sprints to completion autonomously. One slash command runs BMad's full implementation workflow — create-story, readiness check, TDD dev, multi-reviewer code review, patch, retrospective — and the matching git operations (branch, commit, PR, merge) for every story in your sprint, pausing only when a decision genuinely needs you.
 
 > **Independent project.** Sprintpilot is not affiliated with or endorsed by BMad Code, LLC. See [TRADEMARK.md](TRADEMARK.md).
 > Migrating from `bmad-autopilot-addon` v1? See [MIGRATION.md](MIGRATION.md).
 
 ## What it does
 
-Per story, in one autonomous loop:
+Sprintpilot turns a planned BMad sprint into merged, reviewed, tested code **without you driving each step**. You run one command; it executes BMad Method's full implementation workflow story-by-story — every BMad skill in the mandatory order, every quality gate, and all the git operations your configuration calls for — and pauses only when a real decision needs you.
 
-- Creates an isolated worktree + branch, runs `bmad-dev-story` TDD-style (RED then GREEN), lints changed files only.
-- Stages explicitly (never `git add -A`), commits with a conventional message, runs **three parallel reviewers** on the diff.
-- Auto-applies every PATCH finding as a separate commit, pushes, opens a PR (or merges directly, or lands as you go — your choice).
-- Moves to the next story. At end-of-epic, writes a retrospective and lists PRs ready to merge.
+**Per story it runs the BMad 7-step cycle.** Each skill is invoked *verbatim* from BMad, and each step is gated by an on-disk verifier (the trust boundary between what the LLM claims and what's actually on disk) before the next can begin:
 
-The orchestrator (`_Sprintpilot/bin/autopilot.js`) is a deterministic Node state machine. It decides what runs next and enforces BMad's 7-step cycle. The LLM owns in-skill execution and small-judgment decisions. BMad skills are invoked verbatim — Sprintpilot never invents workflows of its own.
+1. **`bmad-create-story`** — writes the next story's spec file (acceptance criteria, tasks) for the next pending story in `sprint-status.yaml`.
+2. **`bmad-check-implementation-readiness`** — confirms the story has no blockers before a line of code is written.
+3. **`bmad-dev-story` (RED)** — writes the tests *first* and confirms they **fail**. TDD is enforced, not optional — you cannot skip to implementation.
+4. **`bmad-dev-story` (GREEN)** — implements until every test passes, with the count stated explicitly (e.g. "9/9 passed").
+5. **`bmad-code-review`** — three reviewers run **in parallel** on the diff: **Blind Hunter** (bugs), **Edge Case Hunter** (boundaries), **Acceptance Auditor** (AC coverage). Findings are triaged into block / patch / defer.
+6. **Patch + re-test** — every `patch` finding is applied as its own commit and the tests are re-run, still green.
+7. **`bmad-retrospective`** — once per epic, after its final story, capturing lessons and listing the PRs ready to merge.
+
+**The git workflow is handled for you, the way you configured it.** Each story gets an isolated worktree + branch (`story/<key>`); changes are staged explicitly (**never** `git add -A`), screened for secrets, committed with a Conventional Commit message, and linted (changed files only). Then — depending on the mode you chose at install — Sprintpilot **opens a stacked PR** (default), **lands the story straight to `main`** as it finishes (land-as-you-go), **merges directly** with no PR, or **reuses your existing feature branch**. CI runs the full test suite as the safety net while local runs stay scoped to affected files.
+
+**`nano` profile** swaps the 7-step cycle for BMad's one-shot `bmad-quick-dev` (Implement → Review → Classify → Commit) — and automatically escalates back to the full cycle if its tests fail or its review flags a high-severity finding.
+
+**You control the loop, not the steps.** The autopilot drives continuously until it has completed `session_story_limit` stories (default 3), the sprint is finished, or it hits one of five genuine blockers — then it halts cleanly with a handoff report. Steer it mid-flight in plain language ("skip this story, the spec is wrong", "pause", "land before the next story") and it maps that to the right action. Under the hood a deterministic Node state machine (`_Sprintpilot/bin/autopilot.js`) decides what runs next and enforces the sequence; the LLM owns in-skill execution and small-judgment calls. Sprintpilot never invents workflows of its own — it composes BMad's skills.
+
+**The benefit:** a planned sprint implements itself overnight with TDD, multi-reviewer code review, and your real git process applied to every story — instead of you hand-running `create-story → readiness → dev → review → patch → commit → PR` dozens of times. You review PRs and answer the occasional genuine question; the autopilot does the mechanical execution faithfully and auditably (every action is logged to an append-only ledger).
 
 ## Quick Start
 
@@ -36,7 +47,7 @@ npx @ikunin/sprintpilot@latest
 /sprint-autopilot-on
 ```
 
-**What you'll see next.** The orchestrator emits one BMad skill at a time and the LLM executes it. First skill is `bmad-create-story` for the next pending story in `sprint-status.yaml`. You'll watch RED→GREEN tests (scoped to affected files by default — `vitest --changed`, `jest --findRelatedTests`, `pytest --testmon`; CI runs the full suite as the safety net), a 3-reviewer review pass, patch commits, and a push or PR. The autopilot drives until `session_story_limit` stories are done (default 3), then halts cleanly. Re-run `/sprint-autopilot-on` to continue.
+**What you'll see next.** The orchestrator emits one action at a time and the LLM executes it, announcing each with a plain `NEXT:` line (e.g. `NEXT: 4-1-add-auth · step dev_green · #1 of 6 in epic 4`) so you always know what's running. The first action is `bmad-create-story` for the next pending story in `sprint-status.yaml`, then the cycle above plays out: RED→GREEN tests (scoped to affected files locally — `vitest --changed`, `jest --findRelatedTests`, `pytest --testmon` — while CI runs the full suite), the review pass, patch commits, and the push/PR/merge per your config. It halts cleanly at `session_story_limit` (default 3) with a handoff report; re-run `/sprint-autopilot-on` to continue where it left off.
 
 **Start at a specific story or epic:**
 
