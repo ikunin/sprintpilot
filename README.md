@@ -43,7 +43,10 @@ npx bmad-method install --modules bmm,tea
 # 2. Install Sprintpilot (interactive — pick tool + complexity profile)
 npx @ikunin/sprintpilot@latest
 
-# 3. In your IDE chat:
+# 3. In your IDE chat — (optional) plan scope + dependency-aware order first:
+/sprintpilot-plan-sprint
+
+# 4. Engage the autopilot:
 /sprint-autopilot-on
 ```
 
@@ -67,6 +70,28 @@ npx @ikunin/sprintpilot@latest install --tools claude-code --profile medium --ye
 ```
 
 Runs on Windows, macOS, and Linux.
+
+## Plan the sprint first (optional, recommended)
+
+Before you engage the autopilot — and after BMad's planning has produced your `epics.md`, `architecture.md`, and `sprint-status.yaml` — run **`/sprintpilot-plan-sprint`** to decide *what* runs and *in what order*. Without it the autopilot simply executes `sprint-status.yaml` top-down; with it you get a curated scope and a **dependency-aware execution sequence**.
+
+The planner:
+
+- **Detects dependencies automatically.** It reads `epics.md` + `architecture.md` and infers per-story and cross-epic dependencies (validated against a DAG), so `4-3-add-auth` runs only after its upstreams `4-1-bootstrap` and `4-2-models` — not in alphabetical / file order.
+- **Sequences execution topologically.** The autopilot's queue follows that order, honoring every edge across the whole sprint.
+- **Lets you curate scope.** Choose which stories belong in *this* sprint — focus a single epic, cherry-pick a few, or take everything; the rest stay in the plan for context but don't run.
+- **Lets you focus + schedule.** Say *"focus on epic 21"* and pick how to place it: run it **first** (`top`) while keeping the rest queued, or make it the **whole** sprint (`focus_only`).
+- **Renders the DAG** to a Mermaid diagram you can preview, and links stories to Jira / Linear / GitHub / GitLab IDs when you use a tracker.
+
+```
+/sprintpilot-plan-sprint                      # build / refresh the dependency-aware plan
+/sprintpilot-plan-sprint epic 21              # plan, focused on one epic (it asks how to schedule it)
+/sprintpilot-plan-sprint 21-3-add-auth, 21-4  # focus specific stories
+/sprintpilot-dependency-graph                 # visualize the DAG (mermaid / graphviz / text / json)
+/sprintpilot-sprint-progress                  # health check + what runs next
+```
+
+It writes `sprint-plan.yaml`; the next `/sprint-autopilot-on` then executes stories in that dependency-aware order. You can re-plan or reorder mid-sprint at any time. **Full guide with curation patterns, scheduling modes, and mid-flight commands: [docs/sprint-planning.md](docs/sprint-planning.md).**
 
 ## Choose your workflow
 
