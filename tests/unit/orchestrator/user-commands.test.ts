@@ -103,9 +103,9 @@ describe('validateOne', () => {
 
   it('accepts trigger_retrospective bare and with reason (v2.2.31)', () => {
     expect(validateOne({ kind: 'trigger_retrospective' }).ok).toBe(true);
-    expect(
-      validateOne({ kind: 'trigger_retrospective', reason: 'closing out epic 4' }).ok,
-    ).toBe(true);
+    expect(validateOne({ kind: 'trigger_retrospective', reason: 'closing out epic 4' }).ok).toBe(
+      true,
+    );
   });
 
   it('rejects trigger_retrospective with non-string reason', () => {

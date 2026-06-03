@@ -256,10 +256,7 @@ describe('nextAction — session_story_limit halt', () => {
 
   it('does NOT fire mid-story (e.g. DEV_RED, CODE_REVIEW) so an in-flight story finishes', () => {
     for (const phase of [STATES.DEV_RED, STATES.CODE_REVIEW, STATES.PATCH_APPLY]) {
-      const a = nextAction(
-        baseState(phase, { session_stories_completed: 5 }),
-        medium(),
-      );
+      const a = nextAction(baseState(phase, { session_stories_completed: 5 }), medium());
       expect(a.type).not.toBe('halt');
     }
   });
@@ -666,10 +663,7 @@ describe('per-phase wall-clock budget — v2.4.0', () => {
       expect(checkPhaseTimeout(state, profile, T_NOW)).toBeNull();
     });
     it('user override null at root disables all phases', () => {
-      const profile = flatToProfile(
-        { autopilot: { phase_timeout_minutes: null } },
-        'medium',
-      );
+      const profile = flatToProfile({ autopilot: { phase_timeout_minutes: null } }, 'medium');
       const state = baseState(STATES.DEV_GREEN, { phase_started_at: at(120) });
       expect(checkPhaseTimeout(state, profile, T_NOW)).toBeNull();
     });

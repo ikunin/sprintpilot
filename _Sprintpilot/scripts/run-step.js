@@ -50,8 +50,6 @@
  *   node run-step.js --step-file /tmp/step.json
  */
 
-'use strict';
-
 const { spawn, spawnSync } = require('node:child_process');
 const fs = require('node:fs');
 const { parseArgs } = require('../lib/runtime/args');
@@ -122,9 +120,8 @@ async function runStep(step) {
 
   const retry = step.retry || {};
   const retryEnabled = retry && retry.on && retry.on !== 'never';
-  const maxAttempts = retryEnabled && Number.isInteger(retry.attempts) && retry.attempts > 0
-    ? retry.attempts
-    : 1;
+  const maxAttempts =
+    retryEnabled && Number.isInteger(retry.attempts) && retry.attempts > 0 ? retry.attempts : 1;
   const backoffMs = retryEnabled ? retry.backoff_ms : null;
   const timeoutMs = typeof step.timeout_ms === 'number' ? step.timeout_ms : undefined;
   const tolerated = Array.isArray(step.tolerate_exit_codes) ? step.tolerate_exit_codes : [];
@@ -149,7 +146,9 @@ async function runStep(step) {
     if (attempt > 0) {
       const wait = backoffFor(attempt - 1, backoffMs);
       if (wait > 0) {
-        process.stderr.write(`[run-step] retry attempt ${attempt + 1}/${maxAttempts} after ${wait}ms\n`);
+        process.stderr.write(
+          `[run-step] retry attempt ${attempt + 1}/${maxAttempts} after ${wait}ms\n`,
+        );
         await sleep(wait);
       } else {
         process.stderr.write(`[run-step] retry attempt ${attempt + 1}/${maxAttempts}\n`);
@@ -159,7 +158,9 @@ async function runStep(step) {
     lastExit = r.exitCode;
     lastError = r.error;
     if (lastError && step.optional) {
-      process.stderr.write(`[run-step] WARN optional step failed to launch: ${lastError.message}\n`);
+      process.stderr.write(
+        `[run-step] WARN optional step failed to launch: ${lastError.message}\n`,
+      );
       return 0;
     }
     if (lastError) {

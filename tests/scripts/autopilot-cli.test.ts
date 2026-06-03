@@ -170,9 +170,7 @@ describe('autopilot start', () => {
     );
     const lines = readFileSync(ledgerPath, 'utf8').trim().split('\n');
     const entries = lines.map((l) => JSON.parse(l));
-    const lintEntry = entries.find(
-      (e) => e.detail && e.detail.lint_enabled === true,
-    );
+    const lintEntry = entries.find((e) => e.detail && e.detail.lint_enabled === true);
     expect(lintEntry).toBeDefined();
     expect(lintEntry.detail.lint_blocking).toBe(true);
   });
@@ -197,9 +195,7 @@ describe('autopilot start', () => {
     );
     const lines = readFileSync(ledgerPath, 'utf8').trim().split('\n');
     const entries = lines.map((l) => JSON.parse(l));
-    const notice = entries.find(
-      (e) => e.detail && e.detail.parallel_stories_notice,
-    );
+    const notice = entries.find((e) => e.detail && e.detail.parallel_stories_notice);
     expect(notice).toBeDefined();
   });
 
@@ -243,7 +239,7 @@ describe('autopilot start', () => {
       '  stories:',
       '    a:',
       '      depends_on: []',
-      '  - key: rogue',                  // misindented — outside stories[]
+      '  - key: rogue', // misindented — outside stories[]
       'cross_epic_deps: []',
       'overrides: []',
       '',
@@ -297,7 +293,8 @@ describe('autopilot start — resume divergence handling (v2.2.30)', () => {
   it('auto-accepts divergence when persisted current_story is now `done` in sprint-status (v2.3.13: via state_reconciled)', () => {
     seedDiverged({
       current_story: '4-6-realm',
-      sprint_status_yaml: 'development_status:\n  4-6-realm: done  # PR #42 merged manually\n  4-7-next: backlog\n',
+      sprint_status_yaml:
+        'development_status:\n  4-6-realm: done  # PR #42 merged manually\n  4-7-next: backlog\n',
     });
     const r = runCli(['start']);
     expect(r.status).toBe(0);
@@ -315,7 +312,10 @@ describe('autopilot start — resume divergence handling (v2.2.30)', () => {
       'implementation-artifacts',
       'ledger.jsonl',
     );
-    const entries = readFileSync(ledgerPath, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+    const entries = readFileSync(ledgerPath, 'utf8')
+      .trim()
+      .split('\n')
+      .map((l) => JSON.parse(l));
     const reconciled = entries.find((e) => e.kind === 'state_reconciled');
     expect(reconciled).toBeDefined();
     const action = reconciled.detail.actions.find(
@@ -362,7 +362,10 @@ describe('autopilot start — resume divergence handling (v2.2.30)', () => {
       'implementation-artifacts',
       'ledger.jsonl',
     );
-    const entries = readFileSync(ledgerPath, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+    const entries = readFileSync(ledgerPath, 'utf8')
+      .trim()
+      .split('\n')
+      .map((l) => JSON.parse(l));
     const accepted = entries.find(
       (e) => e.kind === 'resume' && e.divergence && e.divergence.kind === 'divergence_accepted',
     );

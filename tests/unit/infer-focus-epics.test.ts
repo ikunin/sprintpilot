@@ -34,9 +34,9 @@ describe('inferFocusEpicsFromStoryKeys', () => {
   it('normalizes epic-marker keys to their bare epic id', () => {
     // A mix of epic-21, epic-21-retrospective, and stories from epic 21
     // still counts as single-epic focus.
-    expect(
-      inferFocusEpicsFromStoryKeys(['epic-21', 'epic-21-retrospective', '21-1-foo']),
-    ).toEqual(['21']);
+    expect(inferFocusEpicsFromStoryKeys(['epic-21', 'epic-21-retrospective', '21-1-foo'])).toEqual([
+      '21',
+    ]);
   });
 
   it('returns null when epic markers span multiple epics', () => {

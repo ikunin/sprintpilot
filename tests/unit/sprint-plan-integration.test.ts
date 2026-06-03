@@ -44,9 +44,12 @@ const {
     legacy: Record<string, unknown>,
     plan: Record<string, unknown>,
   ) => Record<string, unknown>;
-  readLegacyDependencies: (
-    projectRoot: string,
-  ) => { exists: boolean; doc?: Record<string, unknown>; error?: string; message?: string };
+  readLegacyDependencies: (projectRoot: string) => {
+    exists: boolean;
+    doc?: Record<string, unknown>;
+    error?: string;
+    message?: string;
+  };
   diffEdges: (
     prev: Record<string, unknown>,
     next: Record<string, unknown>,
@@ -85,11 +88,7 @@ const {
     depsDoc: Record<string, unknown> | null,
     nodes: string[],
   ) => [string, string][];
-  buildDag: (opts: {
-    projectRoot: string;
-    epic: string | null;
-    strategies: string[];
-  }) => {
+  buildDag: (opts: { projectRoot: string; epic: string | null; strategies: string[] }) => {
     nodes: string[];
     edges: [string, string][];
     layers: string[][];
@@ -97,9 +96,10 @@ const {
     cycle: string[];
   };
   planStatusByKey: (plan: Record<string, unknown> | null) => Map<string, string>;
-  bucketEdges: (
-    edges: [string, string][],
-  ) => { intra: [string, string][]; cross: [string, string][] };
+  bucketEdges: (edges: [string, string][]) => {
+    intra: [string, string][];
+    cross: [string, string][];
+  };
   renderMermaid: (
     dag: { nodes: string[]; edges: [string, string][] },
     plan: Record<string, unknown> | null,
@@ -118,7 +118,11 @@ const {
   STATUS_COLORS: Record<string, { fill: string; text: string }>;
 };
 
-const { emptyPlan, read: readPlan, planPath } = sprintPlanMod as {
+const {
+  emptyPlan,
+  read: readPlan,
+  planPath,
+} = sprintPlanMod as {
   emptyPlan: (opts?: { source?: string }) => Record<string, unknown>;
   read: (opts: { projectRoot: string }) => Record<string, unknown> | null;
   planPath: (root: string) => string;
@@ -158,15 +162,17 @@ afterEach(() => {
 // ──────────────────────────────────────────────────────────────────
 
 describe('infer-dependencies write (retargeted)', () => {
-  function writeEpicDeps(epic: string, envelope: Record<string, unknown>): {
+  function writeEpicDeps(
+    epic: string,
+    envelope: Record<string, unknown>,
+  ): {
     status: number;
     stdout: string;
   } {
-    const r = spawnSync(
-      'node',
-      [INFER, 'write', '--epic', epic, '--project-root', tmpRoot],
-      { encoding: 'utf8', input: JSON.stringify(envelope) },
-    );
+    const r = spawnSync('node', [INFER, 'write', '--epic', epic, '--project-root', tmpRoot], {
+      encoding: 'utf8',
+      input: JSON.stringify(envelope),
+    });
     return { status: r.status ?? 0, stdout: r.stdout };
   }
 
@@ -189,26 +195,35 @@ describe('infer-dependencies write (retargeted)', () => {
     (plan.dependencies as Record<string, unknown>).stories = {
       '2-2-bar': { depends_on: ['2-1-foo'], rationale: 'epic-2 chain' },
     };
-    writeFileSync(planPath(tmpRoot), execFileSync('node', [
-      join(REPO_ROOT, '_Sprintpilot', 'scripts', 'sprint-plan.js'), 'empty', '--source', 'auto'
-    ], { encoding: 'utf8' }));
+    writeFileSync(
+      planPath(tmpRoot),
+      execFileSync(
+        'node',
+        [join(REPO_ROOT, '_Sprintpilot', 'scripts', 'sprint-plan.js'), 'empty', '--source', 'auto'],
+        { encoding: 'utf8' },
+      ),
+    );
     // Use the actual sprint-plan.js write to seed properly
-    const seedR = spawnSync('node', [
-      join(REPO_ROOT, '_Sprintpilot', 'scripts', 'sprint-plan.js'),
-      'write',
-      '--project-root',
-      tmpRoot,
-    ], {
-      encoding: 'utf8',
-      input: JSON.stringify({
-        ...plan,
-        dependencies: {
-          version: 1,
-          auto_inferred_at: null,
-          stories: { '2-2-bar': { depends_on: ['2-1-foo'], rationale: 'epic-2 chain' } },
-        },
-      }),
-    });
+    const seedR = spawnSync(
+      'node',
+      [
+        join(REPO_ROOT, '_Sprintpilot', 'scripts', 'sprint-plan.js'),
+        'write',
+        '--project-root',
+        tmpRoot,
+      ],
+      {
+        encoding: 'utf8',
+        input: JSON.stringify({
+          ...plan,
+          dependencies: {
+            version: 1,
+            auto_inferred_at: null,
+            stories: { '2-2-bar': { depends_on: ['2-1-foo'], rationale: 'epic-2 chain' } },
+          },
+        }),
+      },
+    );
     expect(seedR.status).toBe(0);
 
     // Now write epic-1 envelope
@@ -302,9 +317,7 @@ describe('applyEnvelopeToPlan', () => {
   it('only mutates dependencies.stories — leaves other top-level keys intact', () => {
     const plan = emptyPlan({ source: 'auto' });
     plan.notes = 'preserved';
-    plan.cross_epic_deps = [
-      { from_story: 'x', to_story: 'y', rationale: 'preserved' },
-    ];
+    plan.cross_epic_deps = [{ from_story: 'x', to_story: 'y', rationale: 'preserved' }];
     plan.overrides = [{ epic: '9', force_independent: ['9-1'], force_sequential: [] }];
     const next = applyEnvelopeToPlan(
       {
@@ -496,9 +509,9 @@ describe('mergeLegacyIntoPlan', () => {
       plan,
     );
     expect((merged.overrides as Array<{ epic: string }>).length).toBe(1);
-    expect(((merged.overrides as Array<{ force_independent: string[] }>)[0]).force_independent).toEqual([
-      'original',
-    ]);
+    expect(
+      (merged.overrides as Array<{ force_independent: string[] }>)[0].force_independent,
+    ).toEqual(['original']);
   });
 
   it('preserves notes from existing plan', () => {
@@ -533,13 +546,18 @@ describe('resolve-dag readDependencies (via sprint-plan.yaml)', () => {
   it('extracts stories + overrides + cross_epic_deps from the plan', () => {
     const plan = emptyPlan({ source: 'auto' });
     (plan.dependencies as Record<string, unknown>).stories = {
-      'a': { depends_on: ['b'], rationale: 'r' },
+      a: { depends_on: ['b'], rationale: 'r' },
     };
     plan.overrides = [{ epic: '1', force_independent: ['a'], force_sequential: [] }];
     plan.cross_epic_deps = [{ from_story: 'a', to_story: 'b', rationale: 'r' }];
     spawnSync(
       'node',
-      [join(REPO_ROOT, '_Sprintpilot', 'scripts', 'sprint-plan.js'), 'write', '--project-root', tmpRoot],
+      [
+        join(REPO_ROOT, '_Sprintpilot', 'scripts', 'sprint-plan.js'),
+        'write',
+        '--project-root',
+        tmpRoot,
+      ],
       { input: JSON.stringify(plan), encoding: 'utf8' },
     );
 
@@ -778,7 +796,9 @@ describe('applyCrossEpicToPlan', () => {
       }),
     ]);
     // Old entries gone.
-    expect((merged.cross_epic_deps as Array<{ from_story: string }>).some((e) => e.from_story === 'old')).toBe(false);
+    expect(
+      (merged.cross_epic_deps as Array<{ from_story: string }>).some((e) => e.from_story === 'old'),
+    ).toBe(false);
   });
 
   it('preserves the rest of the plan verbatim', () => {
@@ -797,36 +817,28 @@ describe('applyCrossEpicToPlan', () => {
 
 describe('write-cross-epic CLI', () => {
   function bootstrapPerEpicPlan(): void {
-    spawnSync(
-      'node',
-      [INFER, 'write', '--epic', '1', '--project-root', tmpRoot],
-      {
-        encoding: 'utf8',
-        input: JSON.stringify({
-          version: 1,
-          epic: '1',
-          dependencies: { '1-3-add-auth': ['1-1-bootstrap'] },
-          rationale: { '1-3-add-auth': 'r' },
-        }),
-      },
-    );
+    spawnSync('node', [INFER, 'write', '--epic', '1', '--project-root', tmpRoot], {
+      encoding: 'utf8',
+      input: JSON.stringify({
+        version: 1,
+        epic: '1',
+        dependencies: { '1-3-add-auth': ['1-1-bootstrap'] },
+        rationale: { '1-3-add-auth': 'r' },
+      }),
+    });
   }
 
   it('appends to plan.cross_epic_deps with inferred_at stamps', () => {
     bootstrapPerEpicPlan();
-    const r = spawnSync(
-      'node',
-      [INFER, 'write-cross-epic', '--project-root', tmpRoot],
-      {
-        encoding: 'utf8',
-        input: JSON.stringify({
-          version: 1,
-          cross_epic_deps: [
-            { from_story: '2-1-foo', to_story: '1-3-add-auth', rationale: 'needs auth' },
-          ],
-        }),
-      },
-    );
+    const r = spawnSync('node', [INFER, 'write-cross-epic', '--project-root', tmpRoot], {
+      encoding: 'utf8',
+      input: JSON.stringify({
+        version: 1,
+        cross_epic_deps: [
+          { from_story: '2-1-foo', to_story: '1-3-add-auth', rationale: 'needs auth' },
+        ],
+      }),
+    });
     expect(r.status).toBe(0);
     const parsed = JSON.parse(r.stdout);
     expect(parsed.wrote).toBe(true);
@@ -844,19 +856,15 @@ describe('write-cross-epic CLI', () => {
 
   it('exit 1 with validation errors on a malformed envelope', () => {
     bootstrapPerEpicPlan();
-    const r = spawnSync(
-      'node',
-      [INFER, 'write-cross-epic', '--project-root', tmpRoot],
-      {
-        encoding: 'utf8',
-        input: JSON.stringify({
-          version: 1,
-          cross_epic_deps: [
-            { from_story: '1-1-bootstrap', to_story: '1-3-add-auth', rationale: 'same epic' },
-          ],
-        }),
-      },
-    );
+    const r = spawnSync('node', [INFER, 'write-cross-epic', '--project-root', tmpRoot], {
+      encoding: 'utf8',
+      input: JSON.stringify({
+        version: 1,
+        cross_epic_deps: [
+          { from_story: '1-1-bootstrap', to_story: '1-3-add-auth', rationale: 'same epic' },
+        ],
+      }),
+    });
     expect(r.status).toBe(1);
     const parsed = JSON.parse(r.stdout);
     expect(parsed.valid).toBe(false);
@@ -866,14 +874,10 @@ describe('write-cross-epic CLI', () => {
   it('exit 2 when sprint-plan.yaml is corrupt', () => {
     mkdirSync(join(tmpRoot, '_bmad-output', 'implementation-artifacts'), { recursive: true });
     writeFileSync(planPath(tmpRoot), 'broken: : yaml :\n');
-    const r = spawnSync(
-      'node',
-      [INFER, 'write-cross-epic', '--project-root', tmpRoot],
-      {
-        encoding: 'utf8',
-        input: JSON.stringify({ version: 1, cross_epic_deps: [] }),
-      },
-    );
+    const r = spawnSync('node', [INFER, 'write-cross-epic', '--project-root', tmpRoot], {
+      encoding: 'utf8',
+      input: JSON.stringify({ version: 1, cross_epic_deps: [] }),
+    });
     expect(r.status).toBe(2);
     const parsed = JSON.parse(r.stdout);
     expect(parsed.wrote).toBe(false);
@@ -896,7 +900,12 @@ describe('buildDag with cross-epic edges', () => {
     ];
     spawnSync(
       'node',
-      [join(REPO_ROOT, '_Sprintpilot', 'scripts', 'sprint-plan.js'), 'write', '--project-root', tmpRoot],
+      [
+        join(REPO_ROOT, '_Sprintpilot', 'scripts', 'sprint-plan.js'),
+        'write',
+        '--project-root',
+        tmpRoot,
+      ],
       { input: JSON.stringify(plan), encoding: 'utf8' },
     );
   }
@@ -911,7 +920,11 @@ describe('buildDag with cross-epic edges', () => {
 
   it('includes cross-epic edges sprint-wide and orders 1-3 before 2-1', () => {
     writePlanWithCrossEpic();
-    const dag = buildDag({ projectRoot: tmpRoot, epic: null, strategies: ['explicit', 'ordering'] });
+    const dag = buildDag({
+      projectRoot: tmpRoot,
+      epic: null,
+      strategies: ['explicit', 'ordering'],
+    });
     expect(dag.nodes.length).toBe(5);
     expect(dag.edges.some(([a, b]) => a === '1-3-add-auth' && b === '2-1-foo')).toBe(true);
     const layer13 = dag.layers.findIndex((l) => l.includes('1-3-add-auth'));
@@ -998,10 +1011,7 @@ describe('renderMermaid', () => {
 
   it('renders cross-epic edges with dashed syntax', () => {
     const plan = emptyPlan({ source: 'auto' });
-    const out = renderMermaid(
-      { nodes: ['1-1', '2-1'], edges: [['1-1', '2-1']] },
-      plan,
-    );
+    const out = renderMermaid({ nodes: ['1-1', '2-1'], edges: [['1-1', '2-1']] }, plan);
     expect(out).toMatch(/1-1 -\. cross-epic \.-> 2-1/);
   });
 
@@ -1064,7 +1074,9 @@ describe('renderGraphviz', () => {
     const plan = emptyPlan({ source: 'auto' });
     plan.stories = [{ key: '1-1-a', plan_status: 'done', issue_id: 'PROJ-101' }];
     const out = renderGraphviz({ nodes: ['1-1-a'], edges: [] }, plan);
-    expect(out).toMatch(/"1-1-a" \[fillcolor="[^"]+", fontcolor="[^"]+", label="PROJ-101: 1-1-a"\]/);
+    expect(out).toMatch(
+      /"1-1-a" \[fillcolor="[^"]+", fontcolor="[^"]+", label="PROJ-101: 1-1-a"\]/,
+    );
   });
 
   it('omits the label= attribute when story has no issue_id (dot uses node id by default)', () => {
@@ -1085,10 +1097,7 @@ describe('renderGraphviz', () => {
 
   it('renders cross-epic edges with style=dashed and the cross-epic label', () => {
     const plan = emptyPlan({ source: 'auto' });
-    const out = renderGraphviz(
-      { nodes: ['1-1', '2-1'], edges: [['1-1', '2-1']] },
-      plan,
-    );
+    const out = renderGraphviz({ nodes: ['1-1', '2-1'], edges: [['1-1', '2-1']] }, plan);
     expect(out).toMatch(/"1-1" -> "2-1" \[style=dashed, label="cross-epic"\]/);
   });
 });
@@ -1099,32 +1108,24 @@ describe('renderGraphviz', () => {
 
 describe('runRender', () => {
   function bootstrapPlan(): void {
-    spawnSync(
-      'node',
-      [INFER, 'write', '--epic', '1', '--project-root', tmpRoot],
-      {
-        encoding: 'utf8',
-        input: JSON.stringify({
-          version: 1,
-          epic: '1',
-          dependencies: { '1-3-add-auth': ['1-1-bootstrap'] },
-          rationale: { '1-3-add-auth': 'r' },
-        }),
-      },
-    );
-    spawnSync(
-      'node',
-      [INFER, 'write-cross-epic', '--project-root', tmpRoot],
-      {
-        encoding: 'utf8',
-        input: JSON.stringify({
-          version: 1,
-          cross_epic_deps: [
-            { from_story: '2-1-foo', to_story: '1-3-add-auth', rationale: 'needs auth' },
-          ],
-        }),
-      },
-    );
+    spawnSync('node', [INFER, 'write', '--epic', '1', '--project-root', tmpRoot], {
+      encoding: 'utf8',
+      input: JSON.stringify({
+        version: 1,
+        epic: '1',
+        dependencies: { '1-3-add-auth': ['1-1-bootstrap'] },
+        rationale: { '1-3-add-auth': 'r' },
+      }),
+    });
+    spawnSync('node', [INFER, 'write-cross-epic', '--project-root', tmpRoot], {
+      encoding: 'utf8',
+      input: JSON.stringify({
+        version: 1,
+        cross_epic_deps: [
+          { from_story: '2-1-foo', to_story: '1-3-add-auth', rationale: 'needs auth' },
+        ],
+      }),
+    });
   }
 
   it('writes a .mmd file at the default location and reports stats', () => {
@@ -1177,7 +1178,12 @@ describe('runRender', () => {
     };
     spawnSync(
       'node',
-      [join(REPO_ROOT, '_Sprintpilot', 'scripts', 'sprint-plan.js'), 'write', '--project-root', tmpRoot],
+      [
+        join(REPO_ROOT, '_Sprintpilot', 'scripts', 'sprint-plan.js'),
+        'write',
+        '--project-root',
+        tmpRoot,
+      ],
       { input: JSON.stringify(plan), encoding: 'utf8' },
     );
     const r = runRender({ projectRoot: tmpRoot, epic: '1', format: 'mermaid', output: null });
@@ -1209,19 +1215,15 @@ describe('runRender', () => {
 
 describe('CLI: resolve-dag render', () => {
   it('emits JSON to stdout and writes the file', () => {
-    spawnSync(
-      'node',
-      [INFER, 'write', '--epic', '1', '--project-root', tmpRoot],
-      {
-        encoding: 'utf8',
-        input: JSON.stringify({
-          version: 1,
-          epic: '1',
-          dependencies: { '1-3-add-auth': ['1-1-bootstrap'] },
-          rationale: { '1-3-add-auth': 'r' },
-        }),
-      },
-    );
+    spawnSync('node', [INFER, 'write', '--epic', '1', '--project-root', tmpRoot], {
+      encoding: 'utf8',
+      input: JSON.stringify({
+        version: 1,
+        epic: '1',
+        dependencies: { '1-3-add-auth': ['1-1-bootstrap'] },
+        rationale: { '1-3-add-auth': 'r' },
+      }),
+    });
     const r = spawnSync('node', [RESOLVE_DAG, 'render', '--project-root', tmpRoot], {
       encoding: 'utf8',
     });

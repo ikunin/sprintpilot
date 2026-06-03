@@ -1,7 +1,7 @@
-import { describe, expect, it, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 // @ts-expect-error — CommonJS module
 import sprintHealth from '../../../_Sprintpilot/lib/orchestrator/sprint-health.js';
@@ -55,11 +55,43 @@ describe('computeMetrics', () => {
 
   it('counts actions, halts, retries, story completions', () => {
     const entries: LedgerEntry[] = [
-      { seq: 1, ts: minutesBefore(T_NOW, 60), kind: 'action_emitted', action: { type: 'invoke_skill', skill: 'bmad-dev-story' } },
-      { seq: 2, ts: minutesBefore(T_NOW, 50), kind: 'state_transition', from: 'dev_green', to: 'code_review', verdict: 'advanced' },
-      { seq: 3, ts: minutesBefore(T_NOW, 45), kind: 'state_transition', from: 'code_review', to: 'code_review', verdict: 'retry' },
-      { seq: 4, ts: minutesBefore(T_NOW, 30), kind: 'state_transition', from: 'story_done', to: 'epic_boundary_check', verdict: 'advanced' },
-      { seq: 5, ts: minutesBefore(T_NOW, 20), kind: 'halt', phase: 'dev_green', reason: 'phase_timeout_exceeded' },
+      {
+        seq: 1,
+        ts: minutesBefore(T_NOW, 60),
+        kind: 'action_emitted',
+        action: { type: 'invoke_skill', skill: 'bmad-dev-story' },
+      },
+      {
+        seq: 2,
+        ts: minutesBefore(T_NOW, 50),
+        kind: 'state_transition',
+        from: 'dev_green',
+        to: 'code_review',
+        verdict: 'advanced',
+      },
+      {
+        seq: 3,
+        ts: minutesBefore(T_NOW, 45),
+        kind: 'state_transition',
+        from: 'code_review',
+        to: 'code_review',
+        verdict: 'retry',
+      },
+      {
+        seq: 4,
+        ts: minutesBefore(T_NOW, 30),
+        kind: 'state_transition',
+        from: 'story_done',
+        to: 'epic_boundary_check',
+        verdict: 'advanced',
+      },
+      {
+        seq: 5,
+        ts: minutesBefore(T_NOW, 20),
+        kind: 'halt',
+        phase: 'dev_green',
+        reason: 'phase_timeout_exceeded',
+      },
       { seq: 6, ts: minutesBefore(T_NOW, 10), kind: 'verify_rejected', phase: 'dev_green' },
     ];
     const m = computeMetrics(entries);
@@ -106,9 +138,30 @@ describe('computeMetrics', () => {
 
   it('computes average phase duration from successive state_transitions', () => {
     const entries: LedgerEntry[] = [
-      { seq: 1, ts: minutesBefore(T_NOW, 30), kind: 'state_transition', from: 'check_readiness', to: 'dev_red', verdict: 'advanced' },
-      { seq: 2, ts: minutesBefore(T_NOW, 25), kind: 'state_transition', from: 'dev_red', to: 'dev_green', verdict: 'advanced' },
-      { seq: 3, ts: minutesBefore(T_NOW, 15), kind: 'state_transition', from: 'dev_green', to: 'code_review', verdict: 'advanced' },
+      {
+        seq: 1,
+        ts: minutesBefore(T_NOW, 30),
+        kind: 'state_transition',
+        from: 'check_readiness',
+        to: 'dev_red',
+        verdict: 'advanced',
+      },
+      {
+        seq: 2,
+        ts: minutesBefore(T_NOW, 25),
+        kind: 'state_transition',
+        from: 'dev_red',
+        to: 'dev_green',
+        verdict: 'advanced',
+      },
+      {
+        seq: 3,
+        ts: minutesBefore(T_NOW, 15),
+        kind: 'state_transition',
+        from: 'dev_green',
+        to: 'code_review',
+        verdict: 'advanced',
+      },
     ];
     const m = computeMetrics(entries) as { average_phase_minutes: Record<string, number> };
     // dev_red entered at T-30, dev_green entered at T-25 → 5 minute duration in dev_red
@@ -129,7 +182,14 @@ describe('computeMetrics', () => {
     const entries: LedgerEntry[] = [
       { seq: 1, ts: T_NOW, kind: 'state_transition', from: 'x', to: 'y', verdict: 'retry' },
       { seq: 2, ts: T_NOW, kind: 'state_transition', from: 'x', to: 'y', verdict: 'retry' },
-      { seq: 3, ts: T_NOW, kind: 'state_transition', from: 'story_done', to: 'epic_boundary_check', verdict: 'advanced' },
+      {
+        seq: 3,
+        ts: T_NOW,
+        kind: 'state_transition',
+        from: 'story_done',
+        to: 'epic_boundary_check',
+        verdict: 'advanced',
+      },
     ];
     const m = computeMetrics(entries) as { retry_rate_per_story: number };
     expect(m.retry_rate_per_story).toBe(2);
@@ -137,9 +197,23 @@ describe('computeMetrics', () => {
 
   it('ignores impossibly long phase gaps (sanity cap)', () => {
     const entries: LedgerEntry[] = [
-      { seq: 1, ts: '2026-06-01T12:00:00.000Z', kind: 'state_transition', from: '_', to: 'dev_red', verdict: 'advanced' },
+      {
+        seq: 1,
+        ts: '2026-06-01T12:00:00.000Z',
+        kind: 'state_transition',
+        from: '_',
+        to: 'dev_red',
+        verdict: 'advanced',
+      },
       // 8 hours later — way beyond the 4h cap. Should be dropped.
-      { seq: 2, ts: '2026-06-01T20:00:00.000Z', kind: 'state_transition', from: 'dev_red', to: 'dev_green', verdict: 'advanced' },
+      {
+        seq: 2,
+        ts: '2026-06-01T20:00:00.000Z',
+        kind: 'state_transition',
+        from: 'dev_red',
+        to: 'dev_green',
+        verdict: 'advanced',
+      },
     ];
     const m = computeMetrics(entries) as { average_phase_minutes: Record<string, number> };
     expect(m.average_phase_minutes.dev_red).toBeUndefined();
@@ -157,9 +231,20 @@ describe('sliceEpicWindow', () => {
 
   it('slices entries between consecutive epic_boundary_check events', () => {
     const entries: LedgerEntry[] = [
-      { seq: 1, ts: '2026-06-01T10:00:00.000Z', kind: 'state_transition', to: 'epic_boundary_check' },
+      {
+        seq: 1,
+        ts: '2026-06-01T10:00:00.000Z',
+        kind: 'state_transition',
+        to: 'epic_boundary_check',
+      },
       { seq: 2, ts: '2026-06-01T10:05:00.000Z', kind: 'action_emitted' },
-      { seq: 3, ts: '2026-06-01T10:10:00.000Z', kind: 'state_transition', to: 'retrospective', detail: { epic_key: 'E1' } },
+      {
+        seq: 3,
+        ts: '2026-06-01T10:10:00.000Z',
+        kind: 'state_transition',
+        to: 'retrospective',
+        detail: { epic_key: 'E1' },
+      },
     ];
     const w = sliceEpicWindow(entries, 'E1');
     // Should include seq 2 and seq 3, but not seq 1 (that closed the prior epic).

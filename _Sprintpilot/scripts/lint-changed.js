@@ -54,13 +54,17 @@ async function resolveLinterByName(name, lang) {
   }
   if (name === 'ruff' && (await hasCli(name))) return { bin: name, args: ['check'] };
   if (name === 'flake8' && (await hasCli(name))) return { bin: name, args: [] };
-  if (name === 'pylint' && (await hasCli(name))) return { bin: name, args: ['--output-format=text'] };
+  if (name === 'pylint' && (await hasCli(name)))
+    return { bin: name, args: ['--output-format=text'] };
   if (name === 'cargo' || name === 'cargo-clippy' || name === 'clippy') {
-    if (await hasCli('cargo')) return { bin: 'cargo', args: ['clippy', '--message-format=short'], noFiles: true };
+    if (await hasCli('cargo'))
+      return { bin: 'cargo', args: ['clippy', '--message-format=short'], noFiles: true };
     return null;
   }
-  if (name === 'golangci-lint' && (await hasCli(name))) return { bin: name, args: ['run'], noFiles: true };
-  if (name === 'rubocop' && (await hasCli(name))) return { bin: name, args: ['--format', 'simple'] };
+  if (name === 'golangci-lint' && (await hasCli(name)))
+    return { bin: name, args: ['run'], noFiles: true };
+  if (name === 'rubocop' && (await hasCli(name)))
+    return { bin: name, args: ['--format', 'simple'] };
   if (name === 'checkstyle' && (await hasCli(name))) {
     return { bin: name, args: fs.existsSync('checkstyle.xml') ? ['-c', 'checkstyle.xml'] : [] };
   }
@@ -68,18 +72,28 @@ async function resolveLinterByName(name, lang) {
   if (name === 'cppcheck' && (await hasCli(name))) {
     return {
       bin: name,
-      args: lang === 'cpp' ? ['--enable=warning,style', '--language=c++'] : ['--enable=warning,style'],
+      args:
+        lang === 'cpp' ? ['--enable=warning,style', '--language=c++'] : ['--enable=warning,style'],
     };
   }
   if (name === 'clang-tidy' && (await hasCli(name))) return { bin: name, args: [] };
-  if ((name === 'dotnet' || name === 'dotnet format' || name === 'dotnet-format') && (await hasCli('dotnet'))) {
-    return { bin: 'dotnet', args: ['format', '--verify-no-changes', '--diagnostics'], noFiles: true };
+  if (
+    (name === 'dotnet' || name === 'dotnet format' || name === 'dotnet-format') &&
+    (await hasCli('dotnet'))
+  ) {
+    return {
+      bin: 'dotnet',
+      args: ['format', '--verify-no-changes', '--diagnostics'],
+      noFiles: true,
+    };
   }
   if (name === 'swiftlint' && (await hasCli(name))) return { bin: name, args: ['lint', '--quiet'] };
-  if (name === 'sqlfluff' && (await hasCli(name))) return { bin: name, args: ['lint', '--dialect', 'oracle'] };
+  if (name === 'sqlfluff' && (await hasCli(name)))
+    return { bin: name, args: ['lint', '--dialect', 'oracle'] };
   if (name === 'ktlint' && (await hasCli(name))) return { bin: name, args: [] };
   if (name === 'detekt' && (await hasCli(name))) return { bin: name, args: ['--input'] };
-  if (name === 'phpstan' && (await hasCli(name))) return { bin: name, args: ['analyse', '--no-progress'] };
+  if (name === 'phpstan' && (await hasCli(name)))
+    return { bin: name, args: ['analyse', '--no-progress'] };
   if (name === 'phpcs' && (await hasCli(name))) return { bin: name, args: [] };
   return null;
 }

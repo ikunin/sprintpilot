@@ -75,10 +75,7 @@ describe('reconcileWithSprintStatus', () => {
   });
 
   it('returns ok with no actions when persisted state already matches sprint-status', () => {
-    writeSprintStatus(
-      projectRoot,
-      'development_status:\n  1-1-a: in-progress\n  1-2-b: backlog\n',
-    );
+    writeSprintStatus(projectRoot, 'development_status:\n  1-1-a: in-progress\n  1-2-b: backlog\n');
     const p = persisted({ current_story: '1-1-a', current_bmad_step: 'dev_red' });
     const r = reconcileWithSprintStatus({ projectRoot, persisted: p });
     expect(r.ok).toBe(true);
@@ -89,10 +86,7 @@ describe('reconcileWithSprintStatus', () => {
   });
 
   it('clears current_story when sprint-status marks it done (external completion)', () => {
-    writeSprintStatus(
-      projectRoot,
-      'development_status:\n  1-1-a: done\n  1-2-b: backlog\n',
-    );
+    writeSprintStatus(projectRoot, 'development_status:\n  1-1-a: done\n  1-2-b: backlog\n');
     const p = persisted({
       current_story: '1-1-a',
       story_file_path: '_bmad-output/stories/1-1-a.md',
@@ -188,10 +182,7 @@ describe('reconcileWithSprintStatus', () => {
   });
 
   it('handles uppercase / mixed-case status values (case-insensitive)', () => {
-    writeSprintStatus(
-      projectRoot,
-      'development_status:\n  1-1-a: DONE\n  1-2-b: Done\n',
-    );
+    writeSprintStatus(projectRoot, 'development_status:\n  1-1-a: DONE\n  1-2-b: Done\n');
     const p = persisted({
       current_story: '1-1-a',
       story_queue: ['1-1-a', '1-2-b'],
@@ -210,10 +201,7 @@ describe('reconcileWithSprintStatus', () => {
   // story and the unpushed work was forgotten. With the probe in place,
   // a missing origin/<branch> blocks the clear and emits skip_clear_unpushed.
   it('skips clearing current_story when sprint-status=done but origin/<branch> is missing', () => {
-    writeSprintStatus(
-      projectRoot,
-      'development_status:\n  14-1-foo: done\n  14-2-bar: backlog\n',
-    );
+    writeSprintStatus(projectRoot, 'development_status:\n  14-1-foo: done\n  14-2-bar: backlog\n');
     const p = persisted({
       current_story: '14-1-foo',
       story_file_path: '_bmad-output/stories/14-1-foo.md',

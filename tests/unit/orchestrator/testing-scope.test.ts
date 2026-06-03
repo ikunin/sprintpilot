@@ -144,7 +144,11 @@ describe('resolveTestScope: fallback policy', () => {
     seedVitestProject();
     const d = resolveTestScope({
       state: {},
-      profile: { testing_scope: 'affected', testing_fallback: 'full', base_branch: 'nonexistent-branch' },
+      profile: {
+        testing_scope: 'affected',
+        testing_fallback: 'full',
+        base_branch: 'nonexistent-branch',
+      },
       projectRoot,
       baseBranch: 'nonexistent-branch',
     }) as Decision;

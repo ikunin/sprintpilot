@@ -7,27 +7,35 @@
 // real risk is two `node autopilot.js …` invocations).
 
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, lstatSync, appendFileSync } from 'node:fs';
+import {
+  appendFileSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-
-// @ts-expect-error — CommonJS
-import sprintPlanMod from '../../_Sprintpilot/scripts/sprint-plan.js';
-// @ts-expect-error — CommonJS
-import inferMod from '../../_Sprintpilot/scripts/infer-dependencies.js';
-// @ts-expect-error — CommonJS
-import adaptMod from '../../_Sprintpilot/lib/orchestrator/adapt.js';
-// @ts-expect-error — CommonJS
-import applierMod from '../../_Sprintpilot/lib/orchestrator/user-command-applier.js';
-// @ts-expect-error — CommonJS
-import dagMod from '../../_Sprintpilot/lib/orchestrator/sprint-plan.js';
 // @ts-expect-error — CommonJS
 import ledgerMod from '../../_Sprintpilot/lib/orchestrator/action-ledger.js';
 // @ts-expect-error — CommonJS
-import resolveDagMod from '../../_Sprintpilot/scripts/resolve-dag.js';
+import adaptMod from '../../_Sprintpilot/lib/orchestrator/adapt.js';
 // @ts-expect-error — CommonJS
 import profileRules from '../../_Sprintpilot/lib/orchestrator/profile-rules.js';
+// @ts-expect-error — CommonJS
+import dagMod from '../../_Sprintpilot/lib/orchestrator/sprint-plan.js';
+// @ts-expect-error — CommonJS
+import applierMod from '../../_Sprintpilot/lib/orchestrator/user-command-applier.js';
+// @ts-expect-error — CommonJS
+import inferMod from '../../_Sprintpilot/scripts/infer-dependencies.js';
+// @ts-expect-error — CommonJS
+import resolveDagMod from '../../_Sprintpilot/scripts/resolve-dag.js';
+// @ts-expect-error — CommonJS
+import sprintPlanMod from '../../_Sprintpilot/scripts/sprint-plan.js';
 
 const REPO_ROOT = join(__dirname, '..', '..');
 const SP_SCRIPT = join(REPO_ROOT, '_Sprintpilot', 'scripts', 'sprint-plan.js');
@@ -39,25 +47,43 @@ const INFER_SCRIPT = join(REPO_ROOT, '_Sprintpilot', 'scripts', 'infer-dependenc
 // path. Node accepts forward slashes on Windows.
 const sx = (p: string) => p.replace(/\\/g, '/');
 
-const { emptyPlan, write: writePlan, read: readPlan, planPath, lockPath, reorder, archive, setIssueId } =
-  sprintPlanMod as {
-    emptyPlan: (o?: { source?: string }) => Record<string, unknown>;
-    write: (p: Record<string, unknown>, o: { projectRoot: string }) => string;
-    read: (o: { projectRoot: string }) => Record<string, unknown> | null;
-    planPath: (root: string) => string;
-    lockPath: (root: string) => string;
-    reorder: (newOrder: string[], o: { projectRoot: string }) => string;
-    archive: (id: string, o: { projectRoot: string }) => Record<string, unknown>;
-    setIssueId: (key: string, id: string | null, o: { projectRoot: string }) => Record<string, unknown>;
-  };
+const {
+  emptyPlan,
+  write: writePlan,
+  read: readPlan,
+  planPath,
+  lockPath,
+  reorder,
+  archive,
+  setIssueId,
+} = sprintPlanMod as {
+  emptyPlan: (o?: { source?: string }) => Record<string, unknown>;
+  write: (p: Record<string, unknown>, o: { projectRoot: string }) => string;
+  read: (o: { projectRoot: string }) => Record<string, unknown> | null;
+  planPath: (root: string) => string;
+  lockPath: (root: string) => string;
+  reorder: (newOrder: string[], o: { projectRoot: string }) => string;
+  archive: (id: string, o: { projectRoot: string }) => Record<string, unknown>;
+  setIssueId: (
+    key: string,
+    id: string | null,
+    o: { projectRoot: string },
+  ) => Record<string, unknown>;
+};
 
 const { verifyIssuesSignature } = adaptMod as {
   verifyIssuesSignature: (issues: unknown) => string | null;
 };
 
 const { renderMermaid, renderGraphviz } = resolveDagMod as {
-  renderMermaid: (dag: { nodes: string[]; edges: [string, string][] }, plan: Record<string, unknown> | null) => string;
-  renderGraphviz: (dag: { nodes: string[]; edges: [string, string][] }, plan: Record<string, unknown> | null) => string;
+  renderMermaid: (
+    dag: { nodes: string[]; edges: [string, string][] },
+    plan: Record<string, unknown> | null,
+  ) => string;
+  renderGraphviz: (
+    dag: { nodes: string[]; edges: [string, string][] },
+    plan: Record<string, unknown> | null,
+  ) => string;
 };
 
 let tmpRoot = '';
@@ -235,10 +261,16 @@ describe('H4 — tail iterator detects ledger rotation', () => {
     append: (e: Record<string, unknown>, ctx: { projectRoot: string }) => Record<string, unknown>;
     tail: (
       ctx: { projectRoot: string },
-      opts?: { afterSeq?: number; pollIntervalMs?: number; maxIdleMs?: number; signal?: AbortSignal },
+      opts?: {
+        afterSeq?: number;
+        pollIntervalMs?: number;
+        maxIdleMs?: number;
+        signal?: AbortSignal;
+      },
     ) => AsyncIterable<Record<string, unknown>>;
   };
-  const resolveLedger = (ledgerMod as { resolveLedgerPath: (root: string) => string }).resolveLedgerPath;
+  const resolveLedger = (ledgerMod as { resolveLedgerPath: (root: string) => string })
+    .resolveLedgerPath;
 
   it('resumes from seq=0 when the ledger file is truncated', async () => {
     append({ kind: 'state_transition', detail: { i: 1 } }, { projectRoot: tmpRoot });
@@ -405,7 +437,7 @@ describe('M6 — setIssueId rejects forbidden characters', () => {
     );
   });
 
-  it("rejects issue_id containing newline", () => {
+  it('rejects issue_id containing newline', () => {
     seedPlan([{ key: 'a', plan_status: 'pending', priority: 1 }]);
     expect(() => setIssueId('a', 'PROJ\nx', { projectRoot: tmpRoot })).toThrow(
       /forbidden character/,

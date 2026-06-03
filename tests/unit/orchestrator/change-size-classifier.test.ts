@@ -257,9 +257,7 @@ describe('classifyChange (I/O)', () => {
     const r = classifyChange({ projectRoot: '/r', baseBranch: 'main', run: fakeRun });
     expect(r.size).toBe('structural');
     expect(r.structural_signals as string[]).toEqual(
-      expect.arrayContaining([
-        expect.stringContaining('schema_or_migration:db/migrations/'),
-      ]),
+      expect.arrayContaining([expect.stringContaining('schema_or_migration:db/migrations/')]),
     );
   });
 
@@ -269,7 +267,12 @@ describe('classifyChange (I/O)', () => {
       if (joined.includes('--numstat')) return '1\t1\tpackage.json\n';
       if (joined.includes('--name-status')) return 'M\tpackage.json\n';
       // Per-manifest diff fetch.
-      if (args.includes('package.json') && args[0] === 'diff' && !args.includes('--numstat') && !args.includes('--name-status')) {
+      if (
+        args.includes('package.json') &&
+        args[0] === 'diff' &&
+        !args.includes('--numstat') &&
+        !args.includes('--name-status')
+      ) {
         return '\n+    "react": "^18.0.0",\n';
       }
       return '';
@@ -294,7 +297,9 @@ describe('classifyChange (I/O)', () => {
   });
 
   it('returns the same shape on git errors (defensive)', () => {
-    const fakeRun = () => { throw new Error('git not found'); };
+    const fakeRun = () => {
+      throw new Error('git not found');
+    };
     const r = classifyChange({ projectRoot: '/r', baseBranch: 'main', run: fakeRun });
     expect(r.size).toBe('trivial');
     expect(r.reason).toBe('no_diff');

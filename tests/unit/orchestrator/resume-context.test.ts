@@ -34,11 +34,7 @@ const {
   RESUMABLE_PHASES: Set<string>;
   RICH_HINT_PHASES: Set<string>;
   TERMINAL_KINDS: Set<string>;
-  detect: (
-    state: State,
-    ledger: LedgerEntry[],
-    options?: { force?: boolean },
-  ) => Detection;
+  detect: (state: State, ledger: LedgerEntry[], options?: { force?: boolean }) => Detection;
   build: (detection: Detection, world: Record<string, unknown>) => Hint;
   normaliseCheckpoint: (raw: unknown) => Record<string, unknown> | null;
   parseAcceptanceCriteria: (md: string) => { completed: string[]; total: number };
@@ -125,7 +121,13 @@ describe('detect — happy paths and short-circuits', () => {
 
   it('returns resuming: false when ledger has no invoke_skill for the current phase', () => {
     const ledger: LedgerEntry[] = [
-      { seq: 1, ts: T0, kind: 'action_emitted', phase: STATES.PREPARE_STORY_BRANCH, action: { type: 'git_op', phase: STATES.PREPARE_STORY_BRANCH } },
+      {
+        seq: 1,
+        ts: T0,
+        kind: 'action_emitted',
+        phase: STATES.PREPARE_STORY_BRANCH,
+        action: { type: 'git_op', phase: STATES.PREPARE_STORY_BRANCH },
+      },
     ];
     const out = detect({ phase: STATES.DEV_GREEN }, ledger);
     expect(out.resuming).toBe(false);
@@ -159,7 +161,14 @@ describe('detect — happy paths and short-circuits', () => {
   it('treats phase_resumed as terminal (avoids double-resume loop)', () => {
     const ledger = [
       actionEmitted(STATES.DEV_GREEN),
-      { seq: 2, ts: T2, kind: 'phase_resumed', phase: STATES.DEV_GREEN, reason: 'skill_interrupted', hint: { phase: STATES.DEV_GREEN } },
+      {
+        seq: 2,
+        ts: T2,
+        kind: 'phase_resumed',
+        phase: STATES.DEV_GREEN,
+        reason: 'skill_interrupted',
+        hint: { phase: STATES.DEV_GREEN },
+      },
     ];
     const out = detect({ phase: STATES.DEV_GREEN }, ledger);
     expect(out.resuming).toBe(false);
@@ -311,9 +320,7 @@ describe('normaliseCheckpoint', () => {
 
   it('rejects empty payload', () => {
     expect(normaliseCheckpoint({})).toBeNull();
-    expect(
-      normaliseCheckpoint({ ac_done: [], tests_passing: [], tests_failing: [] }),
-    ).toBeNull();
+    expect(normaliseCheckpoint({ ac_done: [], tests_passing: [], tests_failing: [] })).toBeNull();
   });
 
   it('accepts a payload with only a summary', () => {
@@ -374,10 +381,7 @@ describe('parseAcceptanceCriteria', () => {
     ].join('\n');
     const out = parseAcceptanceCriteria(md);
     expect(out.total).toBe(4);
-    expect(out.completed).toEqual([
-      'AC1: button has aria-label',
-      'AC2: focus ring visible',
-    ]);
+    expect(out.completed).toEqual(['AC1: button has aria-label', 'AC2: focus ring visible']);
   });
 
   it('handles uppercase [X]', () => {

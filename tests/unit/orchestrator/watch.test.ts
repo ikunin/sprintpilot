@@ -4,10 +4,7 @@ import { describe, expect, it } from 'vitest';
 import autopilot from '../../../_Sprintpilot/bin/autopilot.js';
 
 const { formatWatchEventLine } = autopilot as {
-  formatWatchEventLine: (
-    e: Record<string, unknown>,
-    opts?: { tty?: boolean },
-  ) => string;
+  formatWatchEventLine: (e: Record<string, unknown>, opts?: { tty?: boolean }) => string;
 };
 
 describe('formatWatchEventLine (v2.5.0)', () => {

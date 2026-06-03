@@ -1,12 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -101,7 +94,12 @@ function appendLedger(entry: Record<string, unknown>): void {
 }
 
 function writeState(yaml: string): void {
-  const path = join(projectRoot, '_bmad-output', 'implementation-artifacts', 'autopilot-state.yaml');
+  const path = join(
+    projectRoot,
+    '_bmad-output',
+    'implementation-artifacts',
+    'autopilot-state.yaml',
+  );
   mkdirSync(join(projectRoot, '_bmad-output', 'implementation-artifacts'), { recursive: true });
   writeFileSync(path, yaml, 'utf8');
 }
@@ -184,14 +182,13 @@ describe('autopilot CLI: resume mid-skill (v2.6.0)', () => {
     expect(hint.phase).toBe('dev_green');
     expect(hint.story_key).toBe('S1');
     expect(typeof hint.phase_started_at).toBe('string');
-    expect((hint.phase_started_at as string)).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+    expect(hint.phase_started_at as string).toMatch(
+      /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/,
+    );
     expect(hint.ac_total).toBe(4);
-    expect(hint.ac_completed).toEqual([
-      'AC1: button has aria-label',
-      'AC2: focus ring visible',
-    ]);
+    expect(hint.ac_completed).toEqual(['AC1: button has aria-label', 'AC2: focus ring visible']);
     expect(typeof hint.summary).toBe('string');
-    expect((hint.summary as string)).toMatch(/2\/4 AC already checked off/);
+    expect(hint.summary as string).toMatch(/2\/4 AC already checked off/);
   });
 
   it('threads resume_hint into the next invoke_skill action template_slots', () => {
@@ -206,10 +203,7 @@ describe('autopilot CLI: resume mid-skill (v2.6.0)', () => {
     const hint = payload.action.template_slots!.resume_hint as Record<string, unknown>;
     expect(hint).toBeTruthy();
     expect(hint.phase).toBe('dev_green');
-    expect(hint.ac_completed).toEqual([
-      'AC1: button has aria-label',
-      'AC2: focus ring visible',
-    ]);
+    expect(hint.ac_completed).toEqual(['AC1: button has aria-label', 'AC2: focus ring visible']);
   });
 
   it('surfaces the last skill_checkpoint as resume_hint.checkpoint', () => {

@@ -21,7 +21,11 @@ type Plan = {
   issue_tracker: unknown;
   epics: Array<Record<string, unknown>>;
   stories: Array<Record<string, unknown>>;
-  dependencies: { version: number; auto_inferred_at: string | null; stories: Record<string, unknown> };
+  dependencies: {
+    version: number;
+    auto_inferred_at: string | null;
+    stories: Record<string, unknown>;
+  };
   cross_epic_deps: unknown[];
   overrides: unknown[];
   notes: string;
@@ -62,10 +66,7 @@ const {
     entries: Array<Record<string, unknown>>,
     opts: { projectRoot: string; position?: string | number },
   ) => string;
-  removeStories: (
-    keys: string[],
-    opts: { projectRoot: string; status?: string },
-  ) => string;
+  removeStories: (keys: string[], opts: { projectRoot: string; status?: string }) => string;
   reorder: (newOrder: string[], opts: { projectRoot: string }) => string;
   resolveInsertIdx: (stories: unknown[], pos: string | number | null) => number;
   setIssueId: (
@@ -79,7 +80,10 @@ const {
     changed: { stories: number; epics: number; transitions: number };
     reason?: string;
   };
-  archive: (plan_id: string, opts: { projectRoot: string }) => { archived: boolean; file?: string; reason?: string };
+  archive: (
+    plan_id: string,
+    opts: { projectRoot: string },
+  ) => { archived: boolean; file?: string; reason?: string };
   mutate: (root: string, fn: (plan: Plan) => Plan) => string;
   findStoryIdx: (plan: Plan, key: string) => number;
   findEpicIdx: (plan: Plan, id: string) => number;
@@ -199,9 +203,9 @@ describe('markExcluded', () => {
   });
 
   it('throws when given a non-array', () => {
-    expect(() => markExcluded('not-an-array' as unknown as string[], { projectRoot: tmpRoot })).toThrow(
-      /array of story keys/,
-    );
+    expect(() =>
+      markExcluded('not-an-array' as unknown as string[], { projectRoot: tmpRoot }),
+    ).toThrow(/array of story keys/);
   });
 });
 
@@ -254,7 +258,9 @@ describe('addStories', () => {
 
   it('rejects entries whose key is already in the plan', () => {
     addStories([{ key: '1-1-a' }], { projectRoot: tmpRoot });
-    expect(() => addStories([{ key: '1-1-a' }], { projectRoot: tmpRoot })).toThrow(/already in the plan/);
+    expect(() => addStories([{ key: '1-1-a' }], { projectRoot: tmpRoot })).toThrow(
+      /already in the plan/,
+    );
   });
 
   it('infers epic from the key when not provided', () => {
@@ -314,10 +320,7 @@ describe('resolveInsertIdx', () => {
 
 describe('removeStories', () => {
   beforeEach(() => {
-    addStories(
-      [{ key: 'a' }, { key: 'b' }, { key: 'c' }],
-      { projectRoot: tmpRoot },
-    );
+    addStories([{ key: 'a' }, { key: 'b' }, { key: 'c' }], { projectRoot: tmpRoot });
   });
 
   it("default status='skipped' marks the entries", () => {
@@ -357,10 +360,7 @@ describe('removeStories', () => {
 
 describe('reorder', () => {
   beforeEach(() => {
-    addStories(
-      [{ key: 'a' }, { key: 'b' }, { key: 'c' }, { key: 'd' }],
-      { projectRoot: tmpRoot },
-    );
+    addStories([{ key: 'a' }, { key: 'b' }, { key: 'c' }, { key: 'd' }], { projectRoot: tmpRoot });
   });
 
   it('reassigns priorities to match newOrder', () => {

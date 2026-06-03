@@ -1,10 +1,13 @@
-import { describe, expect, it } from 'vitest';
-import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { join } from 'node:path';
+import { describe, expect, it } from 'vitest';
 
 const SCRIPT = join(__dirname, '..', '..', '_Sprintpilot', 'scripts', 'run-step.js');
 
-function runStep(stepJson: object, opts: { env?: Record<string, string> } = {}): {
+function runStep(
+  stepJson: object,
+  opts: { env?: Record<string, string> } = {},
+): {
   status: number;
   stdout: string;
   stderr: string;

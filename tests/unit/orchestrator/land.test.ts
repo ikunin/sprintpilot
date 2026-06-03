@@ -159,8 +159,9 @@ describe('planLand: opens the PR (regression for land_as_you_go gap)', () => {
     );
     // tolerate_exit_codes mirrors planCommitAndPush so a missing platform
     // CLI degrades to SKIP rather than halting the land sequence.
-    expect((createPrStep as unknown as { tolerate_exit_codes: number[] }).tolerate_exit_codes)
-      .toEqual([0, 2]);
+    expect(
+      (createPrStep as unknown as { tolerate_exit_codes: number[] }).tolerate_exit_codes,
+    ).toEqual([0, 2]);
   });
 
   it('falls back to generic defaults when prTitle/prBody not supplied', () => {

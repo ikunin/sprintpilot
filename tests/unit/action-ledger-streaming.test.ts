@@ -23,10 +23,7 @@ type LedgerEntry = { seq: number; ts: string; kind: string; [k: string]: unknown
 const { VALID_KINDS, append, read, readSince, tail } = ledgerMod as {
   VALID_KINDS: string[];
   append: (entry: Record<string, unknown>, ctx: { projectRoot: string }) => LedgerEntry;
-  read: (
-    ctx: { projectRoot: string },
-    opts?: { limit?: number },
-  ) => LedgerEntry[];
+  read: (ctx: { projectRoot: string }, opts?: { limit?: number }) => LedgerEntry[];
   readSince: (ctx: { projectRoot: string }, afterSeq: number) => LedgerEntry[];
   tail: (
     ctx: { projectRoot: string },
@@ -39,7 +36,11 @@ const { VALID_KINDS, append, read, readSince, tail } = ledgerMod as {
   ) => AsyncIterable<LedgerEntry>;
 };
 
-const { write: writePlan, emptyPlan, planPath } = sprintPlanMod as {
+const {
+  write: writePlan,
+  emptyPlan,
+  planPath,
+} = sprintPlanMod as {
   write: (plan: Record<string, unknown>, ctx: { projectRoot: string }) => string;
   emptyPlan: (opts?: { source?: string }) => Record<string, unknown>;
   planPath: (root: string) => string;
@@ -111,9 +112,9 @@ describe('VALID_KINDS — v2.3.0 additions registered', () => {
   });
 
   it('append() still rejects truly unknown kinds', () => {
-    expect(() =>
-      append({ kind: 'totally_made_up_kind' }, { projectRoot: tmpRoot }),
-    ).toThrow(/entry.kind/);
+    expect(() => append({ kind: 'totally_made_up_kind' }, { projectRoot: tmpRoot })).toThrow(
+      /entry.kind/,
+    );
   });
 });
 
@@ -240,11 +241,9 @@ describe('autopilot progress CLI', () => {
 
   it('--json on a project with no plan returns plan_present=false', () => {
     seedProjectWithStatus();
-    const out = execFileSync(
-      'node',
-      [AUTOPILOT, 'progress', '--project-root', tmpRoot, '--json'],
-      { encoding: 'utf8' },
-    );
+    const out = execFileSync('node', [AUTOPILOT, 'progress', '--project-root', tmpRoot, '--json'], {
+      encoding: 'utf8',
+    });
     const parsed = JSON.parse(out);
     expect(parsed.plan_present).toBe(false);
     expect(parsed.sprint_progress.source).toBe('sprint-status');
@@ -258,11 +257,9 @@ describe('autopilot progress CLI', () => {
       { key: '1-3-c', plan_status: 'skipped', priority: 3 },
       { key: '1-4-d', plan_status: 'excluded', priority: 4 },
     ]);
-    const out = execFileSync(
-      'node',
-      [AUTOPILOT, 'progress', '--project-root', tmpRoot, '--json'],
-      { encoding: 'utf8' },
-    );
+    const out = execFileSync('node', [AUTOPILOT, 'progress', '--project-root', tmpRoot, '--json'], {
+      encoding: 'utf8',
+    });
     const parsed = JSON.parse(out);
     expect(parsed.plan_present).toBe(true);
     expect(parsed.plan_id).toBeDefined();
@@ -293,11 +290,9 @@ describe('autopilot progress CLI', () => {
         '',
       ].join('\n'),
     );
-    const out = execFileSync(
-      'node',
-      [AUTOPILOT, 'progress', '--project-root', tmpRoot, '--json'],
-      { encoding: 'utf8' },
-    );
+    const out = execFileSync('node', [AUTOPILOT, 'progress', '--project-root', tmpRoot, '--json'], {
+      encoding: 'utf8',
+    });
     const parsed = JSON.parse(out);
     expect(parsed.next_summary).toBe('NEXT: 21-1-x · step create_story · #1 of 2 in epic 21');
   });
@@ -327,11 +322,9 @@ describe('autopilot progress CLI', () => {
       { key: '1-1-a', plan_status: 'done', priority: 1 },
       { key: '1-2-b', plan_status: 'pending', priority: 2 },
     ]);
-    const out = execFileSync(
-      'node',
-      [AUTOPILOT, 'progress', '--project-root', tmpRoot],
-      { encoding: 'utf8' },
-    );
+    const out = execFileSync('node', [AUTOPILOT, 'progress', '--project-root', tmpRoot], {
+      encoding: 'utf8',
+    });
     expect(out).toMatch(/Progress: 1\/2 done/);
     expect(out).toMatch(/Bar: \[=+\s+\] \d+%/);
   });
@@ -353,11 +346,9 @@ describe('autopilot progress CLI', () => {
       },
       { projectRoot: tmpRoot },
     );
-    const out = execFileSync(
-      'node',
-      [AUTOPILOT, 'progress', '--project-root', tmpRoot, '--json'],
-      { encoding: 'utf8' },
-    );
+    const out = execFileSync('node', [AUTOPILOT, 'progress', '--project-root', tmpRoot, '--json'], {
+      encoding: 'utf8',
+    });
     const parsed = JSON.parse(out);
     expect(parsed.recent_events.length).toBeGreaterThanOrEqual(2);
     expect(parsed.recent_events[parsed.recent_events.length - 1]).toMatchObject({
@@ -382,8 +373,9 @@ describe('autopilot progress — issue_id rendering', () => {
   }
 
   function seedPlanWithIssueIds(): void {
-    const plan = (sprintPlanMod as { emptyPlan: (o: { source: string }) => Record<string, unknown> })
-      .emptyPlan({ source: 'auto' });
+    const plan = (
+      sprintPlanMod as { emptyPlan: (o: { source: string }) => Record<string, unknown> }
+    ).emptyPlan({ source: 'auto' });
     plan.issue_tracker = {
       provider: 'jira',
       base_url: 'https://co.atlassian.net',
@@ -401,19 +393,19 @@ describe('autopilot progress — issue_id rendering', () => {
       // 1-3-c intentionally has no issue_id to test partial coverage.
       { key: '1-3-c', plan_status: 'pending', priority: 3 },
     ];
-    (sprintPlanMod as {
-      write: (p: Record<string, unknown>, opts: { projectRoot: string }) => string;
-    }).write(plan, { projectRoot: tmpRoot });
+    (
+      sprintPlanMod as {
+        write: (p: Record<string, unknown>, opts: { projectRoot: string }) => string;
+      }
+    ).write(plan, { projectRoot: tmpRoot });
   }
 
   it('--json includes issue_tracking summary when issue_tracker is configured', () => {
     seedProjectWithStatus();
     seedPlanWithIssueIds();
-    const out = execFileSync(
-      'node',
-      [AUTOPILOT, 'progress', '--project-root', tmpRoot, '--json'],
-      { encoding: 'utf8' },
-    );
+    const out = execFileSync('node', [AUTOPILOT, 'progress', '--project-root', tmpRoot, '--json'], {
+      encoding: 'utf8',
+    });
     const parsed = JSON.parse(out);
     expect(parsed.issue_tracking).toMatchObject({
       provider: 'jira',
@@ -442,11 +434,9 @@ describe('autopilot progress — issue_id rendering', () => {
       },
       { projectRoot: tmpRoot },
     );
-    const out = execFileSync(
-      'node',
-      [AUTOPILOT, 'progress', '--project-root', tmpRoot, '--json'],
-      { encoding: 'utf8' },
-    );
+    const out = execFileSync('node', [AUTOPILOT, 'progress', '--project-root', tmpRoot, '--json'], {
+      encoding: 'utf8',
+    });
     const parsed = JSON.parse(out);
     const e1 = parsed.recent_events.find((e: { story_key: string }) => e.story_key === '1-2-b');
     const e2 = parsed.recent_events.find((e: { story_key: string }) => e.story_key === '1-3-c');
@@ -469,19 +459,20 @@ describe('autopilot progress — issue_id rendering', () => {
 
   it('issue_tracking is null when plan has no issue_tracker configured', () => {
     seedProjectWithStatus();
-    const plan = (sprintPlanMod as { emptyPlan: (o: { source: string }) => Record<string, unknown> })
-      .emptyPlan({ source: 'auto' });
+    const plan = (
+      sprintPlanMod as { emptyPlan: (o: { source: string }) => Record<string, unknown> }
+    ).emptyPlan({ source: 'auto' });
     plan.stories = [{ key: '1-1-a', plan_status: 'pending', priority: 1, issue_id: 'X-1' }];
     // NOTE: issue_tracker intentionally null — even with issue_ids on stories,
     // the coverage line should not appear (no tracker provider to render against).
-    (sprintPlanMod as {
-      write: (p: Record<string, unknown>, opts: { projectRoot: string }) => string;
-    }).write(plan, { projectRoot: tmpRoot });
-    const out = execFileSync(
-      'node',
-      [AUTOPILOT, 'progress', '--project-root', tmpRoot, '--json'],
-      { encoding: 'utf8' },
-    );
+    (
+      sprintPlanMod as {
+        write: (p: Record<string, unknown>, opts: { projectRoot: string }) => string;
+      }
+    ).write(plan, { projectRoot: tmpRoot });
+    const out = execFileSync('node', [AUTOPILOT, 'progress', '--project-root', tmpRoot, '--json'], {
+      encoding: 'utf8',
+    });
     const parsed = JSON.parse(out);
     expect(parsed.issue_tracking).toBeNull();
   });
@@ -524,19 +515,20 @@ describe('autopilot progress — issue_id rendering', () => {
     expect(out).toMatch(/Issue ID:\s+\(not set\)/);
   });
 
-  it("human-readable mode does NOT print Issue tracking line when no tracker configured", () => {
+  it('human-readable mode does NOT print Issue tracking line when no tracker configured', () => {
     seedProjectWithStatus();
-    const plan = (sprintPlanMod as { emptyPlan: (o: { source: string }) => Record<string, unknown> })
-      .emptyPlan({ source: 'auto' });
+    const plan = (
+      sprintPlanMod as { emptyPlan: (o: { source: string }) => Record<string, unknown> }
+    ).emptyPlan({ source: 'auto' });
     plan.stories = [{ key: '1-1-a', plan_status: 'pending', priority: 1 }];
-    (sprintPlanMod as {
-      write: (p: Record<string, unknown>, opts: { projectRoot: string }) => string;
-    }).write(plan, { projectRoot: tmpRoot });
-    const out = execFileSync(
-      'node',
-      [AUTOPILOT, 'progress', '--project-root', tmpRoot],
-      { encoding: 'utf8' },
-    );
+    (
+      sprintPlanMod as {
+        write: (p: Record<string, unknown>, opts: { projectRoot: string }) => string;
+      }
+    ).write(plan, { projectRoot: tmpRoot });
+    const out = execFileSync('node', [AUTOPILOT, 'progress', '--project-root', tmpRoot], {
+      encoding: 'utf8',
+    });
     expect(out).not.toMatch(/Issue tracking:/);
   });
 
@@ -550,11 +542,9 @@ describe('autopilot progress — issue_id rendering', () => {
       },
       { projectRoot: tmpRoot },
     );
-    const out = execFileSync(
-      'node',
-      [AUTOPILOT, 'progress', '--project-root', tmpRoot],
-      { encoding: 'utf8' },
-    );
+    const out = execFileSync('node', [AUTOPILOT, 'progress', '--project-root', tmpRoot], {
+      encoding: 'utf8',
+    });
     // Line should be like:
     //   [42] HH:MM:SS step_started — 1-2-b [PROJ-101] / dev_green
     expect(out).toMatch(/step_started — 1-2-b \[PROJ-101\] \/ dev_green/);

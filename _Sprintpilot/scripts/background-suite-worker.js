@@ -28,8 +28,6 @@
 //     "still running" so a half-completed sidecar doesn't trigger a
 //     false halt.
 
-'use strict';
-
 const fs = require('node:fs');
 const path = require('node:path');
 const { spawn } = require('node:child_process');

@@ -1,11 +1,10 @@
 // Phase 5 — validator tests for the 4 new plan-aware command kinds.
 
 import { describe, expect, it } from 'vitest';
-
-// @ts-expect-error — CommonJS module
-import userCommands from '../../../_Sprintpilot/lib/orchestrator/user-commands.js';
 // @ts-expect-error — CommonJS module
 import applierMod from '../../../_Sprintpilot/lib/orchestrator/user-command-applier.js';
+// @ts-expect-error — CommonJS module
+import userCommands from '../../../_Sprintpilot/lib/orchestrator/user-commands.js';
 
 type ValidOk = { ok: true; command: unknown };
 type ValidFail = { ok: false; errors: string[] };
@@ -226,9 +225,9 @@ describe('validateOne replan_sprint', () => {
   });
 
   it('rejects focus_epics entries that fail the regex', () => {
-    expect(
-      validateOne({ kind: 'replan_sprint', focus_epics: ['valid', 'has space'] }).ok,
-    ).toBe(false);
+    expect(validateOne({ kind: 'replan_sprint', focus_epics: ['valid', 'has space'] }).ok).toBe(
+      false,
+    );
   });
 
   it('rejects an unknown scheduling mode', () => {

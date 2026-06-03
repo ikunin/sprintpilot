@@ -1,7 +1,7 @@
-import { describe, expect, it, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 // @ts-expect-error — CommonJS module
 import backgroundSuite from '../../../_Sprintpilot/lib/orchestrator/background-suite.js';
@@ -84,7 +84,9 @@ describe('background-suite.sanitizeStoryKey', () => {
 describe('background-suite.sidecarDir + sidecarPath', () => {
   it('locates files under _bmad-output/implementation-artifacts/.background-suite', () => {
     const dir = sidecarDir(tmpRoot);
-    expect(dir.endsWith(path.join('_bmad-output', 'implementation-artifacts', '.background-suite'))).toBe(true);
+    expect(
+      dir.endsWith(path.join('_bmad-output', 'implementation-artifacts', '.background-suite')),
+    ).toBe(true);
     expect(sidecarPath(tmpRoot, '1.2-foo').endsWith('1.2-foo.json')).toBe(true);
     expect(logPath(tmpRoot, '1.2-foo').endsWith('1.2-foo.log')).toBe(true);
   });
@@ -137,10 +139,7 @@ describe('background-suite.readLatestSidecar', () => {
 
 describe('background-suite.resolveFullSuiteCommand', () => {
   it('prefers user override testing_commands_full', () => {
-    const cmd = resolveFullSuiteCommand(
-      { testing_commands_full: 'pytest -x' },
-      tmpRoot,
-    );
+    const cmd = resolveFullSuiteCommand({ testing_commands_full: 'pytest -x' }, tmpRoot);
     expect(cmd).toBe('pytest -x');
   });
 
@@ -186,9 +185,7 @@ describe('background-suite.spawnBackground', () => {
     expect((r as Record<string, unknown>).pid).toBe(99999);
 
     // Sidecar exists with status=running.
-    const sidecar = JSON.parse(
-      fs.readFileSync(sidecarPath(tmpRoot, '1.2-foo'), 'utf8'),
-    );
+    const sidecar = JSON.parse(fs.readFileSync(sidecarPath(tmpRoot, '1.2-foo'), 'utf8'));
     expect(sidecar.status).toBe('running');
     expect(sidecar.command).toBe('npm test');
     expect(sidecar.story_key).toBe('1.2-foo');
@@ -287,9 +284,7 @@ describe('background-suite.checkPriorRun', () => {
       completed_at: '2026-06-01T11:05:00.000Z',
       exit_code: 0,
     });
-    expect(
-      checkPriorRun(tmpRoot, { testing_full_suite_on_story_land: 'background' }),
-    ).toBeNull();
+    expect(checkPriorRun(tmpRoot, { testing_full_suite_on_story_land: 'background' })).toBeNull();
   });
 
   it('returns null when latest sidecar is acknowledged', () => {
@@ -301,9 +296,7 @@ describe('background-suite.checkPriorRun', () => {
       exit_code: 1,
       acknowledged: true,
     });
-    expect(
-      checkPriorRun(tmpRoot, { testing_full_suite_on_story_land: 'background' }),
-    ).toBeNull();
+    expect(checkPriorRun(tmpRoot, { testing_full_suite_on_story_land: 'background' })).toBeNull();
   });
 
   it('returns halt descriptor when latest sidecar failed and is unack', () => {

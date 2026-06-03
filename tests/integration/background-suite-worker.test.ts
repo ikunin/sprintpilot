@@ -1,8 +1,8 @@
-import { describe, expect, it, beforeEach, afterEach } from 'vitest';
+import { spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 const WORKER_PATH = path.join(
   process.cwd(),
@@ -40,10 +40,14 @@ function runWorker(args: { command: string }) {
     process.execPath,
     [
       WORKER_PATH,
-      '--sidecar', sidecar,
-      '--log', log,
-      '--story-key', 'test-story',
-      '--command', args.command,
+      '--sidecar',
+      sidecar,
+      '--log',
+      log,
+      '--story-key',
+      'test-story',
+      '--command',
+      args.command,
     ],
     { cwd: tmpRoot, encoding: 'utf8', timeout: 10_000 },
   );

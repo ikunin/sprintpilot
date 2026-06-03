@@ -53,10 +53,7 @@ describe('branchName', () => {
   });
 
   it('epic granularity honors a custom branch_prefix', () => {
-    const p = flatToProfile(
-      { git: { granularity: 'epic', branch_prefix: 'feature/' } },
-      'nano',
-    );
+    const p = flatToProfile({ git: { granularity: 'epic', branch_prefix: 'feature/' } }, 'nano');
     expect(branchName(p, 'S1', 'E3')).toBe('feature/epic-e3');
   });
 });
@@ -90,13 +87,7 @@ describe('plan: commit_and_push_story', () => {
     expect(r.steps[3].args[0]).toBe('node');
     expect(r.steps[3].args.some((a: string) => a.endsWith('create-pr.js'))).toBe(true);
     expect(r.steps[4].args).toEqual(['git', 'switch', 'main']);
-    expect(r.steps[5].args).toEqual([
-      'git',
-      'checkout',
-      'story/s1.2',
-      '--',
-      '_bmad-output',
-    ]);
+    expect(r.steps[5].args).toEqual(['git', 'checkout', 'story/s1.2', '--', '_bmad-output']);
     expect(r.steps[6].args).toEqual(['git', 'add', '_bmad-output']);
     expect(r.steps[7].args.slice(0, 3)).toEqual(['git', 'commit', '--allow-empty']);
     expect(r.steps[7].args[3].startsWith('--message=')).toBe(true);
@@ -121,9 +112,7 @@ describe('plan: commit_and_push_story', () => {
   it('with has_origin=false: no push steps (story OR base)', () => {
     const p = { ...flatToProfile({}, 'medium'), has_origin: false };
     const r = plan(story(), p, { type: 'git_op', op: 'commit_and_push_story' });
-    const pushSteps = r.steps.filter(
-      (s) => s.args[0] === 'git' && s.args[1] === 'push',
-    );
+    const pushSteps = r.steps.filter((s) => s.args[0] === 'git' && s.args[1] === 'push');
     expect(pushSteps).toHaveLength(0);
     // The base-branch sync (switch/checkout/add/commit) still happens —
     // useful for local-only workflows that want main updated.
@@ -145,9 +134,7 @@ describe('plan: commit_and_push_story', () => {
       op: 'commit_and_push_story',
     });
     // The story-branch push is step[2] (first git push in the sequence).
-    const push = r.steps.find(
-      (s) => s.args.join(' ') === 'git push -u origin story/s1.2',
-    );
+    const push = r.steps.find((s) => s.args.join(' ') === 'git push -u origin story/s1.2');
     expect(push).toBeDefined();
     expect(push?.retry).toMatchObject({
       attempts: 4,
@@ -290,9 +277,7 @@ describe('plan: commit_and_push_story — user-config knobs', () => {
       true,
     );
     // Pushes base after merge.
-    const basePushSteps = r.steps.filter(
-      (s) => s.args.join(' ') === 'git push origin main',
-    );
+    const basePushSteps = r.steps.filter((s) => s.args.join(' ') === 'git push origin main');
     expect(basePushSteps.length).toBeGreaterThanOrEqual(1);
     // The _bmad-output-only checkout is skipped (full merge brings it).
     expect(
@@ -311,9 +296,7 @@ describe('plan: commit_and_push_story — user-config knobs', () => {
       true,
     );
     // Squash creates an extra commit step on base.
-    const commitOnBase = r.steps.filter(
-      (s) => s.args[0] === 'git' && s.args[1] === 'commit',
-    );
+    const commitOnBase = r.steps.filter((s) => s.args[0] === 'git' && s.args[1] === 'commit');
     expect(commitOnBase.length).toBeGreaterThanOrEqual(2); // one on branch, one on base
   });
 
@@ -335,8 +318,7 @@ describe('branchName — max_branch_length truncation', () => {
   });
 
   it('truncates and appends an 8-char hash when over the limit', () => {
-    const longKey =
-      '1-12-add-a-really-really-extremely-long-feature-name-with-many-tokens';
+    const longKey = '1-12-add-a-really-really-extremely-long-feature-name-with-many-tokens';
     const p = flatToProfile({}, 'medium'); // max_branch_length defaults to 60
     const name = branchName(p, longKey, 'E1');
     expect(name.length).toBeLessThanOrEqual(60);
@@ -434,9 +416,11 @@ describe('plan: merge_epic', () => {
     const p = { ...flatToProfile({}, 'medium'), worktree_cleanup_on_merge: false };
     const r = plan(story(), p, { type: 'git_op', op: 'merge_epic' });
     expect(r.steps).toHaveLength(3);
-    expect(r.steps.find((s: { args: string[] }) =>
-      s.args.some((a) => typeof a === 'string' && a.endsWith('cleanup-worktrees.js')),
-    )).toBeUndefined();
+    expect(
+      r.steps.find((s: { args: string[] }) =>
+        s.args.some((a) => typeof a === 'string' && a.endsWith('cleanup-worktrees.js')),
+      ),
+    ).toBeUndefined();
   });
 
   it('default + squash_on_merge=true → gh pr merge --squash', () => {
@@ -493,7 +477,10 @@ describe('plan: merge_epic', () => {
   });
 
   it('push_create_pr=false + squash_on_merge=true → local merge --squash + commit', () => {
-    const p = { ...flatToProfile({ git: { squash_on_merge: true } }, 'nano'), push_create_pr: false };
+    const p = {
+      ...flatToProfile({ git: { squash_on_merge: true } }, 'nano'),
+      push_create_pr: false,
+    };
     const r = plan(story(), p, { type: 'git_op', op: 'merge_epic' });
     expect(r.steps.some((s) => s.args.includes('--squash'))).toBe(true);
     expect(

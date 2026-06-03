@@ -131,7 +131,14 @@ async function main() {
       process.exit(1);
     }
     const resolved = platform === 'auto' ? await resolveAutoPlatform() : platform;
-    await runChecksMode({ platform: resolved, branch, baseBranch, waitMinutes, requireApprovedReview, baseUrl });
+    await runChecksMode({
+      platform: resolved,
+      branch,
+      baseBranch,
+      waitMinutes,
+      requireApprovedReview,
+      baseUrl,
+    });
     return;
   }
 
@@ -395,7 +402,14 @@ async function main() {
 // On non-github platforms (or when CLI is missing), exits 2 (SKIPPED) so
 // land.js can surface a user_prompt rather than blocking on a feature
 // we can't deliver.
-async function runChecksMode({ platform, branch, baseBranch, waitMinutes, requireApprovedReview, baseUrl }) {
+async function runChecksMode({
+  platform,
+  branch,
+  baseBranch,
+  waitMinutes,
+  requireApprovedReview,
+  baseUrl,
+}) {
   // `platform` has already been resolved (auto → concrete) in main(),
   // so we only branch on concrete provider strings here.
   if (platform === 'github') {
@@ -438,7 +452,12 @@ async function runChecksMode({ platform, branch, baseBranch, waitMinutes, requir
     process.exit(1);
   }
 
-  if (platform === 'gitlab' || platform === 'bitbucket' || platform === 'gitea' || platform === 'git_only') {
+  if (
+    platform === 'gitlab' ||
+    platform === 'bitbucket' ||
+    platform === 'gitea' ||
+    platform === 'git_only'
+  ) {
     // Polling is not yet implemented for these providers. Surface a
     // SKIPPED exit so land.js can prompt the user.
     log.err(`INFO: --mode checks polling not yet implemented for ${platform}. Verify manually.`);

@@ -1,14 +1,8 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import {
-  cpSync,
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  rmSync,
-} from 'node:fs';
 import { execFileSync } from 'node:child_process';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 // @ts-expect-error — CommonJS module
 import autopilot from '../../../_Sprintpilot/bin/autopilot.js';
@@ -43,10 +37,7 @@ function setupProject(): string {
   mkdirSync(join(root, '_Sprintpilot', 'scripts'), { recursive: true });
   mkdirSync(join(root, '_Sprintpilot', 'lib', 'runtime'), { recursive: true });
   for (const f of ['health-check.js']) {
-    cpSync(
-      join(REPO_ROOT, '_Sprintpilot', 'scripts', f),
-      join(root, '_Sprintpilot', 'scripts', f),
-    );
+    cpSync(join(REPO_ROOT, '_Sprintpilot', 'scripts', f), join(root, '_Sprintpilot', 'scripts', f));
   }
   for (const f of ['args.js', 'log.js', 'git.js', 'yaml-lite.js', 'spawn.js']) {
     cpSync(

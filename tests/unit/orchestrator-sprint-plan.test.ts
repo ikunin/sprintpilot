@@ -9,11 +9,10 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-
-// @ts-expect-error — CommonJS module
-import sprintPlanMod from '../../_Sprintpilot/scripts/sprint-plan.js';
 // @ts-expect-error — CommonJS module
 import orchMod from '../../_Sprintpilot/lib/orchestrator/sprint-plan.js';
+// @ts-expect-error — CommonJS module
+import sprintPlanMod from '../../_Sprintpilot/scripts/sprint-plan.js';
 
 type Plan = {
   schema_version: number;
@@ -24,7 +23,11 @@ type Plan = {
   issue_tracker: unknown;
   epics: Array<Record<string, unknown>>;
   stories: Array<Record<string, unknown>>;
-  dependencies: { version: number; auto_inferred_at: string | null; stories: Record<string, unknown> };
+  dependencies: {
+    version: number;
+    auto_inferred_at: string | null;
+    stories: Record<string, unknown>;
+  };
   cross_epic_deps: unknown[];
   overrides: unknown[];
   notes: string;
@@ -87,7 +90,13 @@ const {
     projectRoot: string;
     profile: Record<string, unknown>;
     opts?: Record<string, unknown>;
-  }) => { auto_derive: boolean; reason: string; missing_keys?: string[]; error?: string; message?: string };
+  }) => {
+    auto_derive: boolean;
+    reason: string;
+    missing_keys?: string[];
+    error?: string;
+    message?: string;
+  };
   planCorruptHaltDescriptor: (opts: { projectRoot: string }) => {
     reason: string;
     error: string;
@@ -101,10 +110,7 @@ const {
     total?: number;
     terminal_counts?: { done: number; skipped: number; excluded: number };
   };
-  planRejectionReason: (
-    story_key: string,
-    opts: { projectRoot: string },
-  ) => string | null;
+  planRejectionReason: (story_key: string, opts: { projectRoot: string }) => string | null;
   collectUpstreams: (story_key: string, plan: Record<string, unknown>) => Set<string>;
   isPlanTerminal: (story_key: string, plan: Record<string, unknown>) => boolean;
   isTerminalInSprintStatus: (story_key: string, projectRoot: string) => boolean;
@@ -275,7 +281,7 @@ describe('planCorruptHaltDescriptor', () => {
       '  stories:',
       '    a:',
       '      depends_on: []',
-      '  - key: rogue',  // rogue at wrong indent
+      '  - key: rogue', // rogue at wrong indent
       'cross_epic_deps: []',
       'overrides: []',
       '',
@@ -621,7 +627,9 @@ describe('planRejectionReason', () => {
     const plan = emptyPlan({ source: 'auto' });
     plan.stories = [{ key: '1-1-a', plan_status: 'excluded' }];
     write(plan, { projectRoot: tmpRoot });
-    expect(planRejectionReason('1-1-a', { projectRoot: tmpRoot })).toMatch(/plan_status='excluded'/);
+    expect(planRejectionReason('1-1-a', { projectRoot: tmpRoot })).toMatch(
+      /plan_status='excluded'/,
+    );
   });
 
   it("returns null when the plan is corrupt (defensive — doesn't reject on read failure)", () => {
@@ -636,7 +644,10 @@ describe('planRejectionReason', () => {
 // ──────────────────────────────────────────────────────────────────
 
 describe('collectUpstreams', () => {
-  function buildPlan(deps: Record<string, string[]>, cross: Array<{ from: string; to: string }> = []) {
+  function buildPlan(
+    deps: Record<string, string[]>,
+    cross: Array<{ from: string; to: string }> = [],
+  ) {
     const plan = emptyPlan({ source: 'auto' });
     plan.dependencies.stories = Object.fromEntries(
       Object.entries(deps).map(([k, depsList]) => [k, { depends_on: depsList, rationale: 'r' }]),
@@ -682,7 +693,7 @@ describe('collectUpstreams', () => {
 // ──────────────────────────────────────────────────────────────────
 
 describe('isPlanTerminal', () => {
-  it("returns true for plan_status in {done, skipped, excluded}", () => {
+  it('returns true for plan_status in {done, skipped, excluded}', () => {
     const plan = emptyPlan({ source: 'auto' });
     plan.stories = [
       { key: 'a', plan_status: 'done' },
@@ -707,7 +718,15 @@ describe('isPlanTerminal', () => {
 
 describe('isTerminalInSprintStatus', () => {
   it('returns true for done/skipped/wont_do/cancelled/abandoned/etc', () => {
-    for (const status of ['done', 'skipped', 'wont_do', 'cancelled', 'canceled', 'deferred', 'abandoned']) {
+    for (const status of [
+      'done',
+      'skipped',
+      'wont_do',
+      'cancelled',
+      'canceled',
+      'deferred',
+      'abandoned',
+    ]) {
       seedSprintStatus(`development_status:\n  s-1: ${status}\n`);
       expect(isTerminalInSprintStatus('s-1', tmpRoot)).toBe(true);
     }

@@ -1,7 +1,7 @@
-import { describe, expect, it } from 'vitest';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { describe, expect, it } from 'vitest';
 
 // @ts-expect-error — CommonJS module
 import autopilot from '../../../_Sprintpilot/bin/autopilot.js';
@@ -221,12 +221,7 @@ describe('composeRuntimeState — migration of legacy current_bmad_step', () => 
     // matched, so its first emission fired a spurious phase_timeout_exceeded.
     const { projectRoot, cleanup } = makeProjectWithSprintStatus(
       null,
-      [
-        'development_status:',
-        '  15-9b-old: done',
-        '  6-4-next: ready-for-dev',
-        '',
-      ].join('\n'),
+      ['development_status:', '  15-9b-old: done', '  6-4-next: ready-for-dev', ''].join('\n'),
     );
     try {
       const stale = '2020-01-01T00:00:00.000Z';
@@ -299,12 +294,7 @@ describe('composeRuntimeState — migration of legacy current_bmad_step', () => 
   it('falls back to flowStart when only epic headers and retrospectives are pending (no real stories)', () => {
     const { projectRoot, cleanup } = makeProjectWithSprintStatus(
       null,
-      [
-        'development_status:',
-        '  epic-4: in-progress',
-        '  4-retrospective: pending',
-        '',
-      ].join('\n'),
+      ['development_status:', '  epic-4: in-progress', '  4-retrospective: pending', ''].join('\n'),
     );
     try {
       const r = composeRuntimeState(
@@ -427,10 +417,7 @@ describe('composeRuntimeState — migration of legacy current_bmad_step', () => 
     // applies to fresh-story-start. Past create_story, with story_key
     // set, the phase is preserved — we're mid-cycle on a specific story.
     for (const phase of ['check_readiness', 'dev_red', 'dev_green', 'code_review']) {
-      const r = composeRuntimeState(
-        { current_bmad_step: phase, current_story: 'S1.2' },
-        medium(),
-      );
+      const r = composeRuntimeState({ current_bmad_step: phase, current_story: 'S1.2' }, medium());
       expect(r.phase).toBe(phase);
     }
   });
@@ -471,11 +458,11 @@ describe('composeRuntimeState — bug #1: remaining_stories_in_epic populated fr
       [
         'development_status:',
         '  epic-4: in-progress',
-        '  4-1-foo: done',          // excluded: done
+        '  4-1-foo: done', // excluded: done
         '  4-2-bar: ready-for-dev', // counted
-        '  4-3-baz: backlog',       // counted
+        '  4-3-baz: backlog', // counted
         '  4-retrospective: pending', // excluded: retro entry
-        '  5-1-other: backlog',     // excluded: different epic
+        '  5-1-other: backlog', // excluded: different epic
         '',
       ].join('\n'),
     );
@@ -496,12 +483,7 @@ describe('composeRuntimeState — bug #1: remaining_stories_in_epic populated fr
   it('returns 0 when all epic stories are done (end-of-epic signal for state machine)', () => {
     const { projectRoot, cleanup } = makeProjectWithSprintStatus(
       null,
-      [
-        'development_status:',
-        '  4-1-foo: done',
-        '  4-2-bar: done',
-        '',
-      ].join('\n'),
+      ['development_status:', '  4-1-foo: done', '  4-2-bar: done', ''].join('\n'),
     );
     try {
       const r = composeRuntimeState(
@@ -534,16 +516,15 @@ describe('composeRuntimeState — persisted current_story validation (poisoned s
     // `branch: story/epic-4` on every emission. v2.2.4: validate and drop.
     const { projectRoot, cleanup } = makeProjectWithSprintStatus(
       null,
-      [
-        'development_status:',
-        '  epic-4: in-progress',
-        '  4-8-realm: ready-for-dev',
-        '',
-      ].join('\n'),
+      ['development_status:', '  epic-4: in-progress', '  4-8-realm: ready-for-dev', ''].join('\n'),
     );
     try {
       const r = composeRuntimeState(
-        { current_bmad_step: 'prepare_story_branch', current_story: 'epic-4', current_epic: 'epic' },
+        {
+          current_bmad_step: 'prepare_story_branch',
+          current_story: 'epic-4',
+          current_epic: 'epic',
+        },
         medium(),
         projectRoot,
       );
@@ -559,12 +540,9 @@ describe('composeRuntimeState — persisted current_story validation (poisoned s
   it('nullifies persisted current_story when it matches retrospective shape', () => {
     const { projectRoot, cleanup } = makeProjectWithSprintStatus(
       null,
-      [
-        'development_status:',
-        '  4-retrospective: pending',
-        '  4-8-realm: ready-for-dev',
-        '',
-      ].join('\n'),
+      ['development_status:', '  4-retrospective: pending', '  4-8-realm: ready-for-dev', ''].join(
+        '\n',
+      ),
     );
     try {
       const r = composeRuntimeState(
@@ -581,11 +559,7 @@ describe('composeRuntimeState — persisted current_story validation (poisoned s
   it('nullifies persisted current_story when it is not in sprint-status.yaml', () => {
     const { projectRoot, cleanup } = makeProjectWithSprintStatus(
       null,
-      [
-        'development_status:',
-        '  4-8-realm: ready-for-dev',
-        '',
-      ].join('\n'),
+      ['development_status:', '  4-8-realm: ready-for-dev', ''].join('\n'),
     );
     try {
       const r = composeRuntimeState(
@@ -606,11 +580,7 @@ describe('composeRuntimeState — persisted current_story validation (poisoned s
     // mid-record produced branch "story/unknown" on commit_and_push_story.
     const { projectRoot, cleanup } = makeProjectWithSprintStatus(
       null,
-      [
-        'development_status:',
-        '  4-9-foo: done  # PR #99 merged',
-        '',
-      ].join('\n'),
+      ['development_status:', '  4-9-foo: done  # PR #99 merged', ''].join('\n'),
     );
     try {
       const r = composeRuntimeState(
@@ -632,12 +602,7 @@ describe('composeRuntimeState — persisted current_story validation (poisoned s
     // but state wasn't reset.
     const { projectRoot, cleanup } = makeProjectWithSprintStatus(
       null,
-      [
-        'development_status:',
-        '  4-8-old: done',
-        '  4-9-next: ready-for-dev',
-        '',
-      ].join('\n'),
+      ['development_status:', '  4-8-old: done', '  4-9-next: ready-for-dev', ''].join('\n'),
     );
     try {
       const r = composeRuntimeState(
@@ -658,12 +623,7 @@ describe('composeRuntimeState — persisted current_story validation (poisoned s
     // flowStart so the next emission re-enters story-start cleanly.
     const { projectRoot, cleanup } = makeProjectWithSprintStatus(
       null,
-      [
-        'development_status:',
-        '  epic-4: in-progress',
-        '  4-9-real: ready-for-dev',
-        '',
-      ].join('\n'),
+      ['development_status:', '  epic-4: in-progress', '  4-9-real: ready-for-dev', ''].join('\n'),
     );
     try {
       const r = composeRuntimeState(
@@ -707,11 +667,7 @@ describe('composeRuntimeState — persisted current_story validation (poisoned s
   it('preserves valid persisted current_story', () => {
     const { projectRoot, cleanup } = makeProjectWithSprintStatus(
       null,
-      [
-        'development_status:',
-        '  4-8-realm: ready-for-dev',
-        '',
-      ].join('\n'),
+      ['development_status:', '  4-8-realm: ready-for-dev', ''].join('\n'),
     );
     try {
       const r = composeRuntimeState(
@@ -740,11 +696,7 @@ describe('composeRuntimeState — persisted current_story validation (poisoned s
   it('preserves short test-style keys like S1 / S1.2 (narrow filter, not the strict looksLikeStoryKey)', () => {
     const { projectRoot, cleanup } = makeProjectWithSprintStatus(
       null,
-      [
-        'development_status:',
-        '  S1: ready-for-dev',
-        '',
-      ].join('\n'),
+      ['development_status:', '  S1: ready-for-dev', ''].join('\n'),
     );
     try {
       const r = composeRuntimeState(
@@ -768,12 +720,9 @@ describe('composeRuntimeState — story_queue validation (poisoned entries dropp
   it('filters out epic-header entries from persisted story_queue', () => {
     const { projectRoot, cleanup } = makeProjectWithSprintStatus(
       null,
-      [
-        'development_status:',
-        '  4-8-realm: ready-for-dev',
-        '  4-9-next: ready-for-dev',
-        '',
-      ].join('\n'),
+      ['development_status:', '  4-8-realm: ready-for-dev', '  4-9-next: ready-for-dev', ''].join(
+        '\n',
+      ),
     );
     try {
       const r = composeRuntimeState(
@@ -793,11 +742,7 @@ describe('composeRuntimeState — story_queue validation (poisoned entries dropp
   it('filters out retrospective entries from persisted story_queue', () => {
     const { projectRoot, cleanup } = makeProjectWithSprintStatus(
       null,
-      [
-        'development_status:',
-        '  4-8-realm: ready-for-dev',
-        '',
-      ].join('\n'),
+      ['development_status:', '  4-8-realm: ready-for-dev', ''].join('\n'),
     );
     try {
       const r = composeRuntimeState(
@@ -842,11 +787,7 @@ describe('composeRuntimeState — story_queue validation (poisoned entries dropp
   it('filters out entries not present in sprint-status', () => {
     const { projectRoot, cleanup } = makeProjectWithSprintStatus(
       null,
-      [
-        'development_status:',
-        '  4-8-realm: ready-for-dev',
-        '',
-      ].join('\n'),
+      ['development_status:', '  4-8-realm: ready-for-dev', ''].join('\n'),
     );
     try {
       const r = composeRuntimeState(
@@ -892,11 +833,7 @@ describe('composeRuntimeState — story_queue validation (poisoned entries dropp
   it('all-invalid queue empties safely (orchestrator falls through to resolveNextStoryKey)', () => {
     const { projectRoot, cleanup } = makeProjectWithSprintStatus(
       null,
-      [
-        'development_status:',
-        '  4-8-realm: ready-for-dev',
-        '',
-      ].join('\n'),
+      ['development_status:', '  4-8-realm: ready-for-dev', ''].join('\n'),
     );
     try {
       const r = composeRuntimeState(
@@ -967,11 +904,7 @@ describe('composeRuntimeState — bug #3: queue consumption gated to story-start
   it('DOES consume queue at CREATE_STORY (story-start phase)', () => {
     const { projectRoot, cleanup } = makeProjectWithSprintStatus(
       null,
-      [
-        'development_status:',
-        '  5-1-next: ready-for-dev',
-        '',
-      ].join('\n'),
+      ['development_status:', '  5-1-next: ready-for-dev', ''].join('\n'),
     );
     try {
       const r = composeRuntimeState(
@@ -995,11 +928,7 @@ describe('composeRuntimeState — bug #3: queue consumption gated to story-start
   it('cross-epic queue at PREPARE_STORY_BRANCH re-derives current_epic from new story_key', () => {
     const { projectRoot, cleanup } = makeProjectWithSprintStatus(
       null,
-      [
-        'development_status:',
-        '  5-1-next: ready-for-dev',
-        '',
-      ].join('\n'),
+      ['development_status:', '  5-1-next: ready-for-dev', ''].join('\n'),
     );
     try {
       const r = composeRuntimeState(

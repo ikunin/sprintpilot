@@ -97,9 +97,7 @@ describe('deriveTasksForStory', () => {
   });
 
   it('flips current task to failed when halt is active and last signal was non-success', () => {
-    const ledgerTail = [
-      { kind: 'signal_recorded', phase: 'dev_red', status: 'blocked' },
-    ];
+    const ledgerTail = [{ kind: 'signal_recorded', phase: 'dev_red', status: 'blocked' }];
     const tasks = deriveTasksForStory('dev_red', ledgerTail, { haltActive: true });
     const devRed = tasks.find((t) => t.id === 'dev_red')!;
     expect(devRed.status).toBe('failed');
@@ -140,9 +138,11 @@ describe('tasksToMarkdown', () => {
   });
 
   it('shows the failed glyph when a task is failed', () => {
-    const tasks = deriveTasksForStory('dev_red', [
-      { kind: 'signal_recorded', phase: 'dev_red', status: 'blocked' },
-    ], { haltActive: true });
+    const tasks = deriveTasksForStory(
+      'dev_red',
+      [{ kind: 'signal_recorded', phase: 'dev_red', status: 'blocked' }],
+      { haltActive: true },
+    );
     const md = tasksToMarkdown('t-22a-test', tasks);
     expect(md).toContain('⚠ failed');
   });
@@ -207,7 +207,9 @@ describe('tasksToMarkdown', () => {
       remainingInQueue: 6,
       storyTitle: 'Story 2.3: Sample Story Title',
     });
-    expect(md).toContain('**Story:** Story 2.3: Sample Story Title (queued; spec not yet authored) (queue: 6 stories)');
+    expect(md).toContain(
+      '**Story:** Story 2.3: Sample Story Title (queued; spec not yet authored) (queue: 6 stories)',
+    );
     expect(md).not.toContain('`2-3-sample-story`');
   });
 });

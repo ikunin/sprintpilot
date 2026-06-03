@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 // @ts-expect-error — CommonJS
-import { pickAdapter, adapters } from '../../../_Sprintpilot/lib/orchestrator/testing/index.js';
+import { adapters, pickAdapter } from '../../../_Sprintpilot/lib/orchestrator/testing/index.js';
 
 type Adapter = {
   NAME: string;
@@ -13,7 +13,10 @@ type Adapter = {
 };
 
 const { vitest, jest, pytest, generic } = adapters as {
-  vitest: Adapter; jest: Adapter; pytest: Adapter; generic: Adapter;
+  vitest: Adapter;
+  jest: Adapter;
+  pytest: Adapter;
+  generic: Adapter;
 };
 
 let projectRoot: string;
@@ -65,9 +68,7 @@ describe('vitest adapter', () => {
   });
 
   it('falls back to bare vitest run for full scope', () => {
-    expect(
-      vitest.buildCmd({ scope: 'full', profile: {} }),
-    ).toBe('npx vitest run');
+    expect(vitest.buildCmd({ scope: 'full', profile: {} })).toBe('npx vitest run');
   });
 
   it('user override wins over adapter-built command', () => {
@@ -247,10 +248,7 @@ describe('adapter.buildExcludeFlags — v2.4.0 quarantine', () => {
       expect(jestAdapter.buildExcludeFlags([])).toBe('');
     });
     it('OR-joins path IDs into a single --testPathIgnorePatterns', () => {
-      const r = jestAdapter.buildExcludeFlags([
-        'tests/flaky.test.ts',
-        'tests/other.test.ts',
-      ]);
+      const r = jestAdapter.buildExcludeFlags(['tests/flaky.test.ts', 'tests/other.test.ts']);
       expect(r.startsWith('--testPathIgnorePatterns ')).toBe(true);
       // Both paths appear in the OR-joined regex (escaped dots).
       expect(r).toContain('tests/flaky\\.test\\.ts');
@@ -261,10 +259,7 @@ describe('adapter.buildExcludeFlags — v2.4.0 quarantine', () => {
 
   describe('pytest', () => {
     it('uses --deselect for node IDs and --ignore= for plain paths', () => {
-      const r = pytestAdapter.buildExcludeFlags([
-        'tests/flaky.py::test_x',
-        'tests/legacy.py',
-      ]);
+      const r = pytestAdapter.buildExcludeFlags(['tests/flaky.py::test_x', 'tests/legacy.py']);
       expect(r).toContain('--deselect tests/flaky.py::test_x');
       expect(r).toContain('--ignore=tests/legacy.py');
     });

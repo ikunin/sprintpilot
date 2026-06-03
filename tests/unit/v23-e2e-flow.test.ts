@@ -15,9 +15,8 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-
 import yaml from 'js-yaml';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 const REPO_ROOT = join(__dirname, '..', '..');
 const SP = join(REPO_ROOT, '_Sprintpilot', 'scripts', 'sprint-plan.js');
@@ -100,9 +99,7 @@ describe('greenfield: no plan, sprint-status fallback', () => {
 
 describe('plan-aware lifecycle', () => {
   it('plan → progress shows pending head → markDone advances → exhaustion archives', () => {
-    seedSprintStatus(
-      'development_status:\n  1-1-a: backlog\n  1-2-b: backlog\n  1-3-c: backlog\n',
-    );
+    seedSprintStatus('development_status:\n  1-1-a: backlog\n  1-2-b: backlog\n  1-3-c: backlog\n');
     // 1. Build a plan with 3 stories + issue_tracker.
     const plan = buildEmptyPlan();
     plan.issue_tracker = {
@@ -170,9 +167,13 @@ describe('plan-aware lifecycle', () => {
     // 6. Archive the plan (simulating what cmdStart does on
     // plan_exhausted). After archive, live plan is gone but the
     // archive file is present.
-    spawnSync('node', ['-e', `require('${sx(SP)}').archive('${planId}', { projectRoot: '${sx(tmpRoot)}' })`], {
-      encoding: 'utf8',
-    });
+    spawnSync(
+      'node',
+      ['-e', `require('${sx(SP)}').archive('${planId}', { projectRoot: '${sx(tmpRoot)}' })`],
+      {
+        encoding: 'utf8',
+      },
+    );
     expect(
       existsSync(join(tmpRoot, '_bmad-output', 'implementation-artifacts', 'sprint-plan.yaml')),
     ).toBe(false);
@@ -186,7 +187,9 @@ describe('plan-aware lifecycle', () => {
 
 describe('mid-flight mutations via script CLI', () => {
   it('reorder + addStories + removeStories all persist correctly', () => {
-    seedSprintStatus('development_status:\n  a: backlog\n  b: backlog\n  c: backlog\n  d: backlog\n');
+    seedSprintStatus(
+      'development_status:\n  a: backlog\n  b: backlog\n  c: backlog\n  d: backlog\n',
+    );
     const plan = buildEmptyPlan();
     plan.stories = [
       { key: 'a', plan_status: 'pending', priority: 1 },
@@ -202,7 +205,11 @@ describe('mid-flight mutations via script CLI', () => {
       { encoding: 'utf8' },
     );
     let p = readPlanFromDisk();
-    expect((p.stories as Array<Record<string, unknown>>).map((s) => s.key)).toEqual(['c', 'a', 'b']);
+    expect((p.stories as Array<Record<string, unknown>>).map((s) => s.key)).toEqual([
+      'c',
+      'a',
+      'b',
+    ]);
 
     // addStories
     spawnSync(
@@ -214,7 +221,12 @@ describe('mid-flight mutations via script CLI', () => {
       { encoding: 'utf8' },
     );
     p = readPlanFromDisk();
-    expect((p.stories as Array<Record<string, unknown>>).map((s) => s.key)).toEqual(['c', 'a', 'b', 'd']);
+    expect((p.stories as Array<Record<string, unknown>>).map((s) => s.key)).toEqual([
+      'c',
+      'a',
+      'b',
+      'd',
+    ]);
 
     // removeStories
     spawnSync(
@@ -276,11 +288,9 @@ describe('dependency graph render', () => {
     ];
     writePlanFromObject(plan);
 
-    const r = spawnSync(
-      'node',
-      [DAG, 'render', '--format', 'mermaid', '--project-root', tmpRoot],
-      { encoding: 'utf8' },
-    );
+    const r = spawnSync('node', [DAG, 'render', '--format', 'mermaid', '--project-root', tmpRoot], {
+      encoding: 'utf8',
+    });
     expect(r.status).toBe(0);
     const parsed = JSON.parse(r.stdout);
     expect(parsed.wrote).toBe(true);
@@ -324,9 +334,7 @@ describe('dependency graph render', () => {
 
 describe('legacy dependencies.yaml migration', () => {
   it('migrate imports + archives + renders correctly afterward', () => {
-    seedSprintStatus(
-      'development_status:\n  1-1-bootstrap: done\n  1-3-add-auth: backlog\n',
-    );
+    seedSprintStatus('development_status:\n  1-1-bootstrap: done\n  1-3-add-auth: backlog\n');
     const legacyDir = join(tmpRoot, '_Sprintpilot', 'sprints');
     mkdirSync(legacyDir, { recursive: true });
     writeFileSync(
@@ -388,7 +396,11 @@ describe('legacy dependencies.yaml migration', () => {
 
 describe('v2.3.0 skill files present', () => {
   it('all three new skills have SKILL.md + workflow.md', () => {
-    const skills = ['sprintpilot-plan-sprint', 'sprintpilot-sprint-progress', 'sprintpilot-dependency-graph'];
+    const skills = [
+      'sprintpilot-plan-sprint',
+      'sprintpilot-sprint-progress',
+      'sprintpilot-dependency-graph',
+    ];
     for (const s of skills) {
       const skillMd = join(REPO_ROOT, '_Sprintpilot', 'skills', s, 'SKILL.md');
       const workflowMd = join(REPO_ROOT, '_Sprintpilot', 'skills', s, 'workflow.md');
@@ -416,7 +428,11 @@ describe('cmdStart plan-aware flows (Round 4 coverage)', () => {
   // Helper: run cmdStart and capture the JSON action it emits. Returns
   // the parsed JSON or null if the output couldn't be parsed (which
   // would itself be a bug worth catching).
-  function runAutopilotStart(): { stdout: string; stderr: string; action: Record<string, unknown> | null } {
+  function runAutopilotStart(): {
+    stdout: string;
+    stderr: string;
+    action: Record<string, unknown> | null;
+  } {
     const r = spawnSync('node', [AUTOPILOT, 'start', '--project-root', tmpRoot, '--no-auto-plan'], {
       encoding: 'utf8',
     });
@@ -572,4 +588,3 @@ describe('cmdStart plan-aware flows (Round 4 coverage)', () => {
     expect(secondResult.reason).toBe('no_legacy_file');
   });
 });
-

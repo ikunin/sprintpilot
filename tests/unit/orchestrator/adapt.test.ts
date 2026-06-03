@@ -1108,11 +1108,7 @@ describe('record_flaky_tests side effect (v2.4.0)', () => {
   });
 
   it('does not emit when flaky_tests is empty / missing', () => {
-    const r = interpretSignal(
-      st(STATES.DEV_GREEN),
-      { status: 'success', output: {} },
-      medium(),
-    );
+    const r = interpretSignal(st(STATES.DEV_GREEN), { status: 'success', output: {} }, medium());
     expect(r.sideEffects.find((e) => e.kind === 'record_flaky_tests')).toBeUndefined();
   });
 
@@ -1180,11 +1176,7 @@ describe('advanceState — phase_started_at stamping (v2.4.0)', () => {
   });
 
   it('uses signal._now for deterministic stamping in tests', () => {
-    const r = interpretSignal(
-      st(STATES.CREATE_STORY),
-      { status: 'success', _now: T },
-      medium(),
-    );
+    const r = interpretSignal(st(STATES.CREATE_STORY), { status: 'success', _now: T }, medium());
     expect(r.newState.phase_started_at).toBe(T);
   });
 });

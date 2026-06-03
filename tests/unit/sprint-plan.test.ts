@@ -55,7 +55,9 @@ const {
   planPath: (root: string) => string;
   lockPath: (root: string) => string;
   emptyPlan: (opts?: { source?: string }) => ValidPlan;
-  validatePlan: (plan: unknown) => null | { code: string; message: string; missing_keys?: string[] };
+  validatePlan: (
+    plan: unknown,
+  ) => null | { code: string; message: string; missing_keys?: string[] };
   read: (opts: { projectRoot: string }) => ValidPlan | PlanError | null;
   write: (plan: ValidPlan, opts: { projectRoot: string }) => string;
 };
@@ -194,7 +196,14 @@ describe('validatePlan', () => {
     const err = validatePlan({ schema_version: 1 });
     expect(err?.code).toBe('incomplete_schema');
     expect(err?.missing_keys).toEqual(
-      expect.arrayContaining(['status', 'epics', 'stories', 'dependencies', 'cross_epic_deps', 'overrides']),
+      expect.arrayContaining([
+        'status',
+        'epics',
+        'stories',
+        'dependencies',
+        'cross_epic_deps',
+        'overrides',
+      ]),
     );
   });
 
@@ -295,7 +304,14 @@ describe('read', () => {
     const result = read({ projectRoot: tmpRoot }) as PlanError;
     expect(result.error).toBe('incomplete_schema');
     expect(result.missing_keys).toEqual(
-      expect.arrayContaining(['status', 'epics', 'stories', 'dependencies', 'cross_epic_deps', 'overrides']),
+      expect.arrayContaining([
+        'status',
+        'epics',
+        'stories',
+        'dependencies',
+        'cross_epic_deps',
+        'overrides',
+      ]),
     );
   });
 });
@@ -347,7 +363,9 @@ describe('CLI', () => {
   });
 
   it('read subcommand returns exists:false for missing plan', () => {
-    const out = execFileSync('node', [SCRIPT, 'read', '--project-root', tmpRoot], { encoding: 'utf8' });
+    const out = execFileSync('node', [SCRIPT, 'read', '--project-root', tmpRoot], {
+      encoding: 'utf8',
+    });
     const parsed = JSON.parse(out);
     expect(parsed.exists).toBe(false);
     expect(parsed.plan).toBeNull();
@@ -381,7 +399,9 @@ describe('CLI', () => {
     let stdout = '';
     let exitCode = 0;
     try {
-      stdout = execFileSync('node', [SCRIPT, 'read', '--project-root', tmpRoot], { encoding: 'utf8' });
+      stdout = execFileSync('node', [SCRIPT, 'read', '--project-root', tmpRoot], {
+        encoding: 'utf8',
+      });
     } catch (e) {
       const err = e as { stdout?: Buffer; status?: number };
       stdout = err.stdout ? err.stdout.toString('utf8') : '';
@@ -409,7 +429,12 @@ describe('round-trip a populated plan', () => {
       },
     };
     plan.cross_epic_deps = [
-      { from_story: '4-3-foo', to_story: '3-1-bar', rationale: 'schema dep', inferred_at: '2026-05-19T00:00:00Z' },
+      {
+        from_story: '4-3-foo',
+        to_story: '3-1-bar',
+        rationale: 'schema dep',
+        inferred_at: '2026-05-19T00:00:00Z',
+      },
     ];
     plan.overrides = [{ epic: '2', force_independent: ['2-1'], force_sequential: ['2-3', '2-4'] }];
     plan.issue_tracker = {

@@ -30,11 +30,7 @@ const log = require('../lib/runtime/log');
 const LOCK_SCRIPT_PATH = path.join(__dirname, 'lock.js');
 
 const SCHEMA_VERSION = 1;
-const PLAN_FILE_REL = path.join(
-  '_bmad-output',
-  'implementation-artifacts',
-  'sprint-plan.yaml',
-);
+const PLAN_FILE_REL = path.join('_bmad-output', 'implementation-artifacts', 'sprint-plan.yaml');
 const LOCK_FILE_REL = path.join('.sprintpilot', 'plan.lock');
 const LOCK_STALE_MINUTES = 5;
 
@@ -53,7 +49,9 @@ function lockPath(projectRoot) {
 // bootstrap flows. status.last_run_outcome reflects the bootstrap intent.
 function emptyPlan({ source = 'skill' } = {}) {
   if (!VALID_SOURCES.includes(source)) {
-    throw new Error(`invalid source ${JSON.stringify(source)}; expected one of ${VALID_SOURCES.join(', ')}`);
+    throw new Error(
+      `invalid source ${JSON.stringify(source)}; expected one of ${VALID_SOURCES.join(', ')}`,
+    );
   }
   const now = new Date().toISOString();
   return {
@@ -96,14 +94,7 @@ function validatePlan(plan) {
       message: `expected schema_version=${SCHEMA_VERSION}, got ${JSON.stringify(plan.schema_version)} — upgrade Sprintpilot`,
     };
   }
-  const required = [
-    'status',
-    'epics',
-    'stories',
-    'dependencies',
-    'cross_epic_deps',
-    'overrides',
-  ];
+  const required = ['status', 'epics', 'stories', 'dependencies', 'cross_epic_deps', 'overrides'];
   const missing = required.filter((k) => !(k in plan));
   if (missing.length > 0) {
     return {
@@ -121,10 +112,18 @@ function validatePlan(plan) {
   if (!Array.isArray(plan.stories)) {
     return { code: 'invalid_stories', message: 'stories must be a list' };
   }
-  if (!plan.dependencies || typeof plan.dependencies !== 'object' || Array.isArray(plan.dependencies)) {
+  if (
+    !plan.dependencies ||
+    typeof plan.dependencies !== 'object' ||
+    Array.isArray(plan.dependencies)
+  ) {
     return { code: 'invalid_dependencies', message: 'dependencies must be a mapping' };
   }
-  if (!plan.dependencies.stories || typeof plan.dependencies.stories !== 'object' || Array.isArray(plan.dependencies.stories)) {
+  if (
+    !plan.dependencies.stories ||
+    typeof plan.dependencies.stories !== 'object' ||
+    Array.isArray(plan.dependencies.stories)
+  ) {
     return {
       code: 'invalid_dependencies_stories',
       message: 'dependencies.stories must be a mapping',
@@ -284,7 +283,14 @@ function acquirePlanLock(projectRoot, timeoutSec = 30) {
   while (Date.now() < deadline) {
     const res = spawnSync(
       process.execPath,
-      [LOCK_SCRIPT_PATH, 'acquire', '--file', lockFile, '--stale-minutes', String(LOCK_STALE_MINUTES)],
+      [
+        LOCK_SCRIPT_PATH,
+        'acquire',
+        '--file',
+        lockFile,
+        '--stale-minutes',
+        String(LOCK_STALE_MINUTES),
+      ],
       { encoding: 'utf8' },
     );
     const stdout = (res.stdout || '').trim();
@@ -524,7 +530,9 @@ function removeStories(keys, { projectRoot, status = 'skipped' }) {
     throw new Error('removeStories requires a non-empty array of keys');
   }
   if (status !== 'skipped' && status !== 'deferred') {
-    throw new Error(`removeStories status must be 'skipped' or 'deferred' (got ${JSON.stringify(status)})`);
+    throw new Error(
+      `removeStories status must be 'skipped' or 'deferred' (got ${JSON.stringify(status)})`,
+    );
   }
   return mutate(projectRoot, (plan) => {
     const missing = [];
@@ -566,7 +574,7 @@ function removeStories(keys, { projectRoot, status = 'skipped' }) {
 //   - Unicode RTL/LTR override marks (visual-reorder attack)
 // Tracker IDs from Jira/Linear/GitHub/GitLab don't legitimately use
 // any of these.
-const ISSUE_ID_REJECT_CHARS = /[\[\]<>|;&\n\r\x00-\x1f\x7f‪-‮⁦-⁩؜]/;
+const ISSUE_ID_REJECT_CHARS = /[[\]<>|;&\n\r\x00-\x1f\x7f‪-‮⁦-⁩؜]/;
 
 // Set issue_id on either an epic or a story entity. Looks up the entity
 // by key/id (epic first since epic ids are typically shorter strings).
@@ -593,9 +601,7 @@ function setIssueId(entity_key, issue_id, { projectRoot }) {
   // Also reject length over 200 — same cap as cross-epic rationale,
   // chosen to prevent runaway labels from making the DAG render unreadable.
   if (typeof issue_id === 'string' && issue_id.length > 200) {
-    throw new Error(
-      `setIssueId rejected issue_id of length ${issue_id.length}: max is 200 chars`,
-    );
+    throw new Error(`setIssueId rejected issue_id of length ${issue_id.length}: max is 200 chars`);
   }
   let result = null;
   mutate(projectRoot, (plan) => {
@@ -726,55 +732,55 @@ function refreshBmadStatus({ projectRoot }) {
     }
     const next = JSON.parse(JSON.stringify(result));
 
-  // Stories
-  for (let i = 0; i < next.stories.length; i++) {
-    const entry = next.stories[i];
-    if (!entry || !entry.key) continue;
-    const observed = bmad.has(entry.key) ? bmad.get(entry.key) : null;
-    if (observed !== entry.bmad_status) {
-      entry.bmad_status = observed;
-      storyChanges += 1;
+    // Stories
+    for (let i = 0; i < next.stories.length; i++) {
+      const entry = next.stories[i];
+      if (!entry || !entry.key) continue;
+      const observed = bmad.has(entry.key) ? bmad.get(entry.key) : null;
+      if (observed !== entry.bmad_status) {
+        entry.bmad_status = observed;
+        storyChanges += 1;
+      }
+      if (
+        observed !== null &&
+        TERMINAL_BMAD_STATUSES.has(observed) &&
+        entry.plan_status !== 'done' &&
+        entry.plan_status !== 'skipped' &&
+        entry.plan_status !== 'excluded'
+      ) {
+        entry.plan_status = 'done';
+        entry.completed_at = entry.completed_at || new Date().toISOString();
+        entry.current_step = null;
+        transitions += 1;
+      }
     }
-    if (
-      observed !== null &&
-      TERMINAL_BMAD_STATUSES.has(observed) &&
-      entry.plan_status !== 'done' &&
-      entry.plan_status !== 'skipped' &&
-      entry.plan_status !== 'excluded'
-    ) {
-      entry.plan_status = 'done';
-      entry.completed_at = entry.completed_at || new Date().toISOString();
-      entry.current_step = null;
-      transitions += 1;
-    }
-  }
 
-  // Epics: aggregate bmad_status from contained stories. backlog if any
-  // story is non-terminal; done if every story is terminal; in-progress
-  // otherwise. This is a heuristic; users can override via direct YAML edit.
-  for (let i = 0; i < next.epics.length; i++) {
-    const epic = next.epics[i];
-    if (!epic || !epic.id) continue;
-    const epicStories = next.stories.filter(
-      (s) => s && (s.epic === epic.id || String(s.epic) === String(epic.id)),
-    );
-    let aggregate = null;
-    if (epicStories.length === 0) {
-      aggregate = epic.bmad_status; // preserve whatever was set
-    } else {
-      const allTerminal = epicStories.every(
-        (s) => s.bmad_status && TERMINAL_BMAD_STATUSES.has(s.bmad_status),
+    // Epics: aggregate bmad_status from contained stories. backlog if any
+    // story is non-terminal; done if every story is terminal; in-progress
+    // otherwise. This is a heuristic; users can override via direct YAML edit.
+    for (let i = 0; i < next.epics.length; i++) {
+      const epic = next.epics[i];
+      if (!epic || !epic.id) continue;
+      const epicStories = next.stories.filter(
+        (s) => s && (s.epic === epic.id || String(s.epic) === String(epic.id)),
       );
-      const anyTerminal = epicStories.some(
-        (s) => s.bmad_status && TERMINAL_BMAD_STATUSES.has(s.bmad_status),
-      );
-      aggregate = allTerminal ? 'done' : anyTerminal ? 'in-progress' : 'backlog';
+      let aggregate = null;
+      if (epicStories.length === 0) {
+        aggregate = epic.bmad_status; // preserve whatever was set
+      } else {
+        const allTerminal = epicStories.every(
+          (s) => s.bmad_status && TERMINAL_BMAD_STATUSES.has(s.bmad_status),
+        );
+        const anyTerminal = epicStories.some(
+          (s) => s.bmad_status && TERMINAL_BMAD_STATUSES.has(s.bmad_status),
+        );
+        aggregate = allTerminal ? 'done' : anyTerminal ? 'in-progress' : 'backlog';
+      }
+      if (aggregate !== epic.bmad_status) {
+        epic.bmad_status = aggregate;
+        epicChanges += 1;
+      }
     }
-    if (aggregate !== epic.bmad_status) {
-      epic.bmad_status = aggregate;
-      epicChanges += 1;
-    }
-  }
 
     const noOp = storyChanges === 0 && epicChanges === 0 && transitions === 0;
     if (noOp) {

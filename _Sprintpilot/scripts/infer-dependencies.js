@@ -63,20 +63,10 @@ function emitTimingEvent(projectRoot, phase, meta) {
     /* ignore — timing is best-effort */
   }
 }
-const {
-  readStoriesFromStatus,
-  parseEpicFromKey,
-  topoLayers,
-  sprintStatusPath,
-  dependenciesPath,
-} = dagMod;
+const { readStoriesFromStatus, parseEpicFromKey, topoLayers, sprintStatusPath, dependenciesPath } =
+  dagMod;
 
-const {
-  read: readPlan,
-  write: writePlan,
-  emptyPlan,
-  planPath,
-} = sprintPlanMod;
+const { read: readPlan, write: writePlan, emptyPlan, planPath } = sprintPlanMod;
 
 const VALID_COMMANDS = ['scaffold-prompt', 'dry-run', 'write', 'migrate', 'write-cross-epic'];
 
@@ -179,7 +169,7 @@ function scaffoldCrossEpicPrompt(projectRoot) {
     '- Schema needed before consumer reads from it.',
     '- Shared API contract that one story defines and another consumes.',
     '- Data model needed before downstream story integrates against it.',
-    '- Migration/setup story explicitly named as a prerequisite in another story\'s AC.',
+    "- Migration/setup story explicitly named as a prerequisite in another story's AC.",
     '',
     'DO NOT flag:',
     '- Weak / soft coupling (sequencing preferences, "would be nice to ship first").',
@@ -243,9 +233,7 @@ function validateCrossEpicEnvelope(envelope, { projectRoot, plan }) {
   // Build the set of edges already inferred per-epic so we can flag duplicates.
   const perEpicEdges = new Set();
   const planStories =
-    plan && plan.dependencies && plan.dependencies.stories
-      ? plan.dependencies.stories
-      : {};
+    plan && plan.dependencies && plan.dependencies.stories ? plan.dependencies.stories : {};
   for (const key of Object.keys(planStories)) {
     const depsList = planStories[key]?.depends_on;
     if (!Array.isArray(depsList)) continue;
@@ -1002,7 +990,9 @@ async function runMigrate(projectRoot) {
   const storyCount = Object.keys(legacy.doc.stories || {}).length;
   const overrideCount = Array.isArray(legacy.doc.overrides) ? legacy.doc.overrides.length : 0;
   const droppedEpicsBlock =
-    legacy.doc.epics && typeof legacy.doc.epics === 'object' && Object.keys(legacy.doc.epics).length > 0;
+    legacy.doc.epics &&
+    typeof legacy.doc.epics === 'object' &&
+    Object.keys(legacy.doc.epics).length > 0;
 
   emitTimingEvent(projectRoot, 'planning.migrate-dependencies', {
     stories_imported: storyCount,
@@ -1052,14 +1042,16 @@ async function main() {
 
   // `migrate` and `write-cross-epic` operate sprint-wide; --cross-epic mode
   // for scaffold-prompt/dry-run also doesn't need --epic. Others require it.
-  const needsEpic =
-    !(command === 'migrate' || command === 'write-cross-epic' || crossEpic);
+  const needsEpic = !(command === 'migrate' || command === 'write-cross-epic' || crossEpic);
   if (needsEpic && !epic) {
     log.error(`${command} requires --epic (or --cross-epic for sprint-wide mode)`);
     process.exit(1);
   }
   // --cross-epic isn't valid for `write` or `migrate`.
-  if (crossEpic && (command === 'write' || command === 'migrate' || command === 'write-cross-epic')) {
+  if (
+    crossEpic &&
+    (command === 'write' || command === 'migrate' || command === 'write-cross-epic')
+  ) {
     log.error(`--cross-epic is not valid for ${command}`);
     process.exit(1);
   }

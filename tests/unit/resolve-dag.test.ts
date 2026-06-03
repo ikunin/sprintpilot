@@ -2,13 +2,12 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import yaml from 'js-yaml';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-
 // @ts-expect-error — CommonJS module
 import dagMod from '../../_Sprintpilot/scripts/resolve-dag.js';
 // @ts-expect-error — CommonJS module
 import sprintPlanMod from '../../_Sprintpilot/scripts/sprint-plan.js';
-import yaml from 'js-yaml';
 
 const {
   parseEpicFromKey,
@@ -402,10 +401,7 @@ describe('CLI integration', () => {
   });
 
   it('v2.3.6: mermaid render reports svg_reason="mmdc-missing" when Mermaid CLI is absent from PATH', () => {
-    seed(
-      tmpRoot,
-      'development_status:\n  1-1-a: ready-for-dev\n  1-2-b: backlog\n',
-    );
+    seed(tmpRoot, 'development_status:\n  1-1-a: ready-for-dev\n  1-2-b: backlog\n');
     const outputPath = join(tmpRoot, '_bmad-output', 'dag.mmd');
     // Run with an empty PATH so mmdc cannot be resolved regardless of
     // whether it's installed on the test machine. (Empty string would
@@ -440,73 +436,69 @@ describe('CLI integration', () => {
   // explicitly because Node's spawn doesn't auto-resolve PATHEXT), but
   // testing that path needs a Windows .cmd shim — out of scope here.
   // The mmdc-missing test above covers the cross-platform absent case.
-  (process.platform === 'win32' ? it.skip : it)('mermaid render produces a sibling SVG (no PNG) when mmdc is on PATH', () => {
-    seed(
-      tmpRoot,
-      'development_status:\n  1-1-a: ready-for-dev\n  1-2-b: backlog\n',
-    );
-    // Shim mmdc into a temp dir on PATH. The shim ignores most flags;
-    // for `--version` it prints a string; otherwise it touches whatever
-    // path follows `-o` and exits 0. That's enough to exercise the
-    // happy path in resolve-dag's spawnSync wrapper.
-    const shimDir = join(tmpRoot, 'mmdc-shim');
-    mkdirSync(shimDir, { recursive: true });
-    const shimPath = join(shimDir, 'mmdc');
-    writeFileSync(
-      shimPath,
-      '#!/bin/sh\n' +
-        '[ "$1" = "--version" ] && echo "shim" && exit 0\n' +
-        'output_next=\n' +
-        'for arg in "$@"; do\n' +
-        '  if [ -n "$output_next" ]; then : > "$arg"; output_next=; continue; fi\n' +
-        '  [ "$arg" = "-o" ] && output_next=1\n' +
-        'done\n' +
-        'exit 0\n',
-      { mode: 0o755 },
-    );
-    const outputPath = join(tmpRoot, '_bmad-output', 'dag.mmd');
-    const out = execFileSync(
-      process.execPath,
-      [
-        SCRIPT,
-        'render',
-        '--format',
-        'mermaid',
-        '--epic',
-        '1',
-        '--output',
-        outputPath,
-        '--project-root',
-        tmpRoot,
-      ],
-      {
-        encoding: 'utf8',
-        env: { ...process.env, PATH: `${shimDir}:${process.env.PATH ?? ''}` },
-      },
-    );
-    const envelope = JSON.parse(out);
-    expect(envelope.wrote).toBe(true);
-    // Only SVG is produced — vector, crisp at any zoom, small on disk.
-    // PNG generation was removed.
-    expect(envelope.svg_file).toBe(outputPath.replace(/\.mmd$/, '.svg'));
-    expect(envelope.svg_reason).toBeUndefined();
-    expect(existsSync(envelope.svg_file)).toBe(true);
-    // No PNG sibling or PNG metadata in the envelope.
-    expect(envelope.png_file).toBeUndefined();
-    expect(envelope.png_dimensions).toBeUndefined();
-    expect(existsSync(outputPath.replace(/\.mmd$/, '.png'))).toBe(false);
-  });
-
+  (process.platform === 'win32' ? it.skip : it)(
+    'mermaid render produces a sibling SVG (no PNG) when mmdc is on PATH',
+    () => {
+      seed(tmpRoot, 'development_status:\n  1-1-a: ready-for-dev\n  1-2-b: backlog\n');
+      // Shim mmdc into a temp dir on PATH. The shim ignores most flags;
+      // for `--version` it prints a string; otherwise it touches whatever
+      // path follows `-o` and exits 0. That's enough to exercise the
+      // happy path in resolve-dag's spawnSync wrapper.
+      const shimDir = join(tmpRoot, 'mmdc-shim');
+      mkdirSync(shimDir, { recursive: true });
+      const shimPath = join(shimDir, 'mmdc');
+      writeFileSync(
+        shimPath,
+        '#!/bin/sh\n' +
+          '[ "$1" = "--version" ] && echo "shim" && exit 0\n' +
+          'output_next=\n' +
+          'for arg in "$@"; do\n' +
+          '  if [ -n "$output_next" ]; then : > "$arg"; output_next=; continue; fi\n' +
+          '  [ "$arg" = "-o" ] && output_next=1\n' +
+          'done\n' +
+          'exit 0\n',
+        { mode: 0o755 },
+      );
+      const outputPath = join(tmpRoot, '_bmad-output', 'dag.mmd');
+      const out = execFileSync(
+        process.execPath,
+        [
+          SCRIPT,
+          'render',
+          '--format',
+          'mermaid',
+          '--epic',
+          '1',
+          '--output',
+          outputPath,
+          '--project-root',
+          tmpRoot,
+        ],
+        {
+          encoding: 'utf8',
+          env: { ...process.env, PATH: `${shimDir}:${process.env.PATH ?? ''}` },
+        },
+      );
+      const envelope = JSON.parse(out);
+      expect(envelope.wrote).toBe(true);
+      // Only SVG is produced — vector, crisp at any zoom, small on disk.
+      // PNG generation was removed.
+      expect(envelope.svg_file).toBe(outputPath.replace(/\.mmd$/, '.svg'));
+      expect(envelope.svg_reason).toBeUndefined();
+      expect(existsSync(envelope.svg_file)).toBe(true);
+      // No PNG sibling or PNG metadata in the envelope.
+      expect(envelope.png_file).toBeUndefined();
+      expect(envelope.png_dimensions).toBeUndefined();
+      expect(existsSync(outputPath.replace(/\.mmd$/, '.png'))).toBe(false);
+    },
+  );
 
   it('v2.3.5 regression: mermaid output puts "flowchart" on the first line (strict-renderer compatibility)', () => {
     // Reproduces the observed report: Claude Code's chat renderer (and
     // some markdown→mermaid pipelines) detect mermaid by sniffing the
     // first non-blank line for a diagram type. Leading `%%` comments
     // caused them to silently skip rendering.
-    seed(
-      tmpRoot,
-      'development_status:\n  1-1-a: ready-for-dev\n  1-2-b: backlog\n',
-    );
+    seed(tmpRoot, 'development_status:\n  1-1-a: ready-for-dev\n  1-2-b: backlog\n');
     const outputPath = join(tmpRoot, '_bmad-output', 'dag.mmd');
     execFileSync(process.execPath, [
       SCRIPT,
@@ -521,12 +513,9 @@ describe('CLI integration', () => {
       tmpRoot,
     ]);
     const rendered = readFileSync(outputPath, 'utf8');
-    const firstNonBlankLine = rendered
-      .split('\n')
-      .find((line) => line.trim().length > 0);
+    const firstNonBlankLine = rendered.split('\n').find((line) => line.trim().length > 0);
     expect(firstNonBlankLine).toBe('flowchart LR');
     // Sanity: %% comments still present after the type declaration.
     expect(rendered).toMatch(/^flowchart LR\n%% plan-id:/m);
   });
-
 });

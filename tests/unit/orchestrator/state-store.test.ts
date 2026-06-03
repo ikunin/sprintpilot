@@ -206,11 +206,7 @@ describe('read', () => {
       'autopilot-state.yaml',
     );
     mkdirSync(join(projectRoot, '_bmad-output', 'implementation-artifacts'), { recursive: true });
-    writeFileSync(
-      stateFile,
-      'relevant_decisions:\n  - id: D1\n  - id: D2\n',
-      'utf8',
-    );
+    writeFileSync(stateFile, 'relevant_decisions:\n  - id: D1\n  - id: D2\n', 'utf8');
     const state = read({ projectRoot });
     expect(state.relevant_decisions).toEqual([{ id: 'D1' }, { id: 'D2' }]);
   });

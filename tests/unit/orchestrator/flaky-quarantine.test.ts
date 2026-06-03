@@ -1,7 +1,7 @@
-import { describe, expect, it, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 // @ts-expect-error — CommonJS module
 import flakyQuarantine from '../../../_Sprintpilot/lib/orchestrator/flaky-quarantine.js';
@@ -277,6 +277,8 @@ describe('flaky-quarantine.parseYaml + dumpYaml roundtrip', () => {
 describe('flaky-quarantine.filePath', () => {
   it('returns the canonical location', () => {
     const fp = filePath('/r');
-    expect(fp.endsWith(path.join('_bmad-output', 'implementation-artifacts', 'flaky-quarantine.yaml'))).toBe(true);
+    expect(
+      fp.endsWith(path.join('_bmad-output', 'implementation-artifacts', 'flaky-quarantine.yaml')),
+    ).toBe(true);
   });
 });

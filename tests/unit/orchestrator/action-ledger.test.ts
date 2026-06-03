@@ -158,14 +158,19 @@ describe('lastWithFingerprint', () => {
     append({ kind: 'state_transition' }, { projectRoot }); // no fingerprint
     const r = lastWithFingerprint({ projectRoot });
     expect(r?.kind).toBe('resume');
-    expect((r as { fingerprint: { sprintStatusSha: string } }).fingerprint.sprintStatusSha).toBe('b');
+    expect((r as { fingerprint: { sprintStatusSha: string } }).fingerprint.sprintStatusSha).toBe(
+      'b',
+    );
   });
 
   it('regression: resume divergence_accepted with fingerprint becomes the new baseline (no infinite re-acceptance loop)', () => {
     // Scenario observed live: a stale halt with fingerprint A. The
     // resumer accepts a divergence, appends a resume with fingerprint B.
     // lastWithFingerprint must surface B (the fresh baseline), not A.
-    append({ kind: 'halt', phase: 'story_land', fingerprint: { sprintStatusSha: 'OLD' } }, { projectRoot });
+    append(
+      { kind: 'halt', phase: 'story_land', fingerprint: { sprintStatusSha: 'OLD' } },
+      { projectRoot },
+    );
     append(
       {
         kind: 'resume',
@@ -175,7 +180,9 @@ describe('lastWithFingerprint', () => {
       { projectRoot },
     );
     const baseline = lastWithFingerprint({ projectRoot });
-    expect((baseline as { fingerprint: { sprintStatusSha: string } }).fingerprint.sprintStatusSha).toBe('NEW');
+    expect(
+      (baseline as { fingerprint: { sprintStatusSha: string } }).fingerprint.sprintStatusSha,
+    ).toBe('NEW');
   });
 
   it('returns the halt baseline when no later resume has a fingerprint', () => {
@@ -183,7 +190,9 @@ describe('lastWithFingerprint', () => {
     append({ kind: 'resume', divergence: { kind: 'resume_divergence' } }, { projectRoot }); // no fingerprint (rejected)
     const r = lastWithFingerprint({ projectRoot });
     expect(r?.kind).toBe('halt');
-    expect((r as { fingerprint: { sprintStatusSha: string } }).fingerprint.sprintStatusSha).toBe('A');
+    expect((r as { fingerprint: { sprintStatusSha: string } }).fingerprint.sprintStatusSha).toBe(
+      'A',
+    );
   });
 });
 

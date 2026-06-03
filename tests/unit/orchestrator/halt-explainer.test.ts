@@ -14,33 +14,27 @@ type EnrichedAction = Action & {
   };
 };
 
-const {
-  enrich,
-  recentActions,
-  lastFailedVerify,
-  elapsedInPhase,
-  similarPriorHalt,
-} = haltExplainer as {
-  enrich: (
-    action: Action,
-    ctx: { ledgerEntries: LedgerEntry[]; state: Record<string, unknown>; now?: string },
-  ) => EnrichedAction;
-  recentActions: (entries: LedgerEntry[], limit?: number) => Record<string, unknown>[];
-  lastFailedVerify: (entries: LedgerEntry[]) => Record<string, unknown> | null;
-  elapsedInPhase: (
-    state: Record<string, unknown>,
-    now?: string,
-  ) => Record<string, unknown> | null;
-  similarPriorHalt: (
-    entries: LedgerEntry[],
-    phase: string,
-    reason: string,
-  ) => Record<string, unknown> | null;
-};
+const { enrich, recentActions, lastFailedVerify, elapsedInPhase, similarPriorHalt } =
+  haltExplainer as {
+    enrich: (
+      action: Action,
+      ctx: { ledgerEntries: LedgerEntry[]; state: Record<string, unknown>; now?: string },
+    ) => EnrichedAction;
+    recentActions: (entries: LedgerEntry[], limit?: number) => Record<string, unknown>[];
+    lastFailedVerify: (entries: LedgerEntry[]) => Record<string, unknown> | null;
+    elapsedInPhase: (
+      state: Record<string, unknown>,
+      now?: string,
+    ) => Record<string, unknown> | null;
+    similarPriorHalt: (
+      entries: LedgerEntry[],
+      phase: string,
+      reason: string,
+    ) => Record<string, unknown> | null;
+  };
 
 const T_NOW = '2026-06-01T12:00:00.000Z';
-const minutesBefore = (n: number) =>
-  new Date(Date.parse(T_NOW) - n * 60_000).toISOString();
+const minutesBefore = (n: number) => new Date(Date.parse(T_NOW) - n * 60_000).toISOString();
 
 describe('halt-explainer.recentActions', () => {
   it('returns the last 3 action_emitted entries with skill/op summaries', () => {
@@ -77,7 +71,11 @@ describe('halt-explainer.recentActions', () => {
     expect(r).toHaveLength(3); // 3 action_emitted with allowed types
     // Oldest-first.
     expect(r[0]).toMatchObject({ skill: 'bmad-dev-story', type: 'invoke_skill', phase: 'dev_red' });
-    expect(r[1]).toMatchObject({ skill: 'bmad-dev-story', type: 'invoke_skill', phase: 'dev_green' });
+    expect(r[1]).toMatchObject({
+      skill: 'bmad-dev-story',
+      type: 'invoke_skill',
+      phase: 'dev_green',
+    });
     expect(r[2]).toMatchObject({ op: 'commit_and_push_story', type: 'git_op' });
   });
 
@@ -153,10 +151,7 @@ describe('halt-explainer.lastFailedVerify', () => {
 
 describe('halt-explainer.elapsedInPhase', () => {
   it('computes minutes since phase entry', () => {
-    const r = elapsedInPhase(
-      { phase: 'dev_green', phase_started_at: minutesBefore(42) },
-      T_NOW,
-    );
+    const r = elapsedInPhase({ phase: 'dev_green', phase_started_at: minutesBefore(42) }, T_NOW);
     expect(r).not.toBeNull();
     expect(r!.phase).toBe('dev_green');
     expect(r!.minutes).toBeCloseTo(42, 1);

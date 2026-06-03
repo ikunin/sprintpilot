@@ -405,8 +405,12 @@ function issueIdByEpicId(plan) {
   const map = new Map();
   if (plan && Array.isArray(plan.epics)) {
     for (const e of plan.epics) {
-      if (e && (typeof e.id === 'string' || typeof e.id === 'number') &&
-          typeof e.issue_id === 'string' && e.issue_id) {
+      if (
+        e &&
+        (typeof e.id === 'string' || typeof e.id === 'number') &&
+        typeof e.issue_id === 'string' &&
+        e.issue_id
+      ) {
         map.set(String(e.id), e.issue_id);
       }
     }
@@ -479,7 +483,7 @@ const MERMAID_ESCAPE_MAP = {
   '|': '&#124;',
   '\n': '<br>',
 };
-const MERMAID_ESCAPE_CHARS = /[\\"&;\]\[()<>|\n]/g;
+const MERMAID_ESCAPE_CHARS = /[\\"&;\][()<>|\n]/g;
 // ASCII control chars (except \n which we map to <br> above) + DEL.
 const STRIP_CONTROL = /[\x00-\x09\x0b-\x1f\x7f]/g;
 // Unicode bidi-override / isolate / embedding marks. These can reorder
@@ -565,14 +569,12 @@ function renderMermaid(dag, plan) {
 // `<` and `>` in a double-quoted label render as literal `<` and `>`
 // (no HTML interpretation), so they don't need entity encoding.
 function dotEscapeLabel(s) {
-  return (
-    String(s)
-      .replace(/\r/g, '')
-      .replace(/[\\"]/g, '\\$&')
-      .replace(/\n/g, '\\n')
-      .replace(/[\x00-\x08\x0b-\x1f\x7f]/g, '')
-      .replace(/[‪-‮⁦-⁩؜]/g, '')
-  );
+  return String(s)
+    .replace(/\r/g, '')
+    .replace(/[\\"]/g, '\\$&')
+    .replace(/\n/g, '\\n')
+    .replace(/[\x00-\x08\x0b-\x1f\x7f]/g, '')
+    .replace(/[‪-‮⁦-⁩؜]/g, '');
 }
 
 function renderGraphviz(dag, plan) {
@@ -606,8 +608,7 @@ function renderGraphviz(dag, plan) {
       const storyLabel = composeStoryLabel(node, storyIssueIds);
       // When the visual label differs from the node id (issue_id is set),
       // emit an explicit `label=` attribute. Otherwise dot uses the node id.
-      const labelAttr =
-        storyLabel === node ? '' : `, label="${dotEscapeLabel(storyLabel)}"`;
+      const labelAttr = storyLabel === node ? '' : `, label="${dotEscapeLabel(storyLabel)}"`;
       lines.push(
         `    "${dotEscapeLabel(node)}" [fillcolor="${fill}", fontcolor="${text}"${labelAttr}];`,
       );
@@ -712,7 +713,12 @@ function tryRenderMermaidSvg(mmdPath) {
 
 function defaultRenderOutputPath(projectRoot, format) {
   const ext = format === 'graphviz' ? 'dot' : 'mmd';
-  return path.join(projectRoot, '_bmad-output', 'implementation-artifacts', `sprint-plan-dag.${ext}`);
+  return path.join(
+    projectRoot,
+    '_bmad-output',
+    'implementation-artifacts',
+    `sprint-plan-dag.${ext}`,
+  );
 }
 
 // Top-level render orchestrator. Returns { wrote, file, format, fallback?, message }.

@@ -19,8 +19,6 @@
 //   node _Sprintpilot/scripts/cleanup-worktrees.js \
 //     [--worktrees-dir .worktrees] [--project-root <path>] [--dry-run]
 
-'use strict';
-
 const fs = require('node:fs');
 const path = require('node:path');
 const cp = require('node:child_process');
@@ -29,10 +27,17 @@ const { parseArgs } = require('../lib/runtime/args');
 const log = require('../lib/runtime/log');
 
 function git(cwd, args, opts) {
-  return cp.spawnSync('git', ['-C', cwd, ...args], Object.assign({
-    encoding: 'utf8',
-    timeout: 10000,
-  }, opts || {}));
+  return cp.spawnSync(
+    'git',
+    ['-C', cwd, ...args],
+    Object.assign(
+      {
+        encoding: 'utf8',
+        timeout: 10000,
+      },
+      opts || {},
+    ),
+  );
 }
 
 function localBranchExists(projectRoot, branch) {
@@ -43,11 +48,9 @@ function localBranchExists(projectRoot, branch) {
 }
 
 function remoteBranchExists(projectRoot, branch) {
-  const r = git(
-    projectRoot,
-    ['show-ref', '--verify', '--quiet', 'refs/remotes/origin/' + branch],
-    { stdio: 'ignore' },
-  );
+  const r = git(projectRoot, ['show-ref', '--verify', '--quiet', 'refs/remotes/origin/' + branch], {
+    stdio: 'ignore',
+  });
   return r.status === 0;
 }
 

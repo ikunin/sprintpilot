@@ -157,9 +157,9 @@ describe('flatToProfile', () => {
     // override was a no-op. The runtime check `profile.phase_timings ===
     // false` always saw undefined.
     expect(flatToProfile({}, 'medium').phase_timings).toBe(true);
-    expect(
-      flatToProfile({ autopilot: { phase_timings: false } }, 'medium').phase_timings,
-    ).toBe(false);
+    expect(flatToProfile({ autopilot: { phase_timings: false } }, 'medium').phase_timings).toBe(
+      false,
+    );
   });
 
   it('git.lint.* fields default false/false/100 and honor overrides', () => {
@@ -201,18 +201,19 @@ describe('flatToProfile', () => {
 
   it('git.lint.linters defaults to null (auto-detect) and rejects non-object shapes', () => {
     expect(flatToProfile({}, 'medium').lint_linters).toBeNull();
-    expect(flatToProfile({ git: { lint: { linters: 'not-a-map' } } }, 'medium').lint_linters).toBeNull();
-    expect(flatToProfile({ git: { lint: { linters: ['a', 'b'] } } }, 'medium').lint_linters).toBeNull();
+    expect(
+      flatToProfile({ git: { lint: { linters: 'not-a-map' } } }, 'medium').lint_linters,
+    ).toBeNull();
+    expect(
+      flatToProfile({ git: { lint: { linters: ['a', 'b'] } } }, 'medium').lint_linters,
+    ).toBeNull();
   });
 
   it('push.auto / push.create_pr default true; honor explicit overrides', () => {
     const def = flatToProfile({}, 'medium');
     expect(def.push_auto).toBe(true);
     expect(def.push_create_pr).toBe(true);
-    const off = flatToProfile(
-      { git: { push: { auto: false, create_pr: false } } },
-      'medium',
-    );
+    const off = flatToProfile({ git: { push: { auto: false, create_pr: false } } }, 'medium');
     expect(off.push_auto).toBe(false);
     expect(off.push_create_pr).toBe(false);
   });
@@ -262,18 +263,15 @@ describe('flatToProfile', () => {
     ).toBe('gitea');
     // Invalid value falls back to default.
     expect(
-      flatToProfile({ git: { platform: { provider: 'fictional' } } }, 'medium')
-        .platform_provider,
+      flatToProfile({ git: { platform: { provider: 'fictional' } } }, 'medium').platform_provider,
     ).toBe('auto');
   });
 
   it('platform.base_url defaults null; reads git.platform.base_url', () => {
     expect(flatToProfile({}, 'medium').platform_base_url).toBeNull();
     expect(
-      flatToProfile(
-        { git: { platform: { base_url: 'https://git.example.com' } } },
-        'medium',
-      ).platform_base_url,
+      flatToProfile({ git: { platform: { base_url: 'https://git.example.com' } } }, 'medium')
+        .platform_base_url,
     ).toBe('https://git.example.com');
   });
 
@@ -409,10 +407,9 @@ describe('phase_timeout_minutes — v2.4.0', () => {
   });
 
   it('user override null disables all timeouts', () => {
-    const p = flatToProfile(
-      { autopilot: { phase_timeout_minutes: null } },
-      'medium',
-    ) as { phase_timeout_minutes: unknown };
+    const p = flatToProfile({ autopilot: { phase_timeout_minutes: null } }, 'medium') as {
+      phase_timeout_minutes: unknown;
+    };
     expect(p.phase_timeout_minutes).toBeNull();
   });
 

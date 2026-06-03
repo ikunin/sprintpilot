@@ -246,43 +246,43 @@ describe('patchAutopilotConfig', () => {
 // ──────────────────────────────────────────────────────────────────
 
 describe('readExistingAutopilotConfig — v2.3.0 fields', () => {
-  it("parses auto_plan_on_start: true", async () => {
+  it('parses auto_plan_on_start: true', async () => {
     writeConfig(`autopilot:\n  auto_plan_on_start: true\n`);
     const out = await readExistingAutopilotConfig(root);
     expect(out.autoPlanOnStart).toBe(true);
   });
 
-  it("parses auto_plan_on_start: false", async () => {
+  it('parses auto_plan_on_start: false', async () => {
     writeConfig(`autopilot:\n  auto_plan_on_start: false\n`);
     const out = await readExistingAutopilotConfig(root);
     expect(out.autoPlanOnStart).toBe(false);
   });
 
-  it("leaves auto_plan_on_start null when key is absent", async () => {
+  it('leaves auto_plan_on_start null when key is absent', async () => {
     writeConfig(`autopilot:\n  session_story_limit: 3\n`);
     const out = await readExistingAutopilotConfig(root);
     expect(out.autoPlanOnStart).toBeNull();
   });
 
-  it("tolerates a trailing comment on auto_plan_on_start", async () => {
+  it('tolerates a trailing comment on auto_plan_on_start', async () => {
     writeConfig(`autopilot:\n  auto_plan_on_start: true  # opted in\n`);
     const out = await readExistingAutopilotConfig(root);
     expect(out.autoPlanOnStart).toBe(true);
   });
 
-  it("parses legacy auto_infer_dependencies: true for the deprecation notice", async () => {
+  it('parses legacy auto_infer_dependencies: true for the deprecation notice', async () => {
     writeConfig(`autopilot:\n  auto_infer_dependencies: true\n`);
     const out = await readExistingAutopilotConfig(root);
     expect(out.autoInferDependencies).toBe(true);
   });
 
-  it("recognizes auto_infer_dependencies: false as set (still surfaces in notice logic)", async () => {
+  it('recognizes auto_infer_dependencies: false as set (still surfaces in notice logic)', async () => {
     writeConfig(`autopilot:\n  auto_infer_dependencies: false\n`);
     const out = await readExistingAutopilotConfig(root);
     expect(out.autoInferDependencies).toBe(false);
   });
 
-  it("leaves auto_infer_dependencies null when absent", async () => {
+  it('leaves auto_infer_dependencies null when absent', async () => {
     writeConfig(`autopilot:\n  session_story_limit: 3\n`);
     const out = await readExistingAutopilotConfig(root);
     expect(out.autoInferDependencies).toBeNull();
@@ -372,12 +372,12 @@ describe('verifySkillManifest', () => {
     writeFileSync(join(dir, 'SKILL.md'), body, 'utf8');
   }
 
-  it("returns empty missing when manifest file is absent", async () => {
+  it('returns empty missing when manifest file is absent', async () => {
     const r = await verifySkillManifest(root, bundle);
     expect(r.missing).toEqual([]);
   });
 
-  it("returns empty missing when all manifest skills are present in the bundle", async () => {
+  it('returns empty missing when all manifest skills are present in the bundle', async () => {
     writeManifest(['sprint-autopilot-on', 'sprintpilot-plan-sprint']);
     writeBundleSkillFile('sprint-autopilot-on');
     writeBundleSkillFile('sprintpilot-plan-sprint');
@@ -386,22 +386,30 @@ describe('verifySkillManifest', () => {
   });
 
   it("returns each manifest skill that's missing from the bundle", async () => {
-    writeManifest(['sprint-autopilot-on', 'sprintpilot-plan-sprint', 'sprintpilot-sprint-progress']);
+    writeManifest([
+      'sprint-autopilot-on',
+      'sprintpilot-plan-sprint',
+      'sprintpilot-sprint-progress',
+    ]);
     writeBundleSkillFile('sprint-autopilot-on');
     // The other two skills are listed in manifest but not shipped in the bundle.
     const r = await verifySkillManifest(root, bundle);
     expect(r.missing.sort()).toEqual(['sprintpilot-plan-sprint', 'sprintpilot-sprint-progress']);
   });
 
-  it("returns empty missing on an empty installed_skills list", async () => {
+  it('returns empty missing on an empty installed_skills list', async () => {
     const dir = join(root, '_Sprintpilot');
     mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, 'manifest.yaml'), 'addon:\n  name: x\n  installed_skills: []\n', 'utf8');
+    writeFileSync(
+      join(dir, 'manifest.yaml'),
+      'addon:\n  name: x\n  installed_skills: []\n',
+      'utf8',
+    );
     const r = await verifySkillManifest(root, bundle);
     expect(r.missing).toEqual([]);
   });
 
-  it("tolerates a malformed manifest gracefully (returns empty)", async () => {
+  it('tolerates a malformed manifest gracefully (returns empty)', async () => {
     const dir = join(root, '_Sprintpilot');
     mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, 'manifest.yaml'), 'not even close to yaml: : :\n', 'utf8');
@@ -409,7 +417,7 @@ describe('verifySkillManifest', () => {
     expect(r.missing).toEqual([]);
   });
 
-  it("regression: false-positive WARN bug — does NOT report skills missing when they exist only in the bundle, not in the project copy (v2.3.2 fix)", async () => {
+  it('regression: false-positive WARN bug — does NOT report skills missing when they exist only in the bundle, not in the project copy (v2.3.2 fix)', async () => {
     // Reproduces the v2.3.0/v2.3.1 bug: skills live in the bundle, not under
     // <projectRoot>/_Sprintpilot/skills/. The fixed verifier looks at the
     // bundle and must report no missing skills here.
@@ -446,7 +454,12 @@ describe('pruneOrphanSkillsFromToolDir', () => {
 
   it('returns empty when skills dir does not exist', async () => {
     const missingDir = join(root, '.does-not-exist', 'skills');
-    const r = await pruneOrphanSkillsFromToolDir(missingDir, ['sprint-autopilot-on'], backupDir, ts);
+    const r = await pruneOrphanSkillsFromToolDir(
+      missingDir,
+      ['sprint-autopilot-on'],
+      backupDir,
+      ts,
+    );
     expect(r).toEqual([]);
   });
 
@@ -459,11 +472,19 @@ describe('pruneOrphanSkillsFromToolDir', () => {
     const removed = await pruneOrphanSkillsFromToolDir(skillsDir, current, backupDir, ts);
     expect(removed.sort()).toEqual(['sprintpilot-code-review', 'sprintpilot-party-mode']);
     // Verify currents are untouched
-    expect(() => readFileSync(join(skillsDir, 'sprint-autopilot-on', 'SKILL.md'), 'utf8')).not.toThrow();
-    expect(() => readFileSync(join(skillsDir, 'sprintpilot-codebase-map', 'SKILL.md'), 'utf8')).not.toThrow();
+    expect(() =>
+      readFileSync(join(skillsDir, 'sprint-autopilot-on', 'SKILL.md'), 'utf8'),
+    ).not.toThrow();
+    expect(() =>
+      readFileSync(join(skillsDir, 'sprintpilot-codebase-map', 'SKILL.md'), 'utf8'),
+    ).not.toThrow();
     // Verify orphans are gone
-    expect(() => readFileSync(join(skillsDir, 'sprintpilot-code-review', 'SKILL.md'), 'utf8')).toThrow();
-    expect(() => readFileSync(join(skillsDir, 'sprintpilot-party-mode', 'SKILL.md'), 'utf8')).toThrow();
+    expect(() =>
+      readFileSync(join(skillsDir, 'sprintpilot-code-review', 'SKILL.md'), 'utf8'),
+    ).toThrow();
+    expect(() =>
+      readFileSync(join(skillsDir, 'sprintpilot-party-mode', 'SKILL.md'), 'utf8'),
+    ).toThrow();
   });
 
   it('does NOT touch skills outside the Sprintpilot namespace', async () => {
@@ -475,9 +496,15 @@ describe('pruneOrphanSkillsFromToolDir', () => {
     const removed = await pruneOrphanSkillsFromToolDir(skillsDir, current, backupDir, ts);
     expect(removed).toEqual([]);
     // Non-Sprintpilot skills still present
-    expect(() => readFileSync(join(skillsDir, 'bmad-code-review', 'SKILL.md'), 'utf8')).not.toThrow();
-    expect(() => readFileSync(join(skillsDir, 'bmad-sprint-planning', 'SKILL.md'), 'utf8')).not.toThrow();
-    expect(() => readFileSync(join(skillsDir, 'custom-user-skill', 'SKILL.md'), 'utf8')).not.toThrow();
+    expect(() =>
+      readFileSync(join(skillsDir, 'bmad-code-review', 'SKILL.md'), 'utf8'),
+    ).not.toThrow();
+    expect(() =>
+      readFileSync(join(skillsDir, 'bmad-sprint-planning', 'SKILL.md'), 'utf8'),
+    ).not.toThrow();
+    expect(() =>
+      readFileSync(join(skillsDir, 'custom-user-skill', 'SKILL.md'), 'utf8'),
+    ).not.toThrow();
   });
 
   it('handles both Sprintpilot prefixes (sprint-autopilot- and sprintpilot-)', async () => {
@@ -505,7 +532,9 @@ describe('pruneOrphanSkillsFromToolDir', () => {
     );
     expect(removed).toEqual(['sprintpilot-orphan']);
     // Orphan should STILL be on disk after dry-run
-    expect(() => readFileSync(join(skillsDir, 'sprintpilot-orphan', 'SKILL.md'), 'utf8')).not.toThrow();
+    expect(() =>
+      readFileSync(join(skillsDir, 'sprintpilot-orphan', 'SKILL.md'), 'utf8'),
+    ).not.toThrow();
   });
 
   it('regression: removes the v2.3.0 → v2.3.1 orphans (sprintpilot-code-review, sprintpilot-party-mode)', async () => {
