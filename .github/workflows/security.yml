@@ -30,8 +30,11 @@ permissions:
   contents: read
   security-events: write # upload SARIF to the Security tab
 
+# Keyed by event too: a manual dispatch / weekly run must not cancel an
+# in-flight push or PR scan on the same ref (they're different scans). Two
+# runs of the SAME event on a ref still supersede each other.
 concurrency:
-  group: security-${{ github.ref }}
+  group: security-${{ github.ref }}-${{ github.event_name }}
   cancel-in-progress: true
 
 # Dependency / transient trees we don't scan as our code. Kept in sync with
@@ -86,7 +89,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0 # full history: needed for the range scan AND the full sweep
       - name: Install gitleaks
@@ -122,7 +125,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0 # need base..head reachable for the scoped diff
 
@@ -153,7 +156,7 @@ jobs:
           output: trivy.sarif
       - name: Upload Trivy SARIF (FULL)
         if: needs.scope.outputs.full == 'true'
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: trivy.sarif
           category: trivy
@@ -201,10 +204,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0 # --baseline-commit needs the base commit present
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
       - name: Install Semgrep
@@ -234,7 +237,7 @@ jobs:
             $BASELINE_ARG --sarif --output semgrep.sarif --metrics=off || true
       - name: Upload Semgrep SARIF
         if: always()
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: semgrep.sarif
           category: semgrep
