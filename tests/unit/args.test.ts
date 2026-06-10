@@ -5,7 +5,7 @@ import argsMod from '../../_Sprintpilot/lib/runtime/args.js';
 const { parseArgs } = argsMod as {
   parseArgs: (
     argv: string[],
-    opts?: { booleanFlags?: string[]; positionalActions?: string[] },
+    opts?: { booleanFlags?: string[]; positionalActions?: string[]; listFlags?: string[] },
   ) => { opts: Record<string, unknown>; positional: string[]; actions: string[] };
 };
 
@@ -58,5 +58,39 @@ describe('parseArgs', () => {
   it('sets help flag on -h and --help', () => {
     expect(parseArgs(['-h']).opts.help).toBe(true);
     expect(parseArgs(['--help']).opts.help).toBe(true);
+  });
+
+  describe('listFlags', () => {
+    it('accumulates a repeated --flag value into an array', () => {
+      const { opts } = parseArgs(['--pattern', 'a', '--pattern', 'b', '--pattern', 'c'], {
+        listFlags: ['pattern'],
+      });
+      expect(opts.pattern).toEqual(['a', 'b', 'c']);
+    });
+
+    it('accumulates the --flag=value form too', () => {
+      const { opts } = parseArgs(['--path=a.ts', '--path=b.ts'], { listFlags: ['path'] });
+      expect(opts.path).toEqual(['a.ts', 'b.ts']);
+    });
+
+    it('yields a single-element array when a list flag appears once', () => {
+      const { opts } = parseArgs(['--pattern', 'only'], { listFlags: ['pattern'] });
+      expect(opts.pattern).toEqual(['only']);
+    });
+
+    it('does not leak following list-flag values into positionals', () => {
+      const { opts, positional } = parseArgs(
+        ['grep', '--pattern', 'x', '--path', 'a.ts', '--path', 'b.ts'],
+        { listFlags: ['pattern', 'path'] },
+      );
+      expect(opts.pattern).toEqual(['x']);
+      expect(opts.path).toEqual(['a.ts', 'b.ts']);
+      expect(positional).toEqual(['grep']);
+    });
+
+    it('leaves non-list flags as last-wins (backward compatible)', () => {
+      const { opts } = parseArgs(['--root', 'a', '--root', 'b']);
+      expect(opts.root).toBe('b');
+    });
   });
 });

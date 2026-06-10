@@ -23,6 +23,7 @@ const {
   readShard,
   writeShardAtomic,
   appendToListAtPath,
+  deepAssign,
   listShardStories,
   stripTrailingComment,
   firstTopLevelColon,
@@ -51,6 +52,7 @@ const {
     p: string,
     e: unknown,
   ) => Record<string, unknown>;
+  deepAssign: (t: unknown, s: unknown) => Record<string, unknown>;
   listShardStories: (root: string, kind: string) => string[];
   stripTrailingComment: (s: string) => string;
   firstTopLevelColon: (s: string) => number;
@@ -251,6 +253,24 @@ describe('appendToListAtPath', () => {
   });
   it('throws on empty path', () => {
     expect(() => appendToListAtPath({}, '', {})).toThrow();
+  });
+  it('drops an append whose path contains __proto__ — no prototype pollution', () => {
+    const o = appendToListAtPath({}, '__proto__.polluted', { x: 1 });
+    appendToListAtPath(o, 'a.constructor.b', { y: 2 });
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+    expect((Object.prototype as Record<string, unknown>).polluted).toBeUndefined();
+  });
+});
+
+describe('deepAssign', () => {
+  it('merges nested objects', () => {
+    expect(deepAssign({ a: { b: 1 } }, { a: { c: 2 } })).toEqual({ a: { b: 1, c: 2 } });
+  });
+  it('skips __proto__/constructor/prototype keys — no prototype pollution', () => {
+    const merged = deepAssign({}, JSON.parse('{"__proto__":{"polluted":true},"ok":1}'));
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+    expect((Object.prototype as Record<string, unknown>).polluted).toBeUndefined();
+    expect(merged.ok).toBe(1);
   });
 });
 

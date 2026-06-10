@@ -317,4 +317,80 @@ describe('scan.js', () => {
       expect(r.stdout).toContain('Usage:');
     });
   });
+
+  describe('grep subcommand', () => {
+    it('exits 1 and prints path:line:text when a pattern matches', () => {
+      tree.write('a.ts', 'const ok = 1;\nif (process.env.CI) skip();\n');
+      const r = runScript('scan', [
+        'grep',
+        '--pattern',
+        'process.env.CI',
+        '--path',
+        'a.ts',
+        '--root',
+        tree.dir,
+      ]);
+      expect(r.status).toBe(1);
+      expect(r.stdout).toContain('a.ts:2:');
+      expect(r.stdout).toContain('process.env.CI');
+    });
+
+    it('exits 0 when no pattern matches any path', () => {
+      tree.write('a.ts', 'const ok = 1;\n');
+      tree.write('b.ts', 'export const x = 2;\n');
+      const r = runScript('scan', [
+        'grep',
+        '--pattern',
+        'process.env.CI',
+        '--path',
+        'a.ts',
+        '--path',
+        'b.ts',
+        '--root',
+        tree.dir,
+      ]);
+      expect(r.status).toBe(0);
+      expect(r.stdout.trim()).toBe('');
+    });
+
+    it('matches any of several --pattern regexes', () => {
+      tree.write('a.ts', 'fetch("http://localhost:3000/api");\n');
+      const r = runScript('scan', [
+        'grep',
+        '--pattern',
+        'process.env.CI',
+        '--pattern',
+        '(localhost|127\\.0\\.0\\.1):\\d{4,5}',
+        '--path',
+        'a.ts',
+        '--root',
+        tree.dir,
+      ]);
+      expect(r.status).toBe(1);
+      expect(r.stdout).toContain('localhost:3000');
+    });
+
+    it('skips missing/unreadable paths instead of failing', () => {
+      tree.write('a.ts', 'const ok = 1;\n');
+      const r = runScript('scan', [
+        'grep',
+        '--pattern',
+        'process.env.CI',
+        '--path',
+        'a.ts',
+        '--path',
+        'does-not-exist.ts',
+        '--root',
+        tree.dir,
+      ]);
+      expect(r.status).toBe(0);
+    });
+
+    it('fails when no --pattern is provided', () => {
+      tree.write('a.ts', 'x\n');
+      const r = runScript('scan', ['grep', '--path', 'a.ts', '--root', tree.dir]);
+      expect(r.status).not.toBe(0);
+      expect(r.stderr).toContain('--pattern');
+    });
+  });
 });

@@ -355,6 +355,9 @@ function stripReservedKeys(obj) {
 function appendToListAtPath(obj, dottedPath, entry) {
   const parts = dottedPath.split('.').filter(Boolean);
   if (parts.length === 0) throw new Error('--path required for append');
+  // Prototype-pollution guard, consistent with setByDottedPath: never let a
+  // path segment reach into the prototype chain. Drop the write silently.
+  if (parts.some((p) => UNSAFE_KEYS.has(p))) return obj;
   let cur = obj;
   for (let i = 0; i < parts.length - 1; i++) {
     const p = parts[i];
@@ -596,6 +599,8 @@ function deepAssign(target, source) {
   if (!source || typeof source !== 'object' || Array.isArray(source)) return source;
   const out = target && typeof target === 'object' && !Array.isArray(target) ? { ...target } : {};
   for (const k of Object.keys(source)) {
+    // Prototype-pollution guard, consistent with the rest of this module.
+    if (UNSAFE_KEYS.has(k)) continue;
     const sv = source[k];
     const tv = out[k];
     if (

@@ -15,6 +15,11 @@
  *               Flags: --include, --exclude, --root
  *   extensions  Extension frequency histogram, descending.
  *               Flags: --exclude, --root, --limit (default 20)
+ *   grep        Search the given --path files for one or more --pattern regexes.
+ *               Prints `path:line:text` per match and exits non-zero when any
+ *               pattern matched (grep convention), so it can drive CI-parity-style
+ *               gates. Flags: --pattern (repeatable), --path (repeatable),
+ *               --root, --limit (default 100). Missing/unreadable paths are skipped.
  *
  * Ignore files: .gitignore and .aiexclude at the project root are parsed and
  * applied as additional excludes by default. Pass --no-respect-ignore-files
@@ -112,7 +117,7 @@ function loadIgnoreFilePatterns(root) {
 
 function help() {
   log.out(
-    'Usage: scan.js <files|largest|loc|extensions> [--include <globs>] [--exclude <globs>] [--root <path>] [--limit <N>] [--count] [--no-respect-ignore-files]',
+    'Usage: scan.js <files|largest|loc|extensions|grep> [--include <globs>] [--exclude <globs>] [--root <path>] [--limit <N>] [--count] [--no-respect-ignore-files] [--pattern <regex> ...] [--path <file> ...]',
   );
 }
 
@@ -521,9 +526,68 @@ function cmdExtensions(opts) {
   }
 }
 
+// Coerce a possibly-repeated flag into an array of strings. parseArgs gives an
+// array when the flag appears 2+ times, a string when once, and `true` when
+// passed with no value — normalise all of those.
+function asList(value) {
+  if (Array.isArray(value)) return value.filter((v) => typeof v === 'string');
+  if (typeof value === 'string') return [value];
+  return [];
+}
+
+// Search --path files for any of the --pattern regexes. Prints `path:line:text`
+// per matching line and exits 1 when at least one pattern matched, 0 otherwise
+// (grep convention) — callers that treat a non-zero exit as a gate failure can
+// use this to block on undesirable patterns. Missing/unreadable paths are
+// skipped (no match), so a stale change-set path never spuriously blocks.
+function cmdGrep(opts) {
+  const patterns = asList(opts.pattern);
+  if (patterns.length === 0) log.fail('grep: at least one --pattern is required');
+
+  let regexes;
+  try {
+    regexes = patterns.map((p) => new RegExp(p));
+  } catch (e) {
+    log.fail(`grep: invalid pattern (${e.message})`);
+    return;
+  }
+
+  const root = opts.root ? path.resolve(opts.root) : process.cwd();
+  const limit = opts.limit ? Number(opts.limit) : 100;
+
+  let matchCount = 0;
+  const shown = [];
+  for (const rel of asList(opts.path)) {
+    const full = path.isAbsolute(rel) ? rel : path.join(root, rel);
+    let content;
+    try {
+      content = fs.readFileSync(full, 'utf8');
+    } catch {
+      continue;
+    }
+    const lines = content.split(/\r?\n/);
+    for (let n = 0; n < lines.length; n++) {
+      // Non-global regexes are stateless across .test() calls, so reuse is safe.
+      if (regexes.some((re) => re.test(lines[n]))) {
+        matchCount++;
+        if (shown.length < limit) {
+          shown.push(`${rel}:${n + 1}:${lines[n].trim().slice(0, 200)}`);
+        }
+      }
+    }
+  }
+
+  for (const row of shown) log.out(row);
+  if (matchCount > shown.length) {
+    log.out(`… ${matchCount - shown.length} more match(es) (truncated at ${limit})`);
+  }
+  if (matchCount > 0) process.exit(1);
+}
+
 function main() {
   const { opts, positional } = parseArgs(process.argv.slice(2), {
     booleanFlags: ['count', 'no-respect-ignore-files'],
+    listFlags: ['pattern', 'path'],
   });
   if (opts.help || positional.length === 0) {
     help();
@@ -542,6 +606,9 @@ function main() {
       break;
     case 'extensions':
       cmdExtensions(opts);
+      break;
+    case 'grep':
+      cmdGrep(opts);
       break;
     default:
       log.error(`Unknown subcommand: ${cmd}`);

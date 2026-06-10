@@ -137,10 +137,11 @@ function main(argv) {
     });
   }
 
-  // Gate 3: ci-parity via scan.js. Pattern set is intentionally conservative
-  // — flag obvious CI-only-fail patterns: `if (!process.env.CI)` skips,
-  // hardcoded localhost ports, `xit`/`xdescribe`. scan.js does the search;
-  // we treat its non-zero exit as a block.
+  // Gate 3: ci-parity via `scan.js grep`. Pattern set is intentionally
+  // conservative — flag obvious CI-only-fail patterns: `if (!process.env.CI)`
+  // skips and hardcoded localhost ports. scan.js greps the changed files and
+  // exits non-zero when any pattern matches; we treat that non-zero exit as a
+  // block.
   const scanPath = path.join(projectRoot, '_Sprintpilot', 'scripts', 'scan.js');
   if (fs.existsSync(scanPath) && jsTs.length > 0) {
     gates.push(
@@ -149,12 +150,12 @@ function main(argv) {
         'node',
         [
           scanPath,
+          'grep',
           '--pattern',
           'process.env.CI',
           '--pattern',
           '(localhost|127\\.0\\.0\\.1):\\d{4,5}',
-          '--paths',
-          ...jsTs,
+          ...jsTs.flatMap((f) => ['--path', f]),
         ],
         projectRoot,
       ),

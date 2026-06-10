@@ -534,7 +534,7 @@ function renderMermaid(dag, plan) {
   const epicsSorted = [...epicGroups.keys()].sort();
   for (const epic of epicsSorted) {
     const epicLabel = composeEpicLabel(epic, epicIssueIds);
-    lines.push(`  subgraph epic_${epic} ["${mermaidEscapeLabel(epicLabel)}"]`);
+    lines.push(`  subgraph epic_${safeSubgraphId(epic)} ["${mermaidEscapeLabel(epicLabel)}"]`);
     for (const node of epicGroups.get(epic).sort()) {
       const status = statusByKey.get(node) ?? 'pending';
       const storyLabel = composeStoryLabel(node, storyIssueIds);
@@ -568,6 +568,14 @@ function renderMermaid(dag, plan) {
 //
 // `<` and `>` in a double-quoted label render as literal `<` and `>`
 // (no HTML interpretation), so they don't need entity encoding.
+// Reduce an epic id to a safe Mermaid/Graphviz subgraph identifier. Subgraph
+// ids are not quoted (unlike labels), so an epic id with spaces or syntax
+// characters would otherwise corrupt the emitted .mmd/.dot. The human-readable
+// epic name is still rendered via the (escaped) label.
+function safeSubgraphId(s) {
+  return String(s).replace(/[^A-Za-z0-9_]/g, '_') || 'epic';
+}
+
 function dotEscapeLabel(s) {
   return String(s)
     .replace(/\r/g, '')
@@ -600,7 +608,7 @@ function renderGraphviz(dag, plan) {
   const epicsSorted = [...epicGroups.keys()].sort();
   for (const epic of epicsSorted) {
     const epicLabel = composeEpicLabel(epic, epicIssueIds);
-    lines.push(`  subgraph cluster_${epic} {`);
+    lines.push(`  subgraph cluster_${safeSubgraphId(epic)} {`);
     lines.push(`    label="${dotEscapeLabel(epicLabel)}";`);
     for (const node of epicGroups.get(epic).sort()) {
       const status = statusByKey.get(node) ?? 'pending';
