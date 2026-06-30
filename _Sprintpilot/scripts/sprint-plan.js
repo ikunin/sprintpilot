@@ -574,7 +574,7 @@ function removeStories(keys, { projectRoot, status = 'skipped' }) {
 //   - Unicode RTL/LTR override marks (visual-reorder attack)
 // Tracker IDs from Jira/Linear/GitHub/GitLab don't legitimately use
 // any of these.
-const ISSUE_ID_REJECT_CHARS = /[[\]<>|;&\n\r\x00-\x1f\x7f‪-‮⁦-⁩؜]/;
+const ISSUE_ID_REJECT_CHARS = /[[\]<>|;&\n\r\x00-\x1f\x7f‪-‮⁦-⁩؜]/; // nosemgrep: generic.unicode.security.bidi.contains-bidirectional-characters -- reject-char class intentionally contains bidi code points in order to reject them
 
 // Set issue_id on either an epic or a story entity. Looks up the entity
 // by key/id (epic first since epic ids are typically shorter strings).

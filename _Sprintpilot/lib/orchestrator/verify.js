@@ -67,7 +67,7 @@ function storyStatusFromSprintStatus(text, storyKey) {
   if (!text || !storyKey) return null;
   const k = escapeRe(storyKey);
   // Block form first — has a `status:` line inside the indented block.
-  const blockRe = new RegExp(`^(\\s+)${k}:\\s*\\n((?:\\1\\s+[^\\n]+\\n)+)`, 'm');
+  const blockRe = new RegExp(`^(\\s+)${k}:\\s*\\n((?:\\1\\s+[^\\n]+\\n)+)`, 'm');  // nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp -- pattern built from a regex-escaped story key
   const bm = text.match(blockRe);
   if (bm) {
     const inner = bm[2];
@@ -77,7 +77,7 @@ function storyStatusFromSprintStatus(text, storyKey) {
   // Inline form: `  story-key: done` (status as scalar value).
   // Optional trailing `# comment` is allowed so `done  # PR #N merged`
   // matches `done` instead of failing the whole line.
-  const inlineRe = new RegExp(
+  const inlineRe = new RegExp(  // nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp -- pattern built from a regex-escaped story key
     `^\\s+${k}:\\s*["']?([\\w-]+)["']?\\s*(?:#.*)?$`,
     'm',
   );

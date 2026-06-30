@@ -131,6 +131,7 @@ function inspectTasksSection(body) {
 // Scanning is strictly bounded to within the AC section.
 function extractAcceptanceCriteria(body, sectionName) {
   const lines = body.split('\n');
+  // nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp -- pattern built from a regex-escaped section name
   const headerRe = new RegExp(
     `^(#{2,})\\s+${sectionName.replace(/[.*+?^${}()|[\\\]]/g, '\\$&')}\\s*$`,
     'i',

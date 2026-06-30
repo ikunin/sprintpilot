@@ -295,7 +295,7 @@ function setByDottedPath(obj, key, value) {
     if (!cur[p] || typeof cur[p] !== 'object' || Array.isArray(cur[p])) {
       cur[p] = {};
     }
-    cur = cur[p];
+    cur = cur[p]; // nosemgrep: javascript.lang.security.audit.prototype-pollution.prototype-pollution-loop.prototype-pollution-loop -- write is guarded above by the UNSAFE_KEYS check; segment can never be __proto__/constructor/prototype
   }
   cur[parts[parts.length - 1]] = value;
   return obj;
@@ -306,7 +306,7 @@ function getByDottedPath(obj, key) {
   let cur = obj;
   for (const p of parts) {
     if (!cur || typeof cur !== 'object') return undefined;
-    cur = cur[p];
+    cur = cur[p]; // nosemgrep: javascript.lang.security.audit.prototype-pollution.prototype-pollution-loop.prototype-pollution-loop -- read-only path traversal; no write sink, cannot pollute a prototype
   }
   return cur;
 }
@@ -364,7 +364,7 @@ function appendToListAtPath(obj, dottedPath, entry) {
     if (!cur[p] || typeof cur[p] !== 'object' || Array.isArray(cur[p])) {
       cur[p] = {};
     }
-    cur = cur[p];
+    cur = cur[p]; // nosemgrep: javascript.lang.security.audit.prototype-pollution.prototype-pollution-loop.prototype-pollution-loop -- write is guarded above by the UNSAFE_KEYS check; segment can never be __proto__/constructor/prototype
   }
   const last = parts[parts.length - 1];
   if (!Array.isArray(cur[last])) cur[last] = [];

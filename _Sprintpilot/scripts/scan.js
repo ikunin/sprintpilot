@@ -246,7 +246,7 @@ function globToRegex(glob) {
     re += c;
     i++;
   }
-  return new RegExp('^' + re + '$');
+  return new RegExp('^' + re + '$'); // nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp -- regex compiled from a trusted glob; metacharacters escaped during translation
 }
 
 function toPosix(p) {
@@ -546,7 +546,7 @@ function cmdGrep(opts) {
 
   let regexes;
   try {
-    regexes = patterns.map((p) => new RegExp(p));
+    regexes = patterns.map((p) => new RegExp(p)); // nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp -- operator-supplied grep pattern by design; guarded by try/catch
   } catch (e) {
     log.fail(`grep: invalid pattern (${e.message})`);
     return;

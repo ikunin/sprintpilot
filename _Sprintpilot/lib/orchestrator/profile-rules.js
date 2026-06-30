@@ -92,7 +92,7 @@ function get(obj, dottedKey) {
   let cur = obj;
   for (const p of parts) {
     if (cur === null || cur === undefined || typeof cur !== 'object') return undefined;
-    cur = cur[p];
+    cur = cur[p];  // nosemgrep: javascript.lang.security.audit.prototype-pollution.prototype-pollution-loop.prototype-pollution-loop -- read-only path traversal; no write sink, cannot pollute a prototype
   }
   return cur;
 }
