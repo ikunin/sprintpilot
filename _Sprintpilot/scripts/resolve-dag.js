@@ -489,7 +489,7 @@ const STRIP_CONTROL = /[\x00-\x09\x0b-\x1f\x7f]/g;
 // Unicode bidi-override / isolate / embedding marks. These can reorder
 // the visual presentation of a label in confusing ways even when the
 // underlying codepoints are benign — strip them entirely.
-const STRIP_BIDI = /[‪-‮⁦-⁩؜]/g;
+const STRIP_BIDI = /[‪-‮⁦-⁩؜]/g; // nosemgrep: generic.unicode.security.bidi.contains-bidirectional-characters -- regex intentionally contains bidi code points in order to strip them
 
 function mermaidEscapeLabel(s) {
   return (
@@ -582,7 +582,7 @@ function dotEscapeLabel(s) {
     .replace(/[\\"]/g, '\\$&')
     .replace(/\n/g, '\\n')
     .replace(/[\x00-\x08\x0b-\x1f\x7f]/g, '')
-    .replace(/[‪-‮⁦-⁩؜]/g, '');
+    .replace(/[‪-‮⁦-⁩؜]/g, ''); // nosemgrep: generic.unicode.security.bidi.contains-bidirectional-characters -- regex intentionally contains bidi code points in order to strip them
 }
 
 function renderGraphviz(dag, plan) {

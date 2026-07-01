@@ -44,7 +44,7 @@ function pushRawField(arr, name, formatted) {
 }
 
 function hasStoryBlock(existing, storyKey) {
-  return new RegExp(`^  ${escapeRegex(storyKey)}:\\s*$`, 'm').test(existing);
+  return new RegExp(`^  ${escapeRegex(storyKey)}:\\s*$`, 'm').test(existing); // nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp -- pattern built from a regex-escaped story key
 }
 
 // Leading whitespace length of a line (counts spaces; tabs count as 1 — the
@@ -63,7 +63,7 @@ function replaceStoryBlock(existing, storyKey, newBlock) {
   // Story headers live at 2-space indent in the addon shape. Any line with
   // MORE indent is a continuation of the block; any line with equal-or-less
   // non-blank indent is a sibling/parent and must be preserved.
-  const headerRe = new RegExp(`^(\\s*)${escapeRegex(storyKey)}:\\s*$`);
+  const headerRe = new RegExp(`^(\\s*)${escapeRegex(storyKey)}:\\s*$`); // nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp -- pattern built from a regex-escaped story key
   const out = [];
   let i = 0;
   let replaced = false;
@@ -126,8 +126,8 @@ function unquoteScalar(s) {
 // header's indent (2 spaces) AND that line is not blank.
 function readStoryField(text, storyKey, field) {
   const lines = text.split(/\r?\n/);
-  const headerRe = new RegExp(`^(\\s*)${escapeRegex(storyKey)}:\\s*$`);
-  const fieldRe = new RegExp(`^\\s+${escapeRegex(field)}:\\s*(.*)$`);
+  const headerRe = new RegExp(`^(\\s*)${escapeRegex(storyKey)}:\\s*$`); // nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp -- pattern built from a regex-escaped story key
+  const fieldRe = new RegExp(`^\\s+${escapeRegex(field)}:\\s*(.*)$`); // nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp -- pattern built from a regex-escaped field name
   let headerIndent = -1;
 
   for (const line of lines) {

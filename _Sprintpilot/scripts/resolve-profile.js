@@ -266,7 +266,7 @@ function getByDottedKey(obj, key) {
   let cur = obj;
   for (const p of parts) {
     if (!isPlainObject(cur) || !(p in cur)) return undefined;
-    cur = cur[p];
+    cur = cur[p]; // nosemgrep: javascript.lang.security.audit.prototype-pollution.prototype-pollution-loop.prototype-pollution-loop -- read-only path traversal; no write sink, cannot pollute a prototype
   }
   return cur;
 }

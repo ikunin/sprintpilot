@@ -173,11 +173,13 @@ function isGameComplete(dir: string): boolean {
   // e.g. `function checkWin`, `checkWin(`, `const winner =`, `class Board`.
   // Prevents false positives from stray tokens in type names, enums used
   // only for export, etc.
-  const identifierRe = (name: string) =>
-    new RegExp(
+  const identifierRe = (name: string) => {
+    // nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp -- controlled test identifier, not external input
+    return new RegExp(
       `(?:function|const|let|var|class|=>|\\bexport\\s+)?\\s*${name}\\s*[=(:<{]|\\b${name}\\s*\\(`,
       'i',
     );
+  };
 
   const features = {
     hasWinDetection:

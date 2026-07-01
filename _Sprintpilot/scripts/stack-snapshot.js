@@ -73,7 +73,10 @@ function readSprintStatus(projectRoot) {
 function statusForStory(sprintStatusText, storyKey) {
   if (!sprintStatusText) return 'unknown';
   // Narrow regex — accept either "story_key: status" or block form.
-  const re = new RegExp(`^\\s*${storyKey}:\\s*(\\w+)`, 'm');
+  // Escape the key so a metacharacter in it can't alter the pattern.
+  const safeKey = storyKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  // nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp -- pattern built from a regex-escaped, trusted story key
+  const re = new RegExp(`^\\s*${safeKey}:\\s*(\\w+)`, 'm');
   const m = sprintStatusText.match(re);
   return m ? m[1] : 'unknown';
 }

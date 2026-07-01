@@ -57,7 +57,7 @@ export function assertYamlField(filePath: string, fieldPath: string, expected: u
     if (current === null || current === undefined || typeof current !== 'object') {
       throw new Error(`YAML field path '${fieldPath}' broken at '${key}' in ${filePath}`);
     }
-    current = (current as Record<string, unknown>)[key];
+    current = (current as Record<string, unknown>)[key]; // nosemgrep: javascript.lang.security.audit.prototype-pollution.prototype-pollution-loop.prototype-pollution-loop -- read-only path traversal; no write sink, cannot pollute a prototype
   }
 
   if (current !== expected) {
@@ -76,7 +76,7 @@ export function assertYamlFieldExists(filePath: string, fieldPath: string): void
     if (current === null || current === undefined || typeof current !== 'object') {
       throw new Error(`YAML field '${fieldPath}' does not exist in ${filePath}`);
     }
-    current = (current as Record<string, unknown>)[key];
+    current = (current as Record<string, unknown>)[key]; // nosemgrep: javascript.lang.security.audit.prototype-pollution.prototype-pollution-loop.prototype-pollution-loop -- read-only path traversal; no write sink, cannot pollute a prototype
   }
 
   if (current === undefined || current === null) {
@@ -151,7 +151,7 @@ export function assertMarkdownHasSections(filePath: string, sections: string[]):
   const content = readFileSync(filePath, 'utf-8');
   const missing = sections.filter((s) => {
     // Match heading at any level (# through ####) at the start of a line
-    const pattern = new RegExp(`^#{1,4}\\s+${s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'm');
+    const pattern = new RegExp(`^#{1,4}\\s+${s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'm'); // nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp -- pattern built from regex-escaped input
     return !pattern.test(content);
   });
   if (missing.length > 0) {

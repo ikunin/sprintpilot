@@ -91,7 +91,7 @@ function globToRegex(glob) {
     i++;
   }
   src += '$';
-  return new RegExp(src);
+  return new RegExp(src); // nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp -- regex compiled from a trusted glob; metacharacters escaped during translation
 }
 
 function parseAllowlist(filePath) {
