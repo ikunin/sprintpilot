@@ -1,5 +1,21 @@
 # Changelog
 
+## [2.7.5] - 2026-07-01
+
+### Added
+
+- **`scan.js grep` subcommand** — pattern matching with `path:line:text` output and grep-convention exit codes; the post-green ci-parity gate now uses it.
+
+### Changed
+
+- **CI / security workflow** — scope-gate scans to the changed files per push with a weekly full-tree sweep; concurrency decoupled by event; GitHub Actions bumped off Node 20.
+- **Docs** — `ARCHITECTURE.md` rewritten as a complete v2.7.4 reference.
+
+### Fixed — code-scanning cleanup
+
+- **All open code-scanning alerts resolved.** Bumped `js-yaml` `^4.1.0` → `^4.3.0` past a medium-severity DoS via crafted YAML merge keys (CVE-2026-53550), and regex-escaped two previously-unescaped `new RegExp` interpolations (`stack-snapshot.js`, `install.js`). The remaining Semgrep findings were verified as false positives and suppressed inline with rationale — bidi-sanitizer regexes, glob→regex compilers that escape metacharacters, escaped-input patterns, and `UNSAFE_KEYS`-guarded / read-only / null-proto object traversals.
+- **CI** — `trivy-action` corrected and upgraded to `v0.36.0`; earlier refs pointed at a dead `setup-trivy` pin, which had been blocking the security gate.
+
 ## [2.7.4] - 2026-06-03
 
 ### Added — layered security scanning
