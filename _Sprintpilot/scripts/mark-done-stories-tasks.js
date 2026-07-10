@@ -34,6 +34,7 @@ const path = require('node:path');
 
 const { parseArgs } = require('../lib/runtime/args');
 const log = require('../lib/runtime/log');
+const { readOutputFolder } = require('../lib/runtime/bmad-output');
 const { parseStatuses, isDone } = require('./list-remaining-stories.js');
 const timing = require('./log-timing.js');
 
@@ -62,21 +63,6 @@ function help() {
       'are preserved verbatim. Emits JSON summary to stdout.',
     ].join('\n'),
   );
-}
-
-// Read BMad's output_folder from _bmad/bmm/config.yaml if present. Returns
-// the folder name (relative to projectRoot) or null if not configurable.
-function readOutputFolder(projectRoot) {
-  const cfg = path.join(projectRoot, '_bmad', 'bmm', 'config.yaml');
-  if (!fs.existsSync(cfg)) return null;
-  try {
-    const body = fs.readFileSync(cfg, 'utf8');
-    const m = body.match(/^output_folder\s*:\s*(\S+)/m);
-    if (!m) return null;
-    return m[1].replace(/^["']|["']$/g, '').trim();
-  } catch {
-    return null;
-  }
 }
 
 function findStoryFile(projectRoot, storyKey, outputFolder) {

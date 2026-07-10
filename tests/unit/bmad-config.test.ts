@@ -5,13 +5,28 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 // @ts-expect-error — CommonJS module
 import bmadConfigMod from '../../lib/core/bmad-config.js';
 
-const { readOutputFolder, verifyBmadInstalled, readBmadVersion, readAddonManifestVersion } =
-  bmadConfigMod as {
-    readOutputFolder: (projectRoot: string) => Promise<string>;
-    verifyBmadInstalled: (projectRoot: string) => Promise<Record<string, unknown> | null>;
-    readBmadVersion: (projectRoot: string) => Promise<string | null>;
-    readAddonManifestVersion: (manifestPath: string) => Promise<string | null>;
-  };
+const {
+  readOutputFolder,
+  verifyBmadInstalled,
+  readBmadVersion,
+  readAddonManifestVersion,
+  readCompatBounds,
+  checkBmadCompat,
+} = bmadConfigMod as {
+  readOutputFolder: (projectRoot: string) => Promise<string>;
+  verifyBmadInstalled: (projectRoot: string) => Promise<Record<string, unknown> | null>;
+  readBmadVersion: (projectRoot: string) => Promise<string | null>;
+  readAddonManifestVersion: (manifestPath: string) => Promise<string | null>;
+  readCompatBounds: (
+    manifestPath: string,
+  ) => Promise<{ floor: string | null; testedThrough: string | null }>;
+  checkBmadCompat: (
+    version: string | null,
+    bounds?: { floor?: string | null; testedThrough?: string | null },
+  ) => { level: 'ok' | 'below_floor' | 'above_tested'; message: string | null };
+};
+
+const BOUNDS = { floor: '6.2.1', testedThrough: '6.10.0' };
 
 describe('bmad-config', () => {
   let dir: string;
@@ -67,6 +82,40 @@ describe('bmad-config', () => {
     mkdirSync(join(dir, '_bmad', 'bmm'), { recursive: true });
     writeFileSync(join(dir, '_bmad', 'bmm', 'config.yaml'), 'output_folder: ""\n', 'utf8');
     expect(await readOutputFolder(dir)).toBe('_bmad-output');
+  });
+
+  it('reads output_folder from _bmad/config.toml (v6.4+ layout)', async () => {
+    mkdirSync(join(dir, '_bmad'), { recursive: true });
+    writeFileSync(
+      join(dir, '_bmad', 'config.toml'),
+      '[core]\nproject_name = "demo"\n\n[modules.bmm]\noutput_folder = "toml/out"\n',
+      'utf8',
+    );
+    expect(await readOutputFolder(dir)).toBe('toml/out');
+  });
+
+  it('config.user.toml overrides config.toml', async () => {
+    mkdirSync(join(dir, '_bmad'), { recursive: true });
+    writeFileSync(join(dir, '_bmad', 'config.toml'), 'output_folder = "base/out"\n', 'utf8');
+    writeFileSync(join(dir, '_bmad', 'config.user.toml'), 'output_folder = "user/out"\n', 'utf8');
+    expect(await readOutputFolder(dir)).toBe('user/out');
+  });
+
+  it('prefers config.yaml over config.toml when both exist', async () => {
+    mkdirSync(join(dir, '_bmad', 'bmm'), { recursive: true });
+    writeFileSync(join(dir, '_bmad', 'bmm', 'config.yaml'), 'output_folder: yaml/wins\n', 'utf8');
+    writeFileSync(join(dir, '_bmad', 'config.toml'), 'output_folder = "toml/loses"\n', 'utf8');
+    expect(await readOutputFolder(dir)).toBe('yaml/wins');
+  });
+
+  it('strips quotes, {project-root}/ prefix, and trailing comment in TOML', async () => {
+    mkdirSync(join(dir, '_bmad'), { recursive: true });
+    writeFileSync(
+      join(dir, '_bmad', 'config.toml'),
+      'output_folder = "{project-root}/toml/dir"   # configured output\n',
+      'utf8',
+    );
+    expect(await readOutputFolder(dir)).toBe('toml/dir');
   });
 
   it('verifyBmadInstalled returns null when _bmad/_config/manifest.yaml missing', async () => {
@@ -190,5 +239,59 @@ describe('bmad-config', () => {
       console.warn = origWarn;
     }
     expect(calls.some((m) => /failed to parse YAML/.test(m))).toBe(true);
+  });
+
+  // A6 — soft, advisory BMad version guard.
+  describe('checkBmadCompat', () => {
+    it('returns ok within [floor, testedThrough]', () => {
+      for (const v of ['6.2.1', '6.8.0', '6.10.0']) {
+        expect(checkBmadCompat(v, BOUNDS).level).toBe('ok');
+      }
+    });
+
+    it('flags below_floor for versions under the floor', () => {
+      const r = checkBmadCompat('6.2.0', BOUNDS);
+      expect(r.level).toBe('below_floor');
+      expect(r.message).toMatch(/below/i);
+    });
+
+    it('flags above_tested for versions past the ceiling', () => {
+      const r = checkBmadCompat('6.11.0', BOUNDS);
+      expect(r.level).toBe('above_tested');
+      expect(r.message).toMatch(/newer/i);
+    });
+
+    it('never warns on unknown/unparseable version', () => {
+      expect(checkBmadCompat('unknown', BOUNDS).level).toBe('ok');
+      expect(checkBmadCompat(null, BOUNDS).level).toBe('ok');
+      expect(checkBmadCompat('', BOUNDS).message).toBeNull();
+    });
+
+    it('treats missing bounds as no constraint', () => {
+      expect(checkBmadCompat('1.0.0', {}).level).toBe('ok');
+      expect(checkBmadCompat('99.0.0', {}).level).toBe('ok');
+    });
+
+    it('coerces a "v"-prefixed version', () => {
+      expect(checkBmadCompat('v6.9.0', BOUNDS).level).toBe('ok');
+    });
+  });
+
+  describe('readCompatBounds', () => {
+    it('parses floor and tested-through from an addon manifest', async () => {
+      const manifest = join(dir, 'manifest.yaml');
+      writeFileSync(
+        manifest,
+        'addon:\n  bmad_compatibility: ">=6.2.1"\n  bmad_tested_through: "6.10.0"\n',
+        'utf8',
+      );
+      expect(await readCompatBounds(manifest)).toEqual({ floor: '6.2.1', testedThrough: '6.10.0' });
+    });
+
+    it('returns null bounds when fields are absent', async () => {
+      const manifest = join(dir, 'manifest.yaml');
+      writeFileSync(manifest, 'addon:\n  name: sprintpilot\n', 'utf8');
+      expect(await readCompatBounds(manifest)).toEqual({ floor: null, testedThrough: null });
+    });
   });
 });

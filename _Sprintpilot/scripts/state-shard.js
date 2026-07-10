@@ -30,6 +30,7 @@ const path = require('node:path');
 
 const { parseArgs } = require('../lib/runtime/args');
 const log = require('../lib/runtime/log');
+const { implArtifactsDir } = require('../lib/runtime/bmad-output');
 
 const STORY_RE = /^[a-z0-9][a-z0-9-]*$/;
 const VALID_KINDS = ['state', 'decision-log'];
@@ -101,28 +102,6 @@ function validateKind(k) {
     return { ok: false, error: `invalid --kind '${k}': must be ${VALID_KINDS.join('|')}` };
   }
   return { ok: true, value: kind };
-}
-
-// Read BMad's `output_folder` config so a project that customized its
-// output location keeps shards in the configured directory. Sibling
-// scripts (mark-done-stories-tasks.js) read the same config, so all
-// writers stay consistent.
-function readOutputFolder(projectRoot) {
-  const cfg = path.join(projectRoot, '_bmad', 'bmm', 'config.yaml');
-  if (!fs.existsSync(cfg)) return null;
-  try {
-    const body = fs.readFileSync(cfg, 'utf8');
-    const m = body.match(/^output_folder\s*:\s*(\S+)/m);
-    if (!m) return null;
-    return m[1].replace(/^["']|["']$/g, '').trim();
-  } catch {
-    return null;
-  }
-}
-
-function implArtifactsDir(projectRoot) {
-  const folder = readOutputFolder(projectRoot) || '_bmad-output';
-  return path.join(projectRoot, folder, 'implementation-artifacts');
 }
 
 function shardDir(projectRoot, kind) {

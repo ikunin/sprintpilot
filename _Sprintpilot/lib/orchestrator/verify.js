@@ -495,17 +495,29 @@ function verifyDevGreen(state, out, ctx) {
   return { ok: issues.length === 0, issues };
 }
 
+// Accepted review-findings heading variants (H2–H4), tolerant of BMad's v6.10
+// presentation rework. Matches "Review Findings", "Code Review Findings",
+// "Findings", or "Triage".
+const REVIEW_HEADING_RE = /^#{2,4}\s+(?:Code Review Findings|Review Findings|Findings|Triage)\b/im;
+
 function verifyCodeReview(state, out, ctx) {
   const issues = [];
   // bmad-code-review writes findings as a "### Review Findings"
   // subsection inside the story file's Tasks/Subtasks block (see
   // .claude/skills/bmad-code-review/steps/step-04-present.md). Older
   // repo layouts also use a separate review file. Accept any of:
-  //   - story file contains a `### Review Findings` section
+  //   - story file contains a review-findings heading (see REVIEW_HEADING_RE)
   //   - `_bmad-output/reviews/<key>.md` exists
   //   - `_bmad-output/implementation-artifacts/code-review-<key>.md` exists
   // Reject only when NONE of the above exist AND the LLM didn't supply
   // findings[] inline.
+  //
+  // The heading probe is intentionally tolerant: BMad v6.10 reworked the
+  // review/edge-case-hunter presentation, so accept the common heading variants
+  // ("Review Findings", "Code Review Findings", "Findings", "Triage") rather
+  // than pin the exact v6.8 wording. The load-bearing contract is the
+  // findings[] envelope below (which drives patch/block routing) — that stays
+  // strict; the markdown heading is only an artifact-presence signal.
   const storyKey = state.story_key || 'unknown';
   const reviewLegacy = nodePath.join(
     ctx.projectRoot,
@@ -525,11 +537,11 @@ function verifyCodeReview(state, out, ctx) {
     foundReview = true;
   } else if (storyFile) {
     const text = readFileSafe(ctx.fs, storyFile);
-    if (text && /^#{2,4}\s+Review Findings\b/m.test(text)) foundReview = true;
+    if (text && REVIEW_HEADING_RE.test(text)) foundReview = true;
   }
   if (!foundReview) {
     issues.push(
-      `review artifact missing: expected one of (a) "### Review Findings" section in ${storyFile || '<story file>'}, (b) ${reviewLegacy}, or (c) ${reviewArtifact}`,
+      `review artifact missing: expected one of (a) a review-findings heading (e.g. "### Review Findings") in ${storyFile || '<story file>'}, (b) ${reviewLegacy}, or (c) ${reviewArtifact}`,
     );
   }
   const findings = Array.isArray(out.findings) ? out.findings : null;
@@ -798,4 +810,7 @@ module.exports = {
   verify,
   verifyWithOverride,
   VERIFIERS,
+  // Sprint-status status lookup (exposed for unit tests — verifies resilience
+  // to newer BMad sprint-status shapes such as v6.9 retrospective action items).
+  storyStatusFromSprintStatus,
 };
