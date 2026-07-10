@@ -5307,4 +5307,8 @@ module.exports = {
   // exclusion-ledger behavior is unit-testable).
   resolveNextStoryKey,
   persistedStoryRejectionReason,
+  // Sprint-status parsing helpers (exposed for unit tests — verify resilience
+  // to newer BMad sprint-status shapes such as v6.9 retrospective action items).
+  parseSprintStatuses,
+  looksLikeStoryKey,
 };

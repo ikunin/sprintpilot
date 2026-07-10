@@ -371,6 +371,8 @@ All durable state lives in `_bmad-output/implementation-artifacts/`. Both `_bmad
 | `decision-log.yaml` | Sprintpilot | Per-phase decisions audit. |
 | `flaky-quarantine.yaml` | Sprintpilot | Flaky-test flip counts + quarantine. |
 
+**BMad-owned tree boundary.** Sprintpilot **never writes under `_bmad/`** — it only *reads* BMad config there. It reads `output_folder` from `_bmad/bmm/config.yaml` (v6.2.x) and falls back to the v6.4+ four-layer `_bmad/config.toml` / `config.user.toml` when no YAML config yields a value (`_Sprintpilot/lib/runtime/bmad-output.js`; installer-side mirror in `lib/core/bmad-config.js`). Sprintpilot's own working memory is its `decision-log.yaml` + `ledger.jsonl`, which are independent by design — it does **not** adopt BMad's v6.9 `_bmad/scripts/memlog.py` primitive, so there is no collision with BMad's memory namespace. Sprintpilot is itself the orchestrator, so do **not** run BMad's own unattended orchestrator (`bmad-loop`, the successor to `bmad-automator`) on the same repo concurrently with `sprint-autopilot-on` — two orchestrators committing and advancing state would contend. See `docs/bmad-dev-auto-evaluation.md`.
+
 ### 10.2 `state-store.js` — the single state-write chokepoint
 
 All writes to `autopilot-state.yaml` go through here. Two classes of keys:

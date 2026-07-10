@@ -653,6 +653,41 @@ describe('verify CODE_REVIEW', () => {
     );
     expect(r.ok).toBe(true);
   });
+
+  // A3 — tolerate BMad v6.10's reworked review/edge-case-hunter heading wording.
+  for (const heading of [
+    '### Review Findings',
+    '## Code Review Findings',
+    '#### Findings',
+    '### Triage',
+  ]) {
+    it(`accepts review-findings heading variant "${heading}"`, () => {
+      const storyDir = join(projectRoot, '_bmad-output', 'stories');
+      mkdirSync(storyDir, { recursive: true });
+      const storyPath = join(storyDir, 'S1.md');
+      writeFileSync(storyPath, `## Tasks\n\n- [x] implement\n\n${heading}\n- F1: defer\n`, 'utf8');
+      const r = verify(
+        { phase: STATES.CODE_REVIEW, story_key: 'S1', story_file_path: storyPath },
+        { findings: [{ id: 'F1', action: 'defer', rationale: 'minor' }] },
+        { projectRoot },
+      );
+      expect(r.ok).toBe(true);
+    });
+  }
+
+  it('still rejects when no review artifact and no findings heading exist', () => {
+    const storyDir = join(projectRoot, '_bmad-output', 'stories');
+    mkdirSync(storyDir, { recursive: true });
+    const storyPath = join(storyDir, 'S1.md');
+    writeFileSync(storyPath, '## Tasks\n\n- [x] implement\n', 'utf8');
+    const r = verify(
+      { phase: STATES.CODE_REVIEW, story_key: 'S1', story_file_path: storyPath },
+      { findings: [{ id: 'F1', action: 'defer', rationale: 'minor' }] },
+      { projectRoot },
+    );
+    expect(r.ok).toBe(false);
+    expect(r.issues.join(' ')).toMatch(/review artifact missing/);
+  });
 });
 
 describe('verify PATCH_APPLY', () => {
@@ -959,6 +994,21 @@ describe('verify NANO_QUICK_DEV', () => {
 
   it("fails when sprint-status still shows 'in-progress'", () => {
     seedSprintStatus('development_status:\n  S1: in-progress\n');
+    const r = verify(
+      { phase: STATES.NANO_QUICK_DEV, story_key: 'S1' },
+      { tests_run: 5, tests_failed: 0, commit_sha: 'abc' },
+      { projectRoot },
+    );
+    expect(r.ok).toBe(false);
+    expect(r.issues.join(' ')).toContain("expected 'done'");
+  });
+
+  // BMad v6.10 quick-dev self-syncs sprint-status through `in-progress` →
+  // `review` → `done` (sync-sprint-status.md). The nano verifier must require
+  // the terminal `done`: a run that stalled at the new intermediate `review`
+  // state is NOT a completed story.
+  it("fails when 6.10 quick-dev left the story at the intermediate 'review' state", () => {
+    seedSprintStatus('development_status:\n  S1: review\n');
     const r = verify(
       { phase: STATES.NANO_QUICK_DEV, story_key: 'S1' },
       { tests_run: 5, tests_failed: 0, commit_sha: 'abc' },

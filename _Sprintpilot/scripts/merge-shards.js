@@ -33,6 +33,7 @@ const path = require('node:path');
 
 const { parseArgs } = require('../lib/runtime/args');
 const log = require('../lib/runtime/log');
+const { implArtifactsDir } = require('../lib/runtime/bmad-output');
 const shardMod = require('./state-shard.js');
 
 const { yamlDump, yamlLoad, KIND_DIR, listShardStories, stripReservedKeys } = shardMod;
@@ -49,27 +50,6 @@ function help() {
       '  --dry-run       Compute the merge but do not write files.',
     ].join('\n'),
   );
-}
-
-// Read BMad's `output_folder` from _bmad/bmm/config.yaml if present, so
-// projects that have configured a non-default output dir don't desync
-// from sibling scripts (mark-done-stories-tasks.js etc.).
-function readOutputFolder(projectRoot) {
-  const cfg = path.join(projectRoot, '_bmad', 'bmm', 'config.yaml');
-  if (!fs.existsSync(cfg)) return null;
-  try {
-    const body = fs.readFileSync(cfg, 'utf8');
-    const m = body.match(/^output_folder\s*:\s*(\S+)/m);
-    if (!m) return null;
-    return m[1].replace(/^["']|["']$/g, '').trim();
-  } catch {
-    return null;
-  }
-}
-
-function implArtifactsDir(projectRoot) {
-  const folder = readOutputFolder(projectRoot) || '_bmad-output';
-  return path.join(projectRoot, folder, 'implementation-artifacts');
 }
 
 // ──────────────────────────────────────────────────────────────────

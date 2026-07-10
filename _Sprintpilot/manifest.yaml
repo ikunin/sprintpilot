@@ -3,8 +3,9 @@ addon:
   version: 2.7.5
   description: Sprintpilot — autopilot and multi-agent addon for BMad Method (git workflow, parallel agents, autonomous story execution)
   # Floor is 6.2.1: the nano profile relies on bmad-quick-dev's step-oneshot.md,
-  # which first appears in 6.2.1. Tested through BMad Method v6.8.0.
+  # which first appears in 6.2.1. Tested through BMad Method v6.10.0.
   bmad_compatibility: ">=6.2.1"
+  bmad_tested_through: "6.10.0"
   modules:
     git:
       enabled: true
