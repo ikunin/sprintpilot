@@ -22,7 +22,46 @@ The per-story flow depends on the active `complexity_profile` in
 
 This policy is enforced by the orchestrator state machine (`_Sprintpilot/lib/orchestrator/state-machine.js` and `adapt.js`) driven from `_Sprintpilot/skills/sprint-autopilot-on/workflow.orchestrator.md`, using profile resolution from `_Sprintpilot/scripts/resolve-profile.js`. When the profile key is absent, the autopilot falls back to `medium`.
 
-### Mandatory sequence per story (all profiles except `nano`)
+### Fast lane — sanctioned per-story quick-dev under full profiles (opt-in, default OFF)
+
+When `autopilot.fast_lane.enabled` is `true`, the full profiles (`small`,
+`medium`, `large`, `legacy`) may route **individual LOW-RISK stories** through
+`bmad-quick-dev` (one-shot) instead of the 7-step cycle, while every
+substantial story keeps the full cycle. This is the **same kind of sanctioned,
+opt-in exception as `nano`** — not an implicit relaxation of the RED-first
+rule. It is **OFF by default**; the installer asks whether to enable it, and
+full profiles behave exactly as before when it is off.
+
+A fast-laned story still runs `bmad-create-story` first (only then does it go
+to `bmad-quick-dev` instead of the 7-step cycle) — the gate needs the story
+file's Acceptance Criteria and declared paths to enforce its guardrails, and
+that file doesn't exist until create-story writes it. (nano, by contrast,
+skips create-story entirely.)
+
+A story is fast-laned only when a deterministic pre-story gate
+(`_Sprintpilot/lib/orchestrator/fast-lane-gate.js`) says so. The gate is
+**conservative — it defaults to `full` on any uncertainty**:
+
+- more Acceptance Criteria than `fast_lane.max_ac` → full;
+- any declared path matching a `deny_globs` entry (auth / migrations /
+  secrets) → full, even if the story is tagged `fast_lane: true`;
+- inference only routes `fast` when **every** path the story declares is
+  covered by `allow_globs`;
+- an explicit story tag (`fast_lane: true|false` / `risk: low|high`) can force
+  the decision (a `full`-forcing tag always wins over a `fast` one).
+
+Guardrails that still hold on a fast-laned story: **tests are still required**
+(`verifyNanoQuickDev` needs `tests_run > 0`, a commit SHA, and
+sprint-status `done`). If the story's quick-dev run **fails outright**, the
+autopilot re-runs the full 7-step cycle for it (from `bmad-create-story`); if it
+**completes but reports failing tests or a high-severity finding**, the
+autopilot routes it through the full adversarial `bmad-code-review` it skipped.
+Either way the story is remembered (`fast_lane_forced_full`) so it is never
+re-fast-laned — a misclassified story self-corrects rather than shipping
+unreviewed. Every routing choice is auditable via the `fast_lane_decision`
+ledger entry.
+
+### Mandatory sequence per story (all profiles except `nano`, and non-fast-laned stories under the fast lane)
 
 1. `bmad-create-story` — story file complete
 2. `bmad-check-implementation-readiness` — no blockers

@@ -37,6 +37,30 @@ autopilot:
   # to false is a one-shot opt-out for net-new projects only.
   auto_plan_on_start: false
 
+  # Quick-dev fast lane — per-story routing of LOW-RISK stories through
+  # bmad-quick-dev (one-shot) under a FULL profile, while substantial
+  # stories keep the mandatory 7-step BMad cycle. DEFAULT OFF: when
+  # disabled, full profiles behave exactly as before. This is a sanctioned,
+  # opt-in relaxation of the RED-first rule (see AGENTS.md); the installer
+  # prompts whether to enable it. A pre-story gate (fast-lane-gate.js)
+  # decides fast|full deterministically and defaults to `full` on any
+  # uncertainty; a fast-laned story that fails tests or hits high severity
+  # bounces back to the full cycle and is remembered for the rest of the
+  # sprint.
+  # NOTE: glob lists are comma-separated STRINGS, not YAML sequences —
+  # resolve-profile.js ships a narrow YAML parser (no array support) into the
+  # user's project, so `allow_globs: "a,b"` is the portable representation.
+  # flatToProfile splits them into arrays.
+  fast_lane:
+    enabled: false                 # master switch (installer prompts)
+    max_ac: 3                      # more Acceptance Criteria than this → never fast-lane
+    # A story only *infers* fast when every path it declares is allow-listed.
+    allow_globs: "docs/**,**/*.md"
+    # Any declared path matching a deny glob forces full — beats an explicit
+    # fast tag (hard safety for auth / migrations / secrets / infra).
+    deny_globs: "**/auth/**,**/migrations/**,**/*secret*,**/*secret*/**"
+    require_story_tag: false       # true = only stories tagged `fast_lane: true` / `risk: low` fast-lane
+
 git:
   granularity: story               # story | epic
   worktree:

@@ -17,6 +17,8 @@ const { _internals } = installMod as {
       retrospectiveMode: string | null;
       autoPlanOnStart: boolean | null;
       autoInferDependencies: boolean | null;
+      fastLaneEnabled: boolean | null;
+      fastLaneMaxAc: number | null;
     }>;
     patchAutopilotConfig: (
       root: string,
@@ -24,9 +26,13 @@ const { _internals } = installMod as {
         sessionStoryLimit?: number;
         retrospectiveMode?: string;
         autoPlanOnStart?: boolean;
+        fastLaneEnabled?: boolean;
+        fastLaneMaxAc?: number;
       },
     ) => Promise<void>;
     applyScalar: (source: string, key: string, value: string | number) => string;
+    applyFastLaneEnabled: (source: string, enabled: boolean) => string;
+    applyFastLaneMaxAc: (source: string, value: number) => string;
     verifySkillManifest: (
       projectRoot: string,
       bundleDir?: string,
@@ -47,6 +53,8 @@ const {
   readExistingAutopilotConfig,
   patchAutopilotConfig,
   applyScalar,
+  applyFastLaneEnabled,
+  applyFastLaneMaxAc,
   verifySkillManifest,
   pruneOrphanSkillsFromToolDir,
   SPRINTPILOT_SKILL_PREFIXES,
@@ -80,6 +88,8 @@ describe('readExistingAutopilotConfig', () => {
       retrospectiveMode: null,
       autoPlanOnStart: null,
       autoInferDependencies: null,
+      fastLaneEnabled: null,
+      fastLaneMaxAc: null,
     });
   });
 
@@ -91,6 +101,8 @@ describe('readExistingAutopilotConfig', () => {
       retrospectiveMode: 'stop',
       autoPlanOnStart: null,
       autoInferDependencies: null,
+      fastLaneEnabled: null,
+      fastLaneMaxAc: null,
     });
   });
 
@@ -104,6 +116,8 @@ describe('readExistingAutopilotConfig', () => {
       retrospectiveMode: 'skip',
       autoPlanOnStart: null,
       autoInferDependencies: null,
+      fastLaneEnabled: null,
+      fastLaneMaxAc: null,
     });
   });
 
@@ -127,6 +141,8 @@ describe('readExistingAutopilotConfig', () => {
       retrospectiveMode: null,
       autoPlanOnStart: null,
       autoInferDependencies: null,
+      fastLaneEnabled: null,
+      fastLaneMaxAc: null,
     });
   });
 
@@ -238,6 +254,135 @@ describe('patchAutopilotConfig', () => {
     const raw = readConfig();
     expect(raw).toContain('session_story_limit: 5  # matches our sprint length');
     expect(raw).toContain('retrospective_mode: skip');
+  });
+});
+
+// ──────────────────────────────────────────────────────────────────
+// Fast lane — autopilot.fast_lane.enabled (nested key)
+// ──────────────────────────────────────────────────────────────────
+
+describe('applyFastLaneEnabled', () => {
+  it('rewrites the enabled: line inside an existing fast_lane block', () => {
+    const src = 'autopilot:\n  fast_lane:\n    enabled: false\n';
+    expect(applyFastLaneEnabled(src, true)).toContain('    enabled: true');
+  });
+
+  it('preserves a trailing comment on the enabled line', () => {
+    const src = 'autopilot:\n  fast_lane:\n    enabled: false  # off by default\n';
+    expect(applyFastLaneEnabled(src, true)).toContain('    enabled: true  # off by default');
+  });
+
+  it('tolerates comment lines between the header and enabled:', () => {
+    const src = 'autopilot:\n  fast_lane:\n    # master switch\n    enabled: false\n';
+    expect(applyFastLaneEnabled(src, true)).toContain('    enabled: true');
+  });
+
+  it('inserts enabled: under a headerless fast_lane block', () => {
+    const src = 'autopilot:\n  fast_lane:\n';
+    expect(applyFastLaneEnabled(src, true)).toContain('    enabled: true');
+  });
+
+  it('appends a fast_lane block when none exists', () => {
+    const src = 'autopilot:\n  session_story_limit: 3\n';
+    const out = applyFastLaneEnabled(src, true);
+    expect(out).toContain('  fast_lane:\n    enabled: true');
+  });
+
+  it('bails (returns input) with no autopilot: header', () => {
+    const src = '# hand-edited\nsome_other: thing\n';
+    expect(applyFastLaneEnabled(src, true)).toBe(src);
+  });
+});
+
+describe('fast_lane block robustness (hand-reordered keys)', () => {
+  it('reads enabled even when max_ac was reordered above it (F1)', async () => {
+    // A hand-reordered block must not read null → a --yes reinstall must not
+    // silently flip enabled:true back to false.
+    writeConfig('autopilot:\n  fast_lane:\n    max_ac: 4\n    enabled: true\n');
+    const out = await readExistingAutopilotConfig(root);
+    expect(out.fastLaneEnabled).toBe(true);
+    expect(out.fastLaneMaxAc).toBe(4);
+  });
+
+  it('applyFastLaneMaxAc inserts under the fast_lane block, not a foreign enabled (F2)', () => {
+    // A nested `enabled:` under a different block above fast_lane must not
+    // capture the max_ac insertion.
+    const src = 'autopilot:\n  other:\n    enabled: true\n  fast_lane:\n    enabled: true\n';
+    const out = applyFastLaneMaxAc(src, 5);
+    // max_ac lands after the fast_lane enabled, not the `other` enabled.
+    expect(out).toBe(
+      'autopilot:\n  other:\n    enabled: true\n  fast_lane:\n    enabled: true\n    max_ac: 5\n',
+    );
+  });
+});
+
+describe('applyFastLaneMaxAc', () => {
+  it('inserts max_ac right after the enabled line when absent', () => {
+    const src = 'autopilot:\n  fast_lane:\n    enabled: true\n';
+    expect(applyFastLaneMaxAc(src, 5)).toBe(
+      'autopilot:\n  fast_lane:\n    enabled: true\n    max_ac: 5\n',
+    );
+  });
+
+  it('replaces an existing active max_ac line', () => {
+    const src = 'autopilot:\n  fast_lane:\n    enabled: true\n    max_ac: 3\n';
+    expect(applyFastLaneMaxAc(src, 7)).toContain('max_ac: 7');
+  });
+
+  it('ignores commented-out max_ac and inserts an active one', () => {
+    const src = 'autopilot:\n  fast_lane:\n    enabled: true\n    # max_ac: 3\n';
+    const out = applyFastLaneMaxAc(src, 2);
+    expect(out).toContain('    max_ac: 2');
+    expect(out).toContain('    # max_ac: 3');
+  });
+
+  it('no-ops on a negative / non-numeric value', () => {
+    const src = 'autopilot:\n  fast_lane:\n    enabled: true\n';
+    expect(applyFastLaneMaxAc(src, -1 as unknown as number)).toBe(src);
+  });
+});
+
+describe('fast_lane round-trips through patch + read', () => {
+  it('patchAutopilotConfig writes enabled and readExistingAutopilotConfig parses it', async () => {
+    writeConfig('autopilot:\n  fast_lane:\n    enabled: false\n');
+    await patchAutopilotConfig(root, {
+      sessionStoryLimit: 3,
+      retrospectiveMode: 'auto',
+      fastLaneEnabled: true,
+    });
+    const out = await readExistingAutopilotConfig(root);
+    expect(out.fastLaneEnabled).toBe(true);
+    expect(readConfig()).toContain('    enabled: true');
+  });
+
+  it('leaves fastLaneEnabled null when the block is absent', async () => {
+    writeConfig('autopilot:\n  session_story_limit: 3\n');
+    const out = await readExistingAutopilotConfig(root);
+    expect(out.fastLaneEnabled).toBeNull();
+  });
+
+  it('writes + reads back max_ac when the lane is enabled', async () => {
+    writeConfig('autopilot:\n  fast_lane:\n    enabled: false\n');
+    await patchAutopilotConfig(root, {
+      sessionStoryLimit: 3,
+      retrospectiveMode: 'auto',
+      fastLaneEnabled: true,
+      fastLaneMaxAc: 5,
+    });
+    const out = await readExistingAutopilotConfig(root);
+    expect(out.fastLaneEnabled).toBe(true);
+    expect(out.fastLaneMaxAc).toBe(5);
+  });
+
+  it('does not write max_ac when the lane is disabled', async () => {
+    writeConfig('autopilot:\n  fast_lane:\n    enabled: false\n');
+    await patchAutopilotConfig(root, {
+      sessionStoryLimit: 3,
+      retrospectiveMode: 'auto',
+      fastLaneEnabled: false,
+      fastLaneMaxAc: 5,
+    });
+    expect(readConfig()).not.toContain('max_ac:');
   });
 });
 

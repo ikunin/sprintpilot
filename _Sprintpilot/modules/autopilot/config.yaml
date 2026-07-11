@@ -88,3 +88,26 @@ autopilot:
   # The halts are deliberately user_prompts (recoverable) so the LLM can
   # be re-prompted with extra context; the next session continues from
   # the same phase. Leave the key unset to inherit profile defaults.
+
+  # Quick-dev fast lane — per-story routing of LOW-RISK stories through
+  # bmad-quick-dev (one-shot) under a FULL profile, while substantial
+  # stories keep the mandatory 7-step BMad cycle.
+  #
+  # DEFAULT OFF. When disabled, small/medium/large/legacy profiles behave
+  # exactly as before — no story is ever fast-laned. This is a sanctioned,
+  # opt-in relaxation of the RED-first rule (see AGENTS.md); the installer
+  # asks whether to enable it. A deterministic pre-story gate decides
+  # fast|full and defaults to `full` on any uncertainty; a fast-laned story
+  # that fails its tests or hits a high-severity finding bounces back to the
+  # full cycle and is remembered for the rest of the sprint.
+  #
+  # Only `enabled` is prompted at install; the remaining knobs inherit the
+  # profile defaults in profiles/_base.yaml. Uncomment to override. NOTE:
+  # glob lists are comma-separated STRINGS (the portable representation for
+  # Sprintpilot's narrow YAML reader), e.g. "docs/**,**/*.md".
+  fast_lane:
+    enabled: false
+    # max_ac: 3                         # more Acceptance Criteria than this → never fast-lane
+    # allow_globs: "docs/**,**/*.md"    # infer fast only when every declared path is allow-listed
+    # deny_globs: "**/auth/**,**/migrations/**,**/*secret*,**/*secret*/**"  # any match forces full (hard safety)
+    # require_story_tag: false          # true = only stories tagged `fast_lane: true` / `risk: low`

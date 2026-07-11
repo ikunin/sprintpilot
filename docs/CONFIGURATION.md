@@ -28,6 +28,79 @@ Profile resolution happens at boot via `_Sprintpilot/scripts/resolve-profile.js`
 | `autopilot.retrospective_mode` | `auto` | `auto` (deterministic artifact, continue) / `stop` (pause for `/bmad-retrospective`) / `skip` (no artifact). |
 | `autopilot.implementation_flow` | `full` (nano: `quick`) | `full` runs the 7-step BMad cycle (create-story → check-readiness → dev-RED → dev-GREEN → code-review → patch → retrospective). `quick` routes every story through `bmad-quick-dev` and boots fresh sessions directly at `NANO_QUICK_DEV`. |
 
+### Quick-Dev Fast Lane
+
+Opt-in (**default OFF**) per-story routing of LOW-RISK stories through `bmad-quick-dev` (one-shot) under a *full* profile, while substantial stories keep the mandatory 7-step cycle. This is a sanctioned relaxation of the RED-first rule (same class as `nano`), not a silent skip — the installer prompts whether to enable it and for `max_ac`. See [quick-dev-fast-lane-plan.md](quick-dev-fast-lane-plan.md) for the full design.
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `autopilot.fast_lane.enabled` | `false` | Master switch. When off, `small`/`medium`/`large`/`legacy` behave exactly as before — no story is ever fast-laned. |
+| `autopilot.fast_lane.max_ac` | `3` | Stories with more Acceptance Criteria than this never fast-lane (size gate; beats an explicit fast tag). |
+| `autopilot.fast_lane.allow_globs` | `"docs/**,**/*.md"` | Comma-separated globs. A story only *infers* `fast` when **every** path it declares is allow-listed. |
+| `autopilot.fast_lane.deny_globs` | `"**/auth/**,**/migrations/**,**/*secret*,**/*secret*/**"` | Comma-separated globs. Any declared path matching forces `full` — hard safety, beats a fast tag. |
+| `autopilot.fast_lane.require_story_tag` | `false` | When `true`, only stories that tag *themselves* `fast_lane: true` / `risk: low` fast-lane (an epic-level tag no longer suffices). |
+
+A fast-lane candidate runs `bmad-create-story` FIRST (so the gate reads real acceptance criteria / declared paths), then routes `CREATE_STORY → NANO_QUICK_DEV` when `fast`, else into the 7-step cycle. `nano` still skips create-story. The gate is conservative — **any uncertainty → `full`**.
+
+#### Setting fast/full per story or epic
+
+Three ways, from most to least authoritative. Use whichever fits — you can mix them.
+
+| Method | How | Scope | Persists in | Survives a re-plan? |
+|---|---|---|---|---|
+| **1. Explicit mark** *(highest authority)* | Chat, CLI, or the planner (below) | Story **or** epic | `fast-lane-overrides.json` (Sprintpilot-owned) | **Yes** |
+| **2. Story-file tag** | A line in the story `.md` | Story | The BMad story file | Yes (the story file isn't regenerated) |
+| **3. Epic/plan tag** | A field on the epic/story entry in `sprint-plan.yaml` | Epic (cascades) or story | `sprint-plan.yaml` | **No** — a `/sprintpilot-plan-sprint` re-run may regenerate it |
+
+**1 — Explicit mark (recommended for one-offs).** You don't edit files; the mark is durable and clobber-resistant.
+
+```bash
+# CLI (also runnable as `! ...` from the IDE chat)
+autopilot fast-lane 4-1-docs fast     # this story → one-shot quick-dev
+autopilot fast-lane 4-2-migration full # this story → full 7-step cycle
+autopilot fast-lane epic-3 fast        # every story in epic 3 (unless the story says otherwise)
+autopilot fast-lane 4-1-docs auto      # clear the mark → back to the automatic gate
+```
+In chat, just say it — the orchestrator maps plain language to the `set_fast_lane` command: *"fast-lane story 4-1"*, *"keep 4-2 full"*, *"don't fast-lane 4-2"*, *"fast-lane epic 5"*, *"reset 4-1 to auto"*. During `/sprintpilot-plan-sprint`, **Step 11c** offers a fast|full pass over the sprint's stories. A **story mark wins over its epic mark**. A `fast` mark applies **even when `fast_lane.enabled` is `false`** (mark one story fast without flipping the whole switch).
+
+**2 — Story-file tag** (put it anywhere in `_bmad-output/implementation-artifacts/<story-key>.md`):
+
+```markdown
+fast_lane: true      # this story → fast
+fast_lane: false     # this story → full
+risk: low            # → fast
+risk: high           # → full   (also: critical; `medium` = no opinion)
+```
+
+**3 — Epic/plan tag** (add a `fast_lane` and/or `risk` field to an entry in `sprint-plan.yaml`):
+
+```yaml
+epics:
+  - id: "3"
+    fast_lane: true        # cascades to every story in epic 3
+stories:
+  - key: 3-4-migration
+    epic: "3"
+    risk: high             # overrides the epic for this one story
+```
+
+#### Precedence (first match wins)
+
+1. **`fast_lane_forced_full`** — a story the escalation net bounced *after it actually failed the fast path* → `full` (always; prevents a fast→fail→fast loop).
+2. **Explicit mark** — a `full` mark → `full`; a `fast` mark → `fast`, overriding deny-globs, `max_ac`, and every tag (you're the human). Story mark beats epic mark. `require_story_tag` does not apply to a mark.
+3. **The automatic gate** (only for stories with no mark, and only when `enabled: true`):
+   1. explicit **full-forcing** tag (story-file or epic) → `full`
+   2. **`deny_globs`** match → `full` (beats a `fast` tag — hard safety)
+   3. more ACs than **`max_ac`** → `full` (beats a `fast` tag)
+   4. explicit **`fast`** tag (story-file beats epic) → `fast`
+   5. `require_story_tag: true` and no story-file `fast` tag → `full`
+   6. **inference** — every declared path ∈ `allow_globs` → `fast`
+   7. default → `full`
+
+**Guardrails.** Tests are still required (`verifyNanoQuickDev` enforces `tests_run > 0`, a commit SHA, and sprint-status `done`). If a fast-laned quick-dev **fails**, the autopilot re-runs the full 7-step cycle from `bmad-create-story`; if it **completes but reports failing tests / a high-severity finding**, it routes the story through the adversarial `bmad-code-review` it skipped. Glob lists are comma-separated strings (the portable representation for Sprintpilot's narrow YAML reader), e.g. `"docs/**,**/*.md"`.
+
+**Auditing.** Every routing choice is a `fast_lane_decision` ledger entry (a mark logs `reasons: ['user_override_fast'|'user_override_full']`); setting a mark logs `fast_lane_override_set`. `autopilot progress` and the session report show fast-laned / kept-full / escalated counts.
+
 ### Per-phase wall-clock budgets (v2.4.0)
 
 | Key | Default | Description |

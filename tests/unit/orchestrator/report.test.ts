@@ -3,23 +3,48 @@ import { describe, expect, it } from 'vitest';
 // @ts-expect-error — CommonJS module
 import report from '../../../_Sprintpilot/lib/orchestrator/report.js';
 
-const { render, ledgerSummary, recentActions, blockers, nextActionHint } = report as {
-  render: (
-    state: Record<string, unknown>,
-    entries: Record<string, unknown>[],
-    profile: Record<string, unknown>,
-  ) => string;
-  ledgerSummary: (entries: Record<string, unknown>[]) => string;
-  recentActions: (entries: Record<string, unknown>[], limit?: number) => string;
-  blockers: (entries: Record<string, unknown>[]) => string;
-  nextActionHint: (state: Record<string, unknown>, profile: Record<string, unknown>) => string;
-};
+const { render, ledgerSummary, fastLaneSummary, recentActions, blockers, nextActionHint } =
+  report as {
+    render: (
+      state: Record<string, unknown>,
+      entries: Record<string, unknown>[],
+      profile: Record<string, unknown>,
+    ) => string;
+    ledgerSummary: (entries: Record<string, unknown>[]) => string;
+    fastLaneSummary: (entries: Record<string, unknown>[]) => string;
+    recentActions: (entries: Record<string, unknown>[], limit?: number) => string;
+    blockers: (entries: Record<string, unknown>[]) => string;
+    nextActionHint: (state: Record<string, unknown>, profile: Record<string, unknown>) => string;
+  };
 
 const entry = (kind: string, extra: Record<string, unknown> = {}) => ({
   seq: 1,
   ts: '2026-05-12T10:00:00.000Z',
   kind,
   ...extra,
+});
+
+describe('fastLaneSummary', () => {
+  it('returns empty when the fast lane never fired', () => {
+    expect(fastLaneSummary([entry('action_emitted')])).toBe('');
+  });
+
+  it('counts a fast-then-escalated story as fast-laned, not kept-full', () => {
+    const entries = [
+      entry('fast_lane_decision', { story_key: '1-1', decision: 'fast' }),
+      entry('fast_lane_decision', { story_key: '1-2', decision: 'full' }),
+      entry('fast_lane_decision', { story_key: '1-3', decision: 'fast' }),
+      // 1-3 later bounced to full → it STILL ran quick-dev, so it stays counted
+      // as fast-laned AND is reported as escalated.
+      entry('fast_lane_decision', { story_key: '1-3', decision: 'full' }),
+      entry('profile_escalated', { from: 'fast_lane', story_key: '1-3' }),
+    ];
+    const out = fastLaneSummary(entries);
+    expect(out).toContain('Stories fast-laned (ran quick-dev one-shot): 2'); // 1-1 + 1-3
+    expect(out).toContain('Stories kept on the full cycle: 1'); // only 1-2
+    expect(out).toContain('Fast-laned stories escalated back to full: 1'); // 1-3
+    expect(out).toContain('1-3');
+  });
 });
 
 describe('render', () => {

@@ -103,7 +103,7 @@ The orchestrator is deliberately split so that all *decisions* are pure and test
                         │ (state, signal)              │ (newState, action, sideEffects)
                         ▼                              │
         ┌─────────────────────────────────────────────────────────────────┐
-        │  PURE CORE — _Sprintpilot/lib/orchestrator/ (22 modules)          │
+        │  PURE CORE — _Sprintpilot/lib/orchestrator/ (24 modules)          │
         │                                                                   │
         │  state-machine.js   phase enum + transition tables + nextAction   │
         │  adapt.js           interpretSignal / advanceState (signal → state)│
@@ -165,6 +165,17 @@ PREPARE_STORY_BRANCH → NANO_QUICK_DEV → STORY_DONE → STORY_LAND? → EPIC_
 ```
 
 Quality gates are preserved inside quick-dev's own review step. If quick-dev's tests fail or its severity classification is `high`, the session **escalates** to the full flow (§8.4).
+
+### Fast-lane flow (full profiles, `autopilot.fast_lane.enabled: true`)
+
+Opt-in (default OFF). Under a *full* profile, a deterministic pre-story gate (`lib/orchestrator/fast-lane-gate.js`, consulted by `deriveEffectiveProfile` in `bin/autopilot.js`) may route an individual LOW-RISK story through quick-dev while substantial stories keep the 7-step cycle. Unlike nano, a fast-laned story runs `bmad-create-story` FIRST — the gate needs a real story file (acceptance criteria + declared paths) to enforce its guardrails, and that file doesn't exist until create-story writes it:
+
+```
+PREPARE_STORY_BRANCH → CREATE_STORY → NANO_QUICK_DEV → STORY_DONE → …
+                                    ↑ gate decides fast|full here (with the real file)
+```
+
+The effective profile is flipped to `implementation_flow = quick` + `fast_lane_active = true` per story (distinguishing it from nano); the decision is locked at `NANO_QUICK_DEV` so quick-dev's post-implementation file edits can't re-flip it. See §8.4 for the escalation net and `docs/quick-dev-fast-lane-plan.md` for the gate/guardrails.
 
 ### Skill mapping per phase
 
@@ -347,9 +358,12 @@ A single `complexity_profile` reshapes the whole flow. It lives in `_Sprintpilot
 | large | 3 | 3 | dev_red 30m, dev_green 60m, review/patch 30m |
 | legacy | 2 | 3 | disabled (preserves v1.0.5) |
 
-### 9.4 Nano → full escalation (`escalateOnFailure`)
+### 9.4 Quick-dev → full escalation (`escalateOnFailure`)
 
-Only `nano` escalates. When a `NANO_QUICK_DEV` success reports `tests_failed > 0` (and `fallback_on_tests_fail`) or `severity = high` (and `fallback_on_quick_dev_high_severity`), the profile is replaced in-memory with the `fallback_target` (default `small`), switched to `implementation_flow = full`, and budgets upgraded. **Escalation is session-scoped — never written back to config.** The next session starts fresh as `nano`. A `profile_escalated` side effect records the reason.
+Two origins share this trigger, both firing at `NANO_QUICK_DEV`:
+
+- **`nano`** (whole-profile): when a `NANO_QUICK_DEV` success reports `tests_failed > 0` (and `fallback_on_tests_fail`) or `severity = high` (and `fallback_on_quick_dev_high_severity`), the profile is replaced in-memory with the `fallback_target` (default `small`), switched to `implementation_flow = full`, and budgets upgraded, so the session's REMAINING stories run the full cycle. **Session-scoped — never written back to config.** A `profile_escalated` side effect records the reason.
+- **Fast lane** (`fast_lane_active`, per story): a single fast-laned story that flags a problem bounces to the full cycle for THAT story and is recorded in `fast_lane_forced_full` (a durable, write-through marker) so the gate never re-fast-lanes it. A **hard failure** (`status: failure`, story not `done`) re-runs the full 7-step cycle from `CREATE_STORY`; a **success-but-flagged** story (already marked `done`) routes to `CODE_REVIEW` — the adversarial review the fast lane skipped — because `composeRuntimeState` would skip-reject a `done` story at `CREATE_STORY` but not at `CODE_REVIEW`. An `escalation_note` (surfaced as `profile_specific_notes`) reframes the re-entry for the skill.
 
 ---
 

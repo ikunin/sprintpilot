@@ -15,6 +15,47 @@ const { flatToProfile, escalateOnFailure, ORCHESTRATOR_DEFAULTS_BY_PROFILE } = p
   >;
 };
 
+describe('flatToProfile — fast_lane config', () => {
+  it('defaults to disabled with empty glob lists on an empty tree', () => {
+    const p = flatToProfile({}, 'medium');
+    expect(p.fast_lane_enabled).toBe(false);
+    expect(p.fast_lane_max_ac).toBe(3);
+    expect(p.fast_lane_allow_globs).toEqual([]);
+    expect(p.fast_lane_deny_globs).toEqual([]);
+    expect(p.fast_lane_require_story_tag).toBe(false);
+  });
+
+  it('parses comma-separated glob strings into arrays (narrow-parser shape)', () => {
+    const p = flatToProfile(
+      {
+        autopilot: {
+          fast_lane: {
+            enabled: true,
+            max_ac: 5,
+            allow_globs: 'docs/**, **/*.md',
+            deny_globs: '**/auth/**',
+            require_story_tag: true,
+          },
+        },
+      },
+      'medium',
+    );
+    expect(p.fast_lane_enabled).toBe(true);
+    expect(p.fast_lane_max_ac).toBe(5);
+    expect(p.fast_lane_allow_globs).toEqual(['docs/**', '**/*.md']);
+    expect(p.fast_lane_deny_globs).toEqual(['**/auth/**']);
+    expect(p.fast_lane_require_story_tag).toBe(true);
+  });
+
+  it('also tolerates real arrays (js-yaml host)', () => {
+    const p = flatToProfile(
+      { autopilot: { fast_lane: { allow_globs: ['a/**', 'b/**'] } } },
+      'medium',
+    );
+    expect(p.fast_lane_allow_globs).toEqual(['a/**', 'b/**']);
+  });
+});
+
 describe('flatToProfile', () => {
   it('produces a typed Profile from an empty resolved tree (medium defaults)', () => {
     const p = flatToProfile({}, 'medium');

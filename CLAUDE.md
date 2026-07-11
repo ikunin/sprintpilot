@@ -55,6 +55,8 @@ The orchestrator separates **decision logic** (deterministic, pure, fully tested
 - `state-store.js` — the **single chokepoint** for `autopilot-state.yaml` writes. `coalesce_state_writes` splits CRITICAL_KEYS (write-through) from non-critical (buffered, flushed at story boundary). Atomic write via tmp + rename. **Deep-merges; cannot delete a nested key** — that constraint is why `excluded-stories.json` is its own file rather than a field on `autopilot-state.yaml`.
 - `action-ledger.js` — append-only JSONL audit at `_bmad-output/implementation-artifacts/ledger.jsonl`. Unknown kinds are tolerated by consumers; add new kinds freely.
 - `excluded-stories.js` — Sprintpilot-owned authoritative exclusion ledger. Resolver consults it; `apply_user_commands` populates from `skip_story` / `remove_from_sprint`; `reconcileFromSprintStatus` folds sprint-status terminal-non-done values in. Designed to survive BMad-side clobbers.
+- `fast-lane-gate.js` — pure, deterministic pre-story classifier for the opt-in quick-dev fast lane (default OFF). `(story signals + fast_lane config + forced-full ledger) → fast|full`, conservative (defaults `full`). The CLI (`deriveEffectiveProfile` in `autopilot.js`) reads the story file + `fast_lane_*` profile fields and flips `implementation_flow` to `quick` per-story when the gate says `fast`; a fast-laned quick-dev failure escalates via `escalateOnFailure` (`escalated_from: 'fast_lane'`) and records the story in `state.fast_lane_forced_full` so it re-runs the full cycle and never re-fast-lanes.
+- `fast-lane-overrides.js` — Sprintpilot-owned, durable per-story/epic `fast|full` marks (`fast-lane-overrides.json`), clobber-resistant like `excluded-stories.js`. The highest-authority routing signal: `deriveEffectiveProfile` consults it before the gate (a `fast` mark beats deny-globs/size/tags and applies even when the lane is off; `fast_lane_forced_full` still wins to prevent loops). Set via the `set_fast_lane` UserCommand, the `autopilot fast-lane` CLI, or `/sprintpilot-plan-sprint`.
 - `user-commands.js` / `user-command-applier.js` — validates and applies `UserCommand`s. The applier is pure: `(state, profile, commands) → { newState, newProfile, sideEffects }`. The CLI runs the side-effects.
 - `sprint-plan.js` + `_Sprintpilot/scripts/sprint-plan.js` — dependency-aware plan and the mirror parser. `TERMINAL_STATUSES` is duplicated across `autopilot.js` and `sprint-plan.js`; tests assert the mirror.
 
@@ -87,6 +89,7 @@ Knowing who writes what is critical to avoid stepping on BMad's domain:
 | `autopilot-state.yaml` | Sprintpilot | Volatile per-session state; deep-merged, never wholesale-replaced. |
 | `ledger.jsonl` | Sprintpilot | Append-only audit. |
 | `excluded-stories.json` | Sprintpilot | Durable exclusion ledger; replace-on-write semantics. |
+| `fast-lane-overrides.json` | Sprintpilot | Durable per-story/epic fast\|full marks; replace-on-write; clobber-resistant (survives re-plan). |
 | `sprint-plan.yaml` | Sprintpilot | Dependency-aware plan; validated against the DAG. |
 | `decision-log.yaml` | Sprintpilot | Per-phase decisions audit. |
 | `flaky-quarantine.yaml` | Sprintpilot | Flaky test flip counts + quarantine. |

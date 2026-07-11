@@ -41,7 +41,7 @@ orchestrator emits it.
 
 | `action.type`     | What you do                                                                                      |
 |-------------------|--------------------------------------------------------------------------------------------------|
-| `invoke_skill`    | Run the named BMad skill **verbatim from its own body** (e.g. `bmad-create-story`, `bmad-quick-dev`, `bmad-code-review`). `action.template_slots` is a parameter bag (story_key, prior_diagnosis, relevant_decisions, prior_signals_summary, …) — it's input context for BMad's skill, NOT a replacement for the skill's instructions. When `implementation_flow=quick`, you'll receive `invoke_skill: bmad-quick-dev` per story — follow BMad's `step-oneshot.md`. |
+| `invoke_skill`    | Run the named BMad skill **verbatim from its own body** (e.g. `bmad-create-story`, `bmad-quick-dev`, `bmad-code-review`). `action.template_slots` is a parameter bag (story_key, prior_diagnosis, relevant_decisions, prior_signals_summary, …) — it's input context for BMad's skill, NOT a replacement for the skill's instructions. When `implementation_flow=quick`, you'll receive `invoke_skill: bmad-quick-dev` per story — follow BMad's `step-oneshot.md`. This occurs under `nano` (whole-profile) **and** under a full profile when the opt-in **fast lane** routes an individual low-risk story to quick-dev (see "Fast lane" below) — either way, treat the action identically. |
 | `run_script`      | Execute `action.command` via the host's shell-equivalent. Argv-only — no shell interpolation.    |
 | `git_op`          | Execute `action.steps` in order. The orchestrator pre-plans every git op (commit_and_push_story, merge_epic, push, fetch, create_branch) via `git-plan.js` and inlines the resulting argv sequence — each step has `args: [cmd, ...argv]`, a `description`, and optional metadata fields (see below). **Required**: run each step via `_Sprintpilot/scripts/run-step.js` (see "Step metadata" below) so the metadata contract is enforced uniformly. Argv-only — NO shell interpolation. Halt on first non-retryable failure. Never improvise the git commands or skip a step — `git push` lives in `steps`, not in `op`. Empty `steps: []` (e.g. when `git.enabled: false`) means "no work, signal success." |
 | `parallel_batch`  | Dispatch each child action concurrently (M6+ hosts only — fall back to sequential otherwise).    |
@@ -93,7 +93,7 @@ Wrap everything in `{ "status": "...", ... }` and pass to
 | `failure`             | `reason`, `diagnosis` (first-class — fed back into next retry), `recoverable: boolean`           |
 | `blocked`             | `blocker_kind` (one of the 5 TRUE BLOCKERS or recoverable kinds), `details`, `user_input_needed`, `consecutive_count?` |
 | `propose_alternative` | `reason`, `alternative` (full Action object), `urgency_hint?` (raises impact only). Low impact → auto-accepted; medium / high → orchestrator stores the alternative in `state.pending_alternative` and emits `user_prompt`. The user accepts via `user_input` `{ kind: 'accept_alternative' }` or rejects via `force_continue` (both clear `pending_alternative`). |
-| `user_input`          | `commands: UserCommand[]` (validated server-side; see user-commands.js). Kinds: `skip_story`, `abort_sprint`, `force_continue`, `override_decision`, `change_profile`, `pause` (cleanly halts THIS session; next `/sprint-autopilot-on` resumes), `accept_alternative` (dispatches the stored `pending_alternative`), `trigger_retrospective` (force-routes to RETROSPECTIVE for the current epic regardless of `remaining_stories_in_epic`; use when the user explicitly says "close out epic N with retro" while non-terminal stories remain). **NEVER send `pause` on your own initiative** — see "Pause is human-only" below. |
+| `user_input`          | `commands: UserCommand[]` (validated server-side; see user-commands.js). Kinds: `skip_story`, `abort_sprint`, `force_continue`, `override_decision`, `change_profile`, `pause` (cleanly halts THIS session; next `/sprint-autopilot-on` resumes), `accept_alternative` (dispatches the stored `pending_alternative`), `trigger_retrospective` (force-routes to RETROSPECTIVE for the current epic regardless of `remaining_stories_in_epic`; use when the user explicitly says "close out epic N with retro" while non-terminal stories remain), `set_fast_lane` (`{ story_key? \| epic, decision: 'fast'\|'full'\|'auto' }` — the user's explicit fast/full mark for a story or epic; `auto` clears it. Map plain-language marks to this: "fast-lane story 4-1" → `{story_key:'4-1',decision:'fast'}`; "keep 4-2 full" / "don't fast-lane 4-2" → `{story_key:'4-2',decision:'full'}`; "fast-lane epic 5" → `{epic:'epic-5',decision:'fast'}`; "reset 4-1 to auto" → `{story_key:'4-1',decision:'auto'}`. The mark is durable and the highest-authority routing signal — see "Fast lane" above). **NEVER send `pause` on your own initiative** — see "Pause is human-only" below. |
 | `verify_override`     | `evidence: { decision_log_ref?, explanation, expected_paths? }` — used when verify.js is wrong   |
 
 ## Visibility — show the user a live task list
@@ -261,6 +261,33 @@ expectations.
 
 After N consecutive verify rejections on the same state (profile-
 configured budget), the orchestrator escalates to `user_prompt`.
+
+## Fast lane (opt-in, default OFF)
+
+When `autopilot.fast_lane.enabled` is true, a deterministic pre-story gate may
+route an **individual low-risk story** through `bmad-quick-dev` (one-shot)
+under a full profile, while every substantial story keeps the mandatory
+7-step cycle. You don't decide this — the orchestrator does, and simply emits
+`invoke_skill: bmad-quick-dev` for a fast-laned story exactly as it would
+under `nano`. Nothing changes in how you dispatch actions.
+
+Two things to know:
+
+- **Escalation is automatic.** If a fast-laned quick-dev run fails, reports
+  failing tests, or flags a high-severity finding, the orchestrator bounces
+  that story back to the full cycle (re-emitting `bmad-create-story`, then the
+  7 steps) and never fast-lanes it again. You just follow the emitted actions.
+- **Read `template_slots.profile_specific_notes` on a bounced story.** It
+  carries a `⚠ FAST-LANE ESCALATION` note explaining that quick-dev already
+  committed a *known-deficient* implementation: in DEV_RED, write tests that
+  encode the ACs and the observed failure (they are expected to fail against
+  the current code), then DEV_GREEN fixes. This is a rigor pass over existing
+  code — do not delete the work, harden it. The note is surfaced every phase
+  of the re-run and clears at the next story.
+
+Auditing: each routing choice is logged as a `fast_lane_decision` ledger
+entry, and `autopilot progress` / the session report show fast-laned and
+escalated counts.
 
 ## Git workflow knobs
 

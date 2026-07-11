@@ -56,6 +56,44 @@ const SIGNAL_STATUSES = [
   'verify_override',
 ];
 
+// fastLaneRerunNote(reason, rerunPhase) → a skill-facing note surfaced as
+// `profile_specific_notes` for every phase of a fast-lane escalation.
+//
+// Two shapes, because the two escalation origins re-enter at different phases:
+//   - CREATE_STORY (hard-failure path): quick-dev FAILED, the story is not
+//     `done`, and we re-run the full 7-step cycle over the committed-but-
+//     deficient code. DEV_RED must know it's hardening existing code, not
+//     doing greenfield RED (tests are EXPECTED to fail against current code).
+//   - CODE_REVIEW (success-but-flagged path): quick-dev completed and marked
+//     the story `done`, but reported failing tests / a high-severity finding.
+//     We run the adversarial review the fast lane skipped, over the shipped
+//     code, and patch what it finds.
+const FAST_LANE_REASON_PHRASE = {
+  tests_failed: 'quick-dev reported failing tests',
+  high_severity: 'quick-dev flagged a high-severity finding',
+  quick_dev_failure: 'the quick-dev one-shot failed',
+};
+function fastLaneRerunNote(reason, rerunPhase) {
+  const why = FAST_LANE_REASON_PHRASE[reason] || 'the quick-dev one-shot did not pass';
+  if (rerunPhase === STATES.CODE_REVIEW) {
+    return (
+      `⚠ FAST-LANE ESCALATION — this story was fast-laned (quick-dev one-shot) and completed, ` +
+      `but ${why}. It is being sent through the full adversarial CODE REVIEW that the fast lane ` +
+      `skipped. Review the committed implementation rigorously; treat any finding as real and ` +
+      `route fixes through patch. Do not rubber-stamp it — this pass exists because the one-shot ` +
+      `flagged a problem.`
+    );
+  }
+  return (
+    `⚠ FAST-LANE ESCALATION — this story was routed through quick-dev (one-shot) and bounced ` +
+    `to the full 7-step cycle because ${why}. Quick-dev has ALREADY committed an implementation ` +
+    `on the story branch; treat it as KNOWN-DEFICIENT. This is a rigor pass over existing code, ` +
+    `NOT greenfield: in DEV_RED, write tests that encode the acceptance criteria and the observed ` +
+    `failure — they are EXPECTED to fail against the current implementation — then DEV_GREEN fixes ` +
+    `until all pass, followed by full code review. Do not delete the existing work; harden it.`
+  );
+}
+
 // Pure: given current orchestrator state + the incoming signal, return:
 //   {
 //     newState,     // updated runtime state shape
@@ -197,18 +235,43 @@ function handleSuccess(state, signal, profile, verifyResult, sideEffects) {
     };
   }
 
-  // Verify passed (or wasn't provided). For nano: check escalation triggers.
+  // Verify passed (or wasn't provided). Quick-dev escalation triggers: a
+  // nano session escalates its REMAINING stories to full; a per-story
+  // fast-laned story (fast_lane_active under a FULL profile) bounces THIS
+  // story back to the full 7-step cycle.
   let workingProfile = profile;
+  let fastLaneRerunPhase = null;
+  const forcedFullAdditions = [];
   if (state.phase === STATES.NANO_QUICK_DEV) {
     const escalated = escalateOnFailure(profile, signal.output);
     if (escalated !== profile) {
       workingProfile = escalated;
-      sideEffects.push({
-        kind: 'profile_escalated',
-        from: 'nano',
-        to: escalated.name,
-        reason: escalated.escalation_reason,
-      });
+      if (escalated.escalated_from === 'fast_lane') {
+        // This is the SUCCESS path: quick-dev completed and marked the story
+        // `done` (verifyNanoQuickDev requires it), but reported failing tests
+        // or a high-severity finding. Route to CODE_REVIEW — the adversarial
+        // review the fast lane skipped — NOT to CREATE_STORY: a `done` story
+        // is rejected+skipped by composeRuntimeState at CREATE_STORY (that
+        // phase isn't in its done-rejection skip-set), whereas CODE_REVIEW IS,
+        // so the story survives re-resolution and actually gets the review.
+        // Record it so the gate keeps it full on re-derivation.
+        fastLaneRerunPhase = STATES.CODE_REVIEW;
+        if (state.story_key) forcedFullAdditions.push(state.story_key);
+        sideEffects.push({
+          kind: 'profile_escalated',
+          from: 'fast_lane',
+          to: workingProfile.name,
+          story_key: state.story_key || null,
+          reason: escalated.escalation_reason,
+        });
+      } else {
+        sideEffects.push({
+          kind: 'profile_escalated',
+          from: 'nano',
+          to: escalated.name,
+          reason: escalated.escalation_reason,
+        });
+      }
     }
   }
 
@@ -234,7 +297,7 @@ function handleSuccess(state, signal, profile, verifyResult, sideEffects) {
     }
   }
 
-  const newPhase = nextStateAfterSuccess(state, workingProfile, signal);
+  const newPhase = fastLaneRerunPhase || nextStateAfterSuccess(state, workingProfile, signal);
   if (newPhase === null) {
     // Defensive: shouldn't normally happen since blocking-findings case is handled.
     return {
@@ -253,6 +316,23 @@ function handleSuccess(state, signal, profile, verifyResult, sideEffects) {
 
   // Build the new state: carry forward story-scoped fields; reset retry counters.
   const newState = advanceState(state, workingProfile, newPhase, signal);
+  // Append fast-lane escalations to the durable forced-full ledger (carried
+  // via advanceState's `...state` spread; we union in the new story keys).
+  if (forcedFullAdditions.length > 0) {
+    const existing = Array.isArray(newState.fast_lane_forced_full)
+      ? newState.fast_lane_forced_full
+      : [];
+    newState.fast_lane_forced_full = Array.from(new Set([...existing, ...forcedFullAdditions]));
+    // Re-set the fast-lane escalation note AFTER advanceState (which cleared it
+    // as a new-story field). The note shape depends on the re-entry phase
+    // (CODE_REVIEW review-pass vs CREATE_STORY full re-run).
+    if (fastLaneRerunPhase) {
+      newState.escalation_note = fastLaneRerunNote(
+        workingProfile.escalation_reason,
+        fastLaneRerunPhase,
+      );
+    }
+  }
   return {
     newState,
     newProfile: workingProfile,
@@ -263,6 +343,50 @@ function handleSuccess(state, signal, profile, verifyResult, sideEffects) {
 }
 
 function handleFailure(state, signal, profile, sideEffects) {
+  // Fast-lane hard-failure fallback. A story fast-laned under a FULL profile
+  // whose quick-dev run FAILS (any status:failure, recoverable or not) bounces
+  // to the full 7-step cycle rather than retrying the one-shot: the fast-path
+  // bet was wrong, and the sanctioned recovery is the rigorous cycle, not a
+  // blind retry. The story is recorded in fast_lane_forced_full so the
+  // pre-story gate keeps it full on re-derivation (no loop back to fast). This
+  // complements the success-with-failing-tests escalation in handleSuccess.
+  if (state.phase === STATES.NANO_QUICK_DEV && profile.fast_lane_active) {
+    const fullProfile = {
+      ...profile,
+      implementation_flow: 'full',
+      fast_lane_active: false,
+      escalated_from: 'fast_lane',
+      escalation_reason: 'quick_dev_failure',
+    };
+    sideEffects.push({
+      kind: 'profile_escalated',
+      from: 'fast_lane',
+      to: fullProfile.name,
+      story_key: state.story_key || null,
+      reason: 'quick_dev_failure',
+    });
+    const rerunState = advanceState(state, fullProfile, STATES.CREATE_STORY, signal);
+    const existing = Array.isArray(rerunState.fast_lane_forced_full)
+      ? rerunState.fast_lane_forced_full
+      : [];
+    if (state.story_key && !existing.includes(state.story_key)) {
+      rerunState.fast_lane_forced_full = [...existing, state.story_key];
+    }
+    // Carry the failure diagnosis into the full re-run's first phase, and set
+    // the fast-lane re-run note (surfaced every phase) so DEV_RED knows it's
+    // hardening existing, committed-but-deficient code — not doing greenfield
+    // RED. Re-set AFTER advanceState, which cleared it as a new-story field.
+    rerunState.prior_diagnosis = signal.diagnosis || null;
+    rerunState.escalation_note = fastLaneRerunNote('quick_dev_failure', STATES.CREATE_STORY);
+    return {
+      newState: rerunState,
+      newProfile: fullProfile,
+      nextAction: nextAction(rerunState, fullProfile),
+      sideEffects,
+      verdict: 'advanced',
+    };
+  }
+
   const recoverable = signal.recoverable !== false;
   const retryCount = (state.retry_count_this_phase || 0) + 1;
   const exhausted = retryCount > profile.retry_budget_per_action;
@@ -706,6 +830,20 @@ function advanceState(state, profile, newPhase, signal) {
     next.test_files = null;
   }
 
+  // escalation_note is story-scoped context (e.g. the fast-lane re-run notice).
+  // Clear it at the FIRST phase of a fresh story so it never bleeds into the
+  // next story. PREPARE_STORY_BRANCH is included because under branch-prep
+  // profiles it — not CREATE_STORY — is the new-story boundary. A fast-lane
+  // escalation routes TO CREATE_STORY (branch already exists) and re-sets the
+  // note AFTER advanceState returns (see handleSuccess / handleFailure).
+  if (
+    newPhase === STATES.PREPARE_STORY_BRANCH ||
+    newPhase === STATES.CREATE_STORY ||
+    newPhase === STATES.NANO_QUICK_DEV
+  ) {
+    next.escalation_note = null;
+  }
+
   // test_scope_hint propagation. dev-story / nano-quick-dev signals may
   // carry `test_scope_hint: { scope: 'full' } | { include_dirs: [...] }`
   // when the LLM realizes the change is structural (refactor of a shared
@@ -761,9 +899,16 @@ function advanceState(state, profile, newPhase, signal) {
   // `output.sprint_is_complete: false` if they have additional stories to
   // run (e.g. a sprint-status.yaml with multiple pending stories was
   // pre-seeded).
+  //
+  // EXCLUDES the per-story fast lane: a fast-laned story under a FULL profile
+  // also runs NANO_QUICK_DEV with implementation_flow='quick', but the sprint
+  // has many more stories to go — marking it complete after one fast-laned
+  // story would wrongly halt the whole run. `fast_lane_active` distinguishes
+  // the two.
   if (
     state.phase === STATES.NANO_QUICK_DEV &&
     profile.implementation_flow === 'quick' &&
+    !profile.fast_lane_active &&
     !next.sprint_is_complete
   ) {
     const explicitOverride = signal && signal.output && signal.output.sprint_is_complete === false;

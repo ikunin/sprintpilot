@@ -67,6 +67,46 @@ function blockers(entries) {
   return lines.join('\n');
 }
 
+// fastLaneSummary(entries) → a metrics block for the quick-dev fast lane, or
+// '' when the lane never fired this sprint (the ledger is append-only and
+// sprint-lifetime, not reset per session). Counts routing decisions
+// (fast_lane_decision) and how many fast-laned stories bounced back to the
+// full cycle (profile_escalated from='fast_lane'), so the value/cost of the
+// fast lane is visible at a glance.
+function fastLaneSummary(entries) {
+  const decisions = entries.filter((e) => e.kind === 'fast_lane_decision');
+  if (decisions.length === 0) return '';
+  // A story counts as "fast-laned" if it was EVER routed fast (it ran
+  // quick-dev), independent of a later forced-full flip. "Kept full" means it
+  // was never fast-laned. This avoids mislabeling an escalated story — which
+  // did run quick-dev — as if it stayed on the full cycle the whole time.
+  const everFast = new Set();
+  const seen = new Set();
+  for (const e of decisions) {
+    const k = e.story_key || '(unknown)';
+    seen.add(k);
+    if (e.decision === 'fast') everFast.add(k);
+  }
+  const keptFull = [...seen].filter((k) => !everFast.has(k)).length;
+  const escalatedKeys = new Set(
+    entries
+      .filter((e) => e.kind === 'profile_escalated' && e.from === 'fast_lane')
+      .map((e) => e.story_key || '(unknown)'),
+  );
+  const lines = [
+    '',
+    '## Fast lane',
+    '',
+    `- Stories fast-laned (ran quick-dev one-shot): ${everFast.size}`,
+    `- Stories kept on the full cycle: ${keptFull}`,
+    `- Fast-laned stories escalated back to full: ${escalatedKeys.size}`,
+  ];
+  if (escalatedKeys.size > 0) {
+    lines.push(`  - ${Array.from(escalatedKeys).join(', ')}`);
+  }
+  return lines.join('\n');
+}
+
 function nextActionHint(state, profile) {
   const phase = state.current_bmad_step;
   if (state.sprint_is_complete && phase !== STATES.SPRINT_FINALIZE_PENDING) {
@@ -83,6 +123,7 @@ function render(state, entries, profile) {
   return [
     header(state || {}),
     ledgerSummary(safeEntries),
+    fastLaneSummary(safeEntries),
     recentActions(safeEntries),
     recentDecisions(safeEntries),
     blockers(safeEntries),
@@ -92,4 +133,13 @@ function render(state, entries, profile) {
     .join('\n');
 }
 
-module.exports = { render, header, ledgerSummary, recentActions, recentDecisions, blockers, nextActionHint };
+module.exports = {
+  render,
+  header,
+  ledgerSummary,
+  fastLaneSummary,
+  recentActions,
+  recentDecisions,
+  blockers,
+  nextActionHint,
+};

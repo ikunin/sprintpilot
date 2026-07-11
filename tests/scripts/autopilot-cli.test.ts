@@ -713,3 +713,36 @@ describe('autopilot start --stories / --epic', () => {
     expect(state).not.toMatch(/story_queue:.*4-1-foo/);
   });
 });
+
+describe('autopilot fast-lane', () => {
+  const readOverrides = () =>
+    JSON.parse(
+      readFileSync(
+        join(projectRoot, '_bmad-output', 'implementation-artifacts', 'fast-lane-overrides.json'),
+        'utf8',
+      ),
+    ).fast_lane_overrides;
+
+  it('marks a story fast, an epic full, and clears to auto', () => {
+    let r = runCli(['fast-lane', '4-1-x', 'fast']);
+    expect(r.status).toBe(0);
+    expect(r.stdout).toMatch(/Marked story 4-1-x as fast/);
+    r = runCli(['fast-lane', 'epic-5', 'full']);
+    expect(r.stdout).toMatch(/Marked epic 5 as full/);
+
+    let ov = readOverrides();
+    expect(ov.stories['4-1-x'].decision).toBe('fast');
+    expect(ov.epics['5'].decision).toBe('full');
+
+    r = runCli(['fast-lane', '4-1-x', 'auto']);
+    expect(r.stdout).toMatch(/Cleared the fast-lane mark on story 4-1-x/);
+    ov = readOverrides();
+    expect(ov.stories['4-1-x']).toBeUndefined();
+    expect(ov.epics['5'].decision).toBe('full'); // epic mark untouched
+  });
+
+  it('rejects a bad decision and missing args', () => {
+    expect(runCli(['fast-lane', '4-1-x', 'bogus']).status).not.toBe(0);
+    expect(runCli(['fast-lane', '4-1-x']).status).not.toBe(0);
+  });
+});

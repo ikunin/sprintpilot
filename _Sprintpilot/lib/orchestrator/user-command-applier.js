@@ -253,6 +253,18 @@ function applyOne(state, profile, cmd) {
       });
       break;
 
+    case 'set_fast_lane':
+      // Persist a fast|full mark (or clear to `auto`) for a story/epic into the
+      // durable fast-lane-overrides store. The CLI edge (applySideEffects) does
+      // the write; the applier stays pure.
+      effects.push({
+        kind: 'set_fast_lane',
+        story_key: cmd.story_key !== undefined ? cmd.story_key : null,
+        epic: cmd.epic !== undefined ? cmd.epic : null,
+        decision: cmd.decision,
+      });
+      break;
+
     case 'replan_sprint':
       // Set replan_requested in state so the next cmdStart picks it up
       // and emits the invoke_skill action. Halt now so the autopilot

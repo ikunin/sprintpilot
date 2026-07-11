@@ -71,6 +71,38 @@ describe('applyOne', () => {
     expect(r.effects[0].reason).toBe('user_skip_story');
   });
 
+  it('set_fast_lane → emits a set_fast_lane side-effect (story + epic + auto)', () => {
+    const story = applyOne(st(STATES.DEV_RED), medium(), {
+      kind: 'set_fast_lane',
+      story_key: '4-1',
+      decision: 'fast',
+    });
+    expect(story.effects[0]).toMatchObject({
+      kind: 'set_fast_lane',
+      story_key: '4-1',
+      epic: null,
+      decision: 'fast',
+    });
+    const epic = applyOne(st(STATES.DEV_RED), medium(), {
+      kind: 'set_fast_lane',
+      epic: 'epic-5',
+      decision: 'full',
+    });
+    expect(epic.effects[0]).toMatchObject({
+      kind: 'set_fast_lane',
+      epic: 'epic-5',
+      decision: 'full',
+    });
+    const auto = applyOne(st(STATES.DEV_RED), medium(), {
+      kind: 'set_fast_lane',
+      story_key: '4-1',
+      decision: 'auto',
+    });
+    expect(auto.effects[0]).toMatchObject({ decision: 'auto' });
+    // pure: state/profile unchanged
+    expect(story.newState).toEqual(st(STATES.DEV_RED));
+  });
+
   it('skip_story → resets to NANO_QUICK_DEV for quick flow', () => {
     const r = applyOne(st(STATES.NANO_QUICK_DEV), nano(), {
       kind: 'skip_story',

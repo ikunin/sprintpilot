@@ -71,7 +71,11 @@ const COMMAND_KINDS = [
   'add_to_sprint',
   'remove_from_sprint',
   'replan_sprint',
+  // Fast lane — mark a story/epic fast|full (or `auto` to clear the mark).
+  'set_fast_lane',
 ];
+
+const FAST_LANE_DECISIONS = ['fast', 'full', 'auto'];
 
 const STORY_KEY_RE = /^[A-Za-z0-9._-]{1,64}$/;
 const EPIC_ID_RE = /^[A-Za-z0-9._-]{1,32}$/;
@@ -108,6 +112,22 @@ function validateOne(cmd) {
         errors.push('skip_story.story_key must match [A-Za-z0-9._-]{1,64}');
       if ('reason' in cmd && cmd.reason !== undefined && typeof cmd.reason !== 'string')
         errors.push('skip_story.reason must be string when present');
+      break;
+    }
+    case 'set_fast_lane': {
+      // Exactly one target: story_key OR epic. decision ∈ fast|full|auto.
+      const hasStory = 'story_key' in cmd && cmd.story_key !== undefined;
+      const hasEpic = 'epic' in cmd && cmd.epic !== undefined;
+      if (hasStory === hasEpic) {
+        errors.push('set_fast_lane requires exactly one of story_key or epic');
+      } else if (hasStory) {
+        if (!nonEmptyString(cmd.story_key) || !STORY_KEY_RE.test(cmd.story_key))
+          errors.push('set_fast_lane.story_key must match [A-Za-z0-9._-]{1,64}');
+      } else if (!nonEmptyString(cmd.epic) || !EPIC_ID_RE.test(cmd.epic)) {
+        errors.push('set_fast_lane.epic must match [A-Za-z0-9._-]{1,32}');
+      }
+      if (!nonEmptyString(cmd.decision) || !FAST_LANE_DECISIONS.includes(cmd.decision))
+        errors.push(`set_fast_lane.decision must be one of ${FAST_LANE_DECISIONS.join(', ')}`);
       break;
     }
     case 'abort_sprint':
