@@ -1,5 +1,19 @@
 # Changelog
 
+## [2.8.0] - 2026-07-11
+
+### Added
+
+- **Quick-dev fast lane (opt-in, default OFF)** — per-story routing of LOW-RISK stories through `bmad-quick-dev` (one-shot) under the full profiles (`small`/`medium`/`large`), while substantial stories keep the mandatory 7-step cycle. A fast-laned story runs `bmad-create-story` first so a deterministic, conservative pre-story gate (`fast-lane-gate.js`) can judge it from real acceptance criteria + declared paths; it defaults to `full` on any doubt, hard-denies auth/migrations/secrets, and honors an AC-count budget. Enable + tune `max_ac` at install (`autopilot.fast_lane.*`).
+  - **Escalation net** — a quick-dev hard failure re-runs the full cycle from `bmad-create-story`; a success flagging failing tests / high severity routes to `bmad-code-review` (the adversarial review the fast lane skipped). The story is recorded in `fast_lane_forced_full` (write-through) so it never re-fast-lanes.
+  - **Per-story / per-epic control** — mark a story or epic `fast`/`full`/`auto` via the `set_fast_lane` chat command, the `autopilot fast-lane <story|epic-<id>> <fast|full|auto>` CLI, or a fast|full pass in `/sprintpilot-plan-sprint`. Marks persist in a clobber-resistant `fast-lane-overrides.json` (survives re-planning) and are the highest-authority routing signal. Story-file tags (`fast_lane:`/`risk:`) and `sprint-plan.yaml` epic tags are also honored.
+  - **Observability** — every routing choice is a `fast_lane_decision` ledger entry; `autopilot progress` and the session report show fast-laned / kept-full / escalated counts.
+- **BMad Method 6.10 compatibility hardening** — `config.toml` tolerance (new `bmad-output.js` output-folder reader + installer mirror), a soft install-time version guard (`checkBmadCompat`, warns never blocks), sprint-status resilience to v6.9 action-items, code-review heading tolerance, and a memlog non-conflict guard. Verified against `bmad-method@6.10.0`.
+
+### Changed
+
+- **Docs** — README, AGENTS, `CONFIGURATION.md`, `USAGE.md`, `ARCHITECTURE.md`, `Sprintpilot.md`, and the orchestrator/planner skill contracts document the fast lane and its per-story/epic configuration.
+
 ## [2.7.5] - 2026-07-01
 
 ### Added
