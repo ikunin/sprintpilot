@@ -113,6 +113,13 @@ const VALID_KINDS = [
   // checkpoint and the terminal signal lets the next boot replay it
   // back to the skill as `resume_hint.checkpoint`.
   'skill_checkpoint',
+  // Fast lane — the per-story fast|full routing decision (story_key, decision,
+  // reasons[]) emitted by deriveEffectiveProfile at story start, deduped so
+  // there is ~one entry per story. Makes every routing choice inspectable.
+  'fast_lane_decision',
+  // Fast lane — a user MARK (set/clear a fast|full override on a story/epic)
+  // applied via the set_fast_lane command / `autopilot fast-lane` CLI.
+  'fast_lane_override_set',
 ];
 
 function isPlainObject(v) {

@@ -57,6 +57,9 @@ const CRITICAL_KEYS = new Set([
   // _Sprintpilot/lib/orchestrator/state-store.js for full rationale.
   'last_verify_issues_signature',
   'consecutive_identical_rejections',
+  // Fast-lane escalation ledger — mirror of state-store.js. Story keys
+  // bounced from the quick-dev fast lane back to the full 7-step cycle.
+  'fast_lane_forced_full',
 ]);
 
 // Prototype-pollution guard. State keys are machine-generated field names;

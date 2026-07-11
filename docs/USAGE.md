@@ -39,6 +39,29 @@ The per-story flow depends on the active `complexity_profile` in `_Sprintpilot/m
 
 The autopilot resolves the profile at boot via `_Sprintpilot/scripts/resolve-profile.js`. Missing key falls back to `medium` with a stderr notice.
 
+### Quick-Dev Fast Lane (opt-in, default OFF)
+
+Independently of the profile, you can let the full profiles fast-lane *individual* low-risk stories through one-shot `bmad-quick-dev` (instead of the 7-step cycle) while substantial stories keep the full cycle. It is **off by default**; the installer asks whether to enable it (and for the `max_ac` budget), or set it directly:
+
+```yaml
+# _Sprintpilot/modules/autopilot/config.yaml
+autopilot:
+  fast_lane:
+    enabled: true       # off by default
+    max_ac: 3           # stories with more Acceptance Criteria never fast-lane
+    # allow_globs / deny_globs / require_story_tag — see docs/CONFIGURATION.md
+```
+
+A conservative pre-story gate decides `fast | full` from each story's real acceptance criteria and declared paths (create-story runs first), defaulting to `full` on any doubt and hard-denying auth / migrations / secrets. Tests stay required; a fast-laned story that fails re-runs the full cycle, and one that completes but flags a problem is routed through the adversarial code review it skipped.
+
+**Mark a story or epic fast/full** without editing files — the mark is the highest-authority signal and persists in a clobber-resistant store (survives re-planning):
+
+- In chat: *"fast-lane story 4-1"*, *"keep 4-2 full"*, *"fast-lane epic 5"*, *"reset 4-1 to auto"*.
+- CLI: `autopilot fast-lane <story-key | epic-<id>> <fast|full|auto>`.
+- During `/sprintpilot-plan-sprint` (a fast|full pass over the stories).
+
+A `fast` mark wins over the gate (deny-globs, size budget, tags) and works even when the lane is globally off; only a story that already *failed* the fast path (`fast_lane_forced_full`) resists a `fast` mark. Every choice is logged (`fast_lane_decision`) and the counts show in `autopilot progress`. Full reference: [CONFIGURATION.md](CONFIGURATION.md#quick-dev-fast-lane) and [quick-dev-fast-lane-plan.md](quick-dev-fast-lane-plan.md).
+
 ### Parallel Story Dispatch
 
 When `ma.parallel_stories: true` AND the host supports concurrent subagents (Claude Code today; Gemini CLI experimentally) AND the active layer of the inferred DAG has ≥2 independent stories, step 3 of the autopilot:

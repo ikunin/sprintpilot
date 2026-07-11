@@ -8,6 +8,7 @@
     "test:fast": "vitest run unit/ scripts/",
     "test": "vitest run unit/ scripts/",
     "test:e2e:nano": "RUN_LLM_E2E=1 vitest run e2e/nano.test.ts",
+    "test:e2e:fast-lane": "RUN_LLM_E2E=1 vitest run e2e/fast-lane.test.ts",
     "test:e2e:live": "RUN_LLM_E2E=1 vitest run e2e/nano.test.ts",
     "test:e2e:greenfield": "RUN_LLM_E2E=1 RUN_LLM_E2E_FULL=1 vitest run e2e/greenfield.test.ts",
     "test:e2e:brownfield": "RUN_LLM_E2E=1 RUN_LLM_E2E_FULL=1 vitest run e2e/brownfield.test.ts",

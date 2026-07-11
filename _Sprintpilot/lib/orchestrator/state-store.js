@@ -39,6 +39,12 @@ const CRITICAL_KEYS = new Set([
   // the loop-hint enriched prompt, defeating the loop-detection UX.
   'last_verify_issues_signature',
   'consecutive_identical_rejections',
+  // Fast-lane escalation ledger (story keys bounced from the quick-dev
+  // fast lane back to the full 7-step cycle). Must write through so a
+  // crash between the escalation and the story boundary doesn't let the
+  // pre-story gate re-fast-lane a story that already failed the fast path.
+  // Array value → replaced wholesale by deepMerge (never partially merged).
+  'fast_lane_forced_full',
 ]);
 
 // In-memory pending buffer. Process-scoped — flushed at story boundary or

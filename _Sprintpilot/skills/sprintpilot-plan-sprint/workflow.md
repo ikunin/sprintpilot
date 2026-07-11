@@ -457,6 +457,39 @@ also override individual entries via `[a:KEY]` (re-include something the
 scheduling default excluded) or `[r:KEY]` (exclude something the default
 included).</action>
 
+### Step 11c — Fast-lane marking (conditional)
+
+<action>ONLY when the quick-dev fast lane is enabled — check with:
+```
+node ./_Sprintpilot/scripts/resolve-profile.js get autopilot.fast_lane.enabled
+```
+If it prints `false` (or the key is absent), SKIP this sub-step entirely.
+
+When enabled, offer a per-story fast|full pass over the INCLUDED stories.
+The fast lane routes genuinely low-risk stories (docs, tiny config, small
+pure functions) through one-shot `bmad-quick-dev` while substantial
+stories keep the full 7-step cycle. A conservative gate already decides
+this per story at run time; this pass lets the user PRE-mark stories they
+already know about, so they don't have to intervene mid-sprint.
+
+> "Fast lane is ON. Want to pre-mark any of the 14 included stories
+>  `fast` (one-shot quick-dev) or `full` (7-step cycle)? The gate decides
+>  the rest automatically — this is only for stories you already know.
+>
+>    e.g. 'fast 3-1-docs, 3-2-readme'  ·  'full 4-2-migration'
+>         'fast epic 3'  ·  [Enter] skip — let the gate decide."
+
+Persist each mark with the CLI (durable + clobber-resistant — it survives
+future re-plans):
+```
+node ./_Sprintpilot/bin/autopilot.js fast-lane <story-key> fast    # or full / auto
+node ./_Sprintpilot/bin/autopilot.js fast-lane epic-<id> fast
+```
+A `fast` mark is the highest-authority signal (it overrides the gate's
+deny-globs / size budget); reserve it for stories you're confident are
+low-risk. `full` guarantees the rigorous cycle. Echo back what you set:
+> "Marked fast: 3-1-docs, 3-2-readme, epic-3. Marked full: 4-2-migration."</action>
+
 ---
 
 ## Step 12 — Validate Selection

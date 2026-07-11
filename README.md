@@ -30,6 +30,8 @@ Sprintpilot turns a planned BMad sprint into merged, reviewed, tested code **wit
 
 **`nano` profile** swaps the 7-step cycle for BMad's one-shot `bmad-quick-dev` (Implement → Review → Classify → Commit) — and automatically escalates back to the full cycle if its tests fail or its review flags a high-severity finding.
 
+**The quick-dev fast lane (opt-in, default OFF)** brings that speed to the full profiles *per story*: a conservative pre-story gate routes genuinely low-risk stories (docs, tiny config, small pure functions) through one-shot `bmad-quick-dev` while substantial stories keep the full 7-step cycle. The story spec is still written first (`bmad-create-story`) so the gate can judge it from real acceptance criteria and declared paths; the gate defaults to `full` on any doubt and hard-denies auth / migrations / secrets. Tests remain required, and a fast-laned story that fails re-runs the full cycle (or, if it completed but flagged a problem, gets the adversarial code review it skipped). Off unless you enable it at install; every routing choice is auditable and shown in `autopilot progress`.
+
 **You control the loop, not the steps.** The autopilot drives continuously until it has completed `session_story_limit` stories (default 3), the sprint is finished, or it hits one of five genuine blockers — then it halts cleanly with a handoff report. Steer it mid-flight in plain language ("skip this story, the spec is wrong", "pause", "land before the next story") and it maps that to the right action. Under the hood a deterministic Node state machine (`_Sprintpilot/bin/autopilot.js`) decides what runs next and enforces the sequence; the LLM owns in-skill execution and small-judgment calls. Sprintpilot never invents workflows of its own — it composes BMad's skills.
 
 **The benefit:** a planned sprint implements itself overnight with TDD, multi-reviewer code review, and your real git process applied to every story — instead of you hand-running `create-story → readiness → dev → review → patch → commit → PR` dozens of times. You review PRs and answer the occasional genuine question; the autopilot does the mechanical execution faithfully and auditably (every action is logged to an append-only ledger).
@@ -122,6 +124,8 @@ Pick at install: `--profile <name>`. Missing profile defaults to `medium`.
 
 **Nano safety net:** if `bmad-quick-dev` tests fail or its review classifies a finding as `high` severity, the autopilot escalates that session to the full 7-step cycle (session-scoped, never written back to config).
 
+**Fast lane (opt-in, default OFF):** the full profiles (`small`/`medium`/`large`) can route *individual* low-risk stories — docs, tiny config, small pure-function additions — through one-shot `bmad-quick-dev` while substantial stories keep the full 7-step cycle. Each fast-lane candidate still runs `bmad-create-story` first, then a conservative pre-story gate decides `fast | full` from its real acceptance criteria and declared paths (defaulting to `full` on any doubt, hard-denying auth/migrations/secrets, and honoring an AC-count budget + explicit story/epic tags). Tests stay required; a fast-laned story that **fails** re-runs the full cycle, and one that **completes but flags a problem** gets routed through the adversarial code review it skipped. The installer asks whether to enable it (and for the `max_ac` budget); per-project knobs live under `autopilot.fast_lane.*`, and counts show in `autopilot progress`. See [docs/quick-dev-fast-lane-plan.md](docs/quick-dev-fast-lane-plan.md).
+
 ## Running a session
 
 The autopilot scans the host chat for your interjections every turn — you can steer it without learning a command vocabulary:
@@ -187,6 +191,11 @@ Most projects only ever change a handful of settings. Pick the change you want, 
 | `complexity_profile` | `autopilot/config.yaml` | `medium` | Per-story flow + which optimization layers are enabled |
 | `autopilot.session_story_limit` | `autopilot/config.yaml` | `3` (nano: `5`) | Stories per session before checkpoint. `0` = unlimited |
 | `autopilot.retrospective_mode` | `autopilot/config.yaml` | `auto` | `auto` / `stop` / `skip` |
+| `autopilot.fast_lane.enabled` | `autopilot/config.yaml` | `false` | Route low-risk stories through one-shot quick-dev under full profiles (installer prompts) |
+| `autopilot.fast_lane.max_ac` | `autopilot/config.yaml` | `3` | Stories with more Acceptance Criteria never fast-lane |
+| `autopilot.fast_lane.allow_globs` | `autopilot/config.yaml` | `"docs/**,**/*.md"` | Inference only fast-lanes when every declared path is allow-listed (comma-sep) |
+| `autopilot.fast_lane.deny_globs` | `autopilot/config.yaml` | `"**/auth/**,**/migrations/**,**/*secret*,**/*secret*/**"` | Any declared path matching forces `full` — hard safety |
+| `autopilot.fast_lane.require_story_tag` | `autopilot/config.yaml` | `false` | Only fast-lane stories explicitly tagged `fast_lane: true` / `risk: low` |
 | `git.merge_strategy` | `git/config.yaml` | `stacked` | `stacked` / `land_as_you_go` |
 | `git.push.create_pr` | `git/config.yaml` | `true` | `false` = direct merge to base |
 | `git.reuse_user_branch` | `git/config.yaml` | `false` | Commit every story onto the current user branch |
@@ -425,6 +434,7 @@ Skill internals + output schemas: [docs/USAGE.md](docs/USAGE.md#multi-agent-skil
 - [Sprint Planning Reference](docs/sprint-planning.md) — focused guide to `/sprintpilot-plan-sprint`: curation, validation, mid-flight commands, companion skills
 - [Architecture](docs/ARCHITECTURE.md) — state machine, action / signal vocabulary, verify contracts
 - [Configuration Reference](docs/CONFIGURATION.md) — every setting, default, profile override
+- [Quick-Dev Fast Lane](docs/quick-dev-fast-lane-plan.md) — per-story quick-dev routing under full profiles: gate, guardrails, escalation
 - [Extending (Platforms & Languages)](docs/EXTENDING.md)
 - [Contributing](docs/CONTRIBUTING.md)
 - [Changelog](CHANGELOG.md)

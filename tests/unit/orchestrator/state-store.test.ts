@@ -148,6 +148,10 @@ describe('write (coalesce path)', () => {
         // across rejections.
         'last_verify_issues_signature',
         'consecutive_identical_rejections',
+        // Fast-lane escalation ledger — story keys bounced from the
+        // quick-dev fast lane back to the full cycle. Write-through so a
+        // crash can't let the gate re-fast-lane an already-failed story.
+        'fast_lane_forced_full',
       ].sort(),
     );
   });

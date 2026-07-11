@@ -37,6 +37,8 @@ const ledger = require('../lib/orchestrator/action-ledger');
 const resumeContext = require('../lib/orchestrator/resume-context');
 const backgroundSuite = require('../lib/orchestrator/background-suite');
 const changeSizeClassifier = require('../lib/orchestrator/change-size-classifier');
+const fastLaneGate = require('../lib/orchestrator/fast-lane-gate');
+const fastLaneOverrides = require('../lib/orchestrator/fast-lane-overrides');
 const flakyQuarantine = require('../lib/orchestrator/flaky-quarantine');
 const haltExplainer = require('../lib/orchestrator/halt-explainer');
 const sprintHealth = require('../lib/orchestrator/sprint-health');
@@ -57,7 +59,7 @@ const {
 
 const { STATES } = stateMachine;
 
-const SUBCOMMANDS = ['start', 'next', 'record', 'state', 'report', 'validate-config', 'status', 'progress', 'heartbeat', 'tasks', 'quarantine', 'watch', 'resume'];
+const SUBCOMMANDS = ['start', 'next', 'record', 'state', 'report', 'validate-config', 'status', 'progress', 'heartbeat', 'tasks', 'quarantine', 'watch', 'resume', 'fast-lane'];
 
 // v2.3.12 — canonical per-story task list (the BMad 7-step cycle,
 // collapsed into operator-visible labels). Used by `autopilot tasks` to
@@ -844,6 +846,233 @@ function persistState(updates, profile, projectRoot, story) {
   return stateStore.write(updates, profile, { projectRoot, story });
 }
 
+// Story-start phases where a fresh routing decision is meaningful — used to
+// throttle fast_lane_decision ledger emission to ~one entry per story.
+const FAST_LANE_STORY_START_PHASES = new Set([
+  STATES.PREPARE_STORY_BRANCH,
+  STATES.CREATE_STORY,
+  STATES.NANO_QUICK_DEV,
+]);
+
+// resolvePlanFastLaneTag(projectRoot, storyKey) → 'fast' | 'full' | null.
+//
+// Reads sprint-plan.yaml and returns an epic/plan-level routing tag for the
+// story: the story's own plan entry wins, then its epic entry. Each may carry
+// an optional `fast_lane` (bool/string) and/or `risk` (string) field —
+// tolerant, forward-compatible (absent → null; a `full`-forcing tag beats a
+// `fast` one). Best-effort: any read/parse error → null (no epic tag). Story-
+// FILE tags still take priority over this (the gate resolves that).
+function resolvePlanFastLaneTag(projectRoot, storyKey) {
+  try {
+    const planRead = sprintPlanScript.read({ projectRoot });
+    if (!planRead || (typeof planRead === 'object' && 'error' in planRead)) return null;
+    const plan = planRead.plan || planRead;
+    const storyEntry = Array.isArray(plan.stories)
+      ? plan.stories.find((s) => s && s.key === storyKey)
+      : null;
+    const storyTag = fastLaneGate.tagFromFields(storyEntry);
+    if (storyTag) return storyTag;
+    const epicId = (storyEntry && storyEntry.epic) || deriveEpicFromStoryKey(storyKey);
+    const epicEntry =
+      epicId != null && Array.isArray(plan.epics)
+        ? plan.epics.find((e) => e && String(e.id) === String(epicId))
+        : null;
+    return fastLaneGate.tagFromFields(epicEntry);
+  } catch (_e) {
+    return null;
+  }
+}
+
+// deriveEffectiveProfile(persisted, profile, projectRoot, opts) → profile.
+//
+// The per-story fast-lane seam. When `autopilot.fast_lane.enabled` is true,
+// a deterministic pre-story gate (fast-lane-gate.js) may route a LOW-RISK
+// story through the quick flow (implementation_flow='quick') under a FULL
+// profile — otherwise the story keeps the mandatory 7-step cycle. Returns the
+// profile UNCHANGED (full behavior, byte-identical to pre-fast-lane) when:
+//   - the fast lane is disabled,
+//   - the profile is already quick (nano — whole-profile fast path),
+//   - no story resolves yet, or
+//   - the story is in the forced-full ledger (escalated back from a prior
+//     fast-lane failure — sticky so it never re-fast-lanes).
+//
+// The gate is re-derived every emission from durable inputs (story file +
+// config + forced-full ledger), so a fast story stays quick and a full story
+// stays full across the whole cycle without persisting a session profile.
+// Best-effort: any error falls back to the base (full) profile — the fast
+// lane never wedges the autopilot.
+//
+// opts.emitLedger (cmdNext only) appends a `fast_lane_decision` audit entry,
+// throttled to story-start phases so the ledger gets ~one entry per story.
+function deriveEffectiveProfile(persisted, profile, projectRoot, opts = {}) {
+  try {
+    if (!profile) return profile;
+    if (profile.implementation_flow === 'quick') return profile; // nano — already quick
+    // NB: the fast_lane_enabled gate is applied LATER (after the manual-override
+    // check) so a per-story `fast` override works even when the lane is off.
+
+    // Resolve the candidate story key cheaply (mirrors composeRuntimeState's
+    // precedence without re-running the whole pipeline): persisted
+    // current_story → first valid queue entry → sprint-status resolver.
+    let storyKey = persisted.current_story || null;
+    if (storyKey && persistedStoryRejectionReason(storyKey, projectRoot)) storyKey = null;
+    if (!storyKey && Array.isArray(persisted.story_queue)) {
+      storyKey =
+        persisted.story_queue.find(
+          (k) => typeof k === 'string' && k && !persistedStoryRejectionReason(k, projectRoot),
+        ) || null;
+    }
+    if (!storyKey) {
+      storyKey = resolveNextStoryKey(projectRoot, { preferEpic: persisted.current_epic || null });
+    }
+    if (!storyKey) return profile;
+
+    const forcedList = Array.isArray(persisted.fast_lane_forced_full)
+      ? persisted.fast_lane_forced_full
+      : [];
+    const forcedFull = forcedList.includes(storyKey);
+
+    // Append a fast_lane_decision audit entry (deduped against the last one for
+    // this story so re-emitting `next` at the same phase doesn't spam the
+    // ledger). Best-effort — never blocks the emission. Callers gate WHEN to
+    // log; this just does the append.
+    const logDecision = (decision, reasons) => {
+      try {
+        const prev = ledger.last({ projectRoot }, 'fast_lane_decision');
+        if (prev && prev.story_key === storyKey && prev.decision === decision) return;
+        ledger.append(
+          { kind: 'fast_lane_decision', story_key: storyKey, decision, reasons },
+          { projectRoot },
+        );
+      } catch (_e) {
+        /* audit is best-effort */
+      }
+    };
+
+    // Manual user override (highest authority). A user marks a story or epic
+    // `fast` / `full` via the `set_fast_lane` chat command, `autopilot
+    // fast-lane` CLI, or `/sprintpilot-plan-sprint`; it lives in the durable,
+    // clobber-resistant fast-lane-overrides.json and is consulted here BEFORE
+    // the automatic gate — and even when the lane is globally OFF, so "mark
+    // this one story fast" works without flipping the whole switch. A `fast`
+    // mark wins over the gate's deny-globs / size budget / tags (the human is
+    // trusted); `forced_full` (a story the escalation net bounced after it
+    // actually failed the fast path) still wins over a `fast` mark to prevent a
+    // fast→fail→fast loop.
+    const epicKey = deriveEpicFromStoryKey(storyKey);
+    const override = fastLaneOverrides.resolve(projectRoot, storyKey, epicKey);
+    const phase = persisted.current_bmad_step || null;
+    const atStoryStart = phase === null || FAST_LANE_STORY_START_PHASES.has(phase);
+
+    // Decision lock at NANO_QUICK_DEV. A story here was already routed fast (a
+    // full profile only reaches NANO_QUICK_DEV via the fast lane); it is
+    // COMMITTED to quick-dev, so keep it `quick + fast_lane_active` and do NOT
+    // re-derive:
+    //   - re-reading the story file would flip the gate to `full` (quick-dev
+    //     appended a File List) and clear fast_lane_active just when adapt.js's
+    //     escalation guards need it;
+    //   - a `full` override arriving mid-quick-dev must NOT strip
+    //     fast_lane_active either — that would silently defeat the escalation
+    //     net AND still not produce a real full cycle (the phase stays
+    //     nano_quick_dev). A `full` mark instead takes effect at the story's
+    //     NEXT story-start re-derivation. Only `forced_full` (the escalation
+    //     flow itself) downgrades an in-flight fast story.
+    // Also honors the config kill-switch loosely: turning the lane off does not
+    // yank a story out of an in-flight quick-dev run.
+    //
+    // This is also where the `fast` decision is RECORDED — at CREATE_STORY the
+    // file didn't exist yet so the gate logged `full`, and this is the first
+    // emitting phase where `fast` is knowable, so the ledger reads
+    // `full`(create-story) → `fast`.
+    if (!forcedFull && phase === STATES.NANO_QUICK_DEV) {
+      if (opts.emitLedger) {
+        logDecision(
+          fastLaneGate.DECISION_FAST,
+          override === 'fast' ? ['user_override_fast'] : ['locked_at_nano_quick_dev'],
+        );
+      }
+      return { ...profile, implementation_flow: 'quick', fast_lane_active: true };
+    }
+
+    // Manual override at a routing decision point (before the automatic gate).
+    if (atStoryStart) {
+      if (!forcedFull && override === 'fast') {
+        if (opts.emitLedger) logDecision(fastLaneGate.DECISION_FAST, ['user_override_fast']);
+        return { ...profile, implementation_flow: 'quick', fast_lane_active: true };
+      }
+      if (override === 'full') {
+        if (opts.emitLedger) logDecision(fastLaneGate.DECISION_FULL, ['user_override_full']);
+        return profile;
+      }
+    }
+
+    // No override in force → fall to the automatic gate, but only when the lane
+    // is enabled (an override above already handled the lane-off case).
+    if (profile.fast_lane_enabled !== true) return profile;
+
+    // Read the story file (best-effort). Missing → gate sees empty text →
+    // conservative `full`. Resolve from THIS story's convention path first;
+    // only trust persisted.story_file_path when it belongs to this story — it
+    // can still point at the PREVIOUS story's .md right after a re-resolution
+    // (e.g. current_story was rejected and storyKey advanced), which would
+    // classify the new story on stale content and emit a misleading ledger
+    // entry.
+    let storyText = '';
+    const conventionPath = path.join(
+      projectRoot,
+      '_bmad-output',
+      'implementation-artifacts',
+      `${storyKey}.md`,
+    );
+    const persistedMatchesStory =
+      typeof persisted.story_file_path === 'string' &&
+      path.basename(persisted.story_file_path) === `${storyKey}.md`;
+    const storyPath =
+      persistedMatchesStory && safeExistsSync(persisted.story_file_path)
+        ? persisted.story_file_path
+        : conventionPath;
+    if (safeExistsSync(storyPath)) {
+      try {
+        storyText = fs.readFileSync(storyPath, 'utf8');
+      } catch (_e) {
+        storyText = '';
+      }
+    }
+
+    // Epic/plan-level fallback tag: honor a `fast_lane` / `risk` field on the
+    // story's sprint-plan.yaml entry, or on its epic entry, so an epic tagged
+    // low-risk cascades to its stories without tagging each. Story-FILE tags
+    // still win (resolved inside the gate). Best-effort; null when absent.
+    const fallbackTag = resolvePlanFastLaneTag(projectRoot, storyKey);
+
+    const result = fastLaneGate.classifyStory({
+      storyKey,
+      storyText,
+      config: profile,
+      forcedFull,
+      fallbackTag,
+    });
+
+    if (opts.emitLedger && atStoryStart) logDecision(result.decision, result.reasons);
+
+    if (result.decision === fastLaneGate.DECISION_FAST) {
+      // Only flip at a story-start phase (or a fresh session). A story that
+      // already entered the FULL cycle (create-story wrote a file the gate now
+      // reads as `fast`) must NOT flip mid-cycle to a quick+fast_lane_active
+      // profile — the routing is decided once, at the CREATE_STORY → successor
+      // transition, and stays put. The fast-lane phases (PREPARE_STORY_BRANCH,
+      // CREATE_STORY, NANO_QUICK_DEV) are exactly where the flip is meaningful.
+      if (atStoryStart) {
+        return { ...profile, implementation_flow: 'quick', fast_lane_active: true };
+      }
+    }
+    return profile;
+  } catch (e) {
+    log.warn(`fast-lane gate skipped: ${e.message}`);
+    return profile;
+  }
+}
+
 // Compose the runtime `state` shape the state machine expects from the
 // persisted autopilot-state.yaml. Missing fields default to fresh-session
 // values; the CLI does not assume more than what's on disk.
@@ -873,8 +1102,11 @@ function composeRuntimeState(persisted, profile, projectRoot) {
     profile.enabled !== false &&
     !profile.reuse_user_branch &&
     (profile.granularity === 'story' || profile.granularity === 'epic');
+  // nano (whole-profile quick) boots straight at NANO_QUICK_DEV. The per-story
+  // fast lane (fast_lane_active) boots at CREATE_STORY instead — it must run
+  // create-story first so the pre-story gate can read a real story file.
   const flowStart =
-    profile && profile.implementation_flow === 'quick'
+    profile && profile.implementation_flow === 'quick' && !profile.fast_lane_active
       ? STATES.NANO_QUICK_DEV
       : STATES.CREATE_STORY;
   const defaultPhase = needsBranchPrep ? STATES.PREPARE_STORY_BRANCH : flowStart;
@@ -1185,6 +1417,12 @@ function composeRuntimeState(persisted, profile, projectRoot) {
     // Head is the current pick; adapt.advanceState pops on story
     // completion. Empty array means "no override; use resolveNextStoryKey."
     story_queue: persistedQueue,
+    // Fast-lane escalation ledger: story keys bounced from the quick-dev
+    // fast lane back to the full 7-step cycle. deriveEffectiveProfile /
+    // fast-lane-gate.js consult it so a re-run story never re-fast-lanes.
+    fast_lane_forced_full: Array.isArray(persisted.fast_lane_forced_full)
+      ? persisted.fast_lane_forced_full
+      : [],
     // Land-as-you-go: pending land state survives rebase-conflict halts.
     land_pending: persisted.land_pending || null,
     // Pending alternative (propose_alternative → user_prompt) survives
@@ -1251,6 +1489,9 @@ function persistRuntimeState(runtime, profile, projectRoot) {
     current_epic: runtime.current_epic,
     ac_summary: runtime.ac_summary,
     prior_diagnosis: runtime.prior_diagnosis,
+    // Story-scoped escalation context (fast-lane re-run notice). Surfaced as
+    // profile_specific_notes every phase; cleared at each new-story boundary.
+    escalation_note: runtime.escalation_note || null,
     relevant_decisions: runtime.relevant_decisions,
     prior_signals_summary: runtime.prior_signals_summary,
     patch_findings: runtime.patch_findings,
@@ -1262,6 +1503,9 @@ function persistRuntimeState(runtime, profile, projectRoot) {
     consecutive_test_failures: runtime.consecutive_test_failures,
     user_branch: runtime.user_branch,
     story_queue: Array.isArray(runtime.story_queue) ? runtime.story_queue : [],
+    fast_lane_forced_full: Array.isArray(runtime.fast_lane_forced_full)
+      ? runtime.fast_lane_forced_full
+      : [],
     land_pending: runtime.land_pending,
     pending_alternative: runtime.pending_alternative || null,
     session_stories_completed: runtime.session_stories_completed || 0,
@@ -2602,6 +2846,35 @@ function applySideEffects(sideEffects, runtime, profile, projectRoot) {
         }
         break;
       }
+      case 'set_fast_lane': {
+        // Persist / clear a fast|full mark in the durable overrides store. An
+        // `epic-<id>` key routes to the epics bucket regardless of which field
+        // carried it (defensive: the LLM might place an epic in story_key). The
+        // audit entry logs the normalized key so it matches what resolve() sees.
+        try {
+          const rawKey = eff.epic || eff.story_key;
+          if (!rawKey) break;
+          const isEpic = !!eff.epic || /^epic-/i.test(rawKey);
+          const auditKey = isEpic ? fastLaneOverrides.normalizeEpicKey(rawKey) : rawKey;
+          const target = isEpic ? 'epic' : 'story';
+          if (eff.decision === 'auto') {
+            const cleared = fastLaneOverrides.clearOverride(projectRoot, rawKey, { isEpic });
+            ledger.append(
+              { kind: 'fast_lane_override_set', target, key: auditKey, decision: 'auto', cleared },
+              { projectRoot },
+            );
+          } else {
+            const res = fastLaneOverrides.setOverride(projectRoot, rawKey, eff.decision, { isEpic });
+            ledger.append(
+              { kind: 'fast_lane_override_set', target, key: res.key || auditKey, decision: eff.decision, ok: res.ok },
+              { projectRoot },
+            );
+          }
+        } catch (e) {
+          log.warn(`set_fast_lane failed: ${e.message}`);
+        }
+        break;
+      }
       default:
         // Unknown side-effect kinds are recorded but otherwise ignored.
         ledger.append({ kind: 'state_transition', detail: eff }, { projectRoot });
@@ -3510,8 +3783,13 @@ function cmdStart(opts) {
   }
 
   // Fresh start or clean resume. `composeRuntimeState` applies the
-  // profile-aware initial phase when persisted state is empty.
-  const runtime = composeRuntimeState(persisted, profile, projectRoot);
+  // profile-aware initial phase when persisted state is empty. Apply the
+  // per-story fast-lane routing so the FIRST emitted action already matches
+  // what `next` will re-derive (no ledger emit here — cmdNext owns the
+  // audit entry; start immediately followed by next would otherwise
+  // double-log the decision).
+  const effectiveProfile = deriveEffectiveProfile(persisted, profile, projectRoot);
+  const runtime = composeRuntimeState(persisted, effectiveProfile, projectRoot);
 
   // session_story_limit is per-session — a fresh `autopilot start`
   // resets the counter so the next batch of N stories can run before
@@ -3519,7 +3797,7 @@ function cmdStart(opts) {
   // increments on STORY_DONE → EPIC_BOUNDARY_CHECK.)
   runtime.session_stories_completed = 0;
 
-  const lockResult = lockUserBranchIfNeeded(runtime, profile, projectRoot);
+  const lockResult = lockUserBranchIfNeeded(runtime, effectiveProfile, projectRoot);
   if (lockResult && lockResult.halt) {
     const halt = decorateHaltContext(lockResult.halt, runtime, projectRoot);
     ledger.append(
@@ -3537,21 +3815,26 @@ function cmdStart(opts) {
       decorateTestScope(
         decorateRunScript(
           decorateResumeHint(
-            decorateGitOp(stateMachine.nextAction(runtime, profile), runtime, profile, projectRoot),
+            decorateGitOp(
+              stateMachine.nextAction(runtime, effectiveProfile),
+              runtime,
+              effectiveProfile,
+              projectRoot,
+            ),
             runtime,
-            profile,
+            effectiveProfile,
             projectRoot,
           ),
           runtime,
-          profile,
+          effectiveProfile,
           projectRoot,
         ),
         runtime,
-        profile,
+        effectiveProfile,
         projectRoot,
       ),
       runtime,
-      profile,
+      effectiveProfile,
       projectRoot,
     ),
     runtime,
@@ -3559,11 +3842,17 @@ function cmdStart(opts) {
   );
   // land_as_you_go guard: never start a new story while the previous one
   // is unpushed/unlanded. Overrides the emitted action with a halt prompt.
-  const landGuard = guardLandAsYouGoPredecessor({ action, runtime, profile, projectRoot });
+  const landGuard = guardLandAsYouGoPredecessor({
+    action,
+    runtime,
+    profile: effectiveProfile,
+    projectRoot,
+  });
   if (landGuard) action = decorateHaltContext(landGuard, runtime, projectRoot);
   ledger.append({ kind: 'action_emitted', phase: runtime.phase, action }, { projectRoot });
-  persistRuntimeState(runtime, profile, projectRoot);
-  if (profile.coalesce_state_writes) stateStore.flush(profile, { projectRoot, story: runtime.story_key });
+  persistRuntimeState(runtime, effectiveProfile, projectRoot);
+  if (effectiveProfile.coalesce_state_writes)
+    stateStore.flush(effectiveProfile, { projectRoot, story: runtime.story_key });
   const nextSummary = formatNextStorySummary(runtime, action, persisted.story_queue);
   process.stdout.write(
     `${JSON.stringify({ action, phase: runtime.phase, next_summary: nextSummary }, null, 2)}\n`,
@@ -3573,7 +3862,7 @@ function cmdStart(opts) {
 
 function cmdNext(opts) {
   const projectRoot = resolveProjectRoot(opts);
-  const { typed: profile } = resolveProfile(projectRoot, opts.profile);
+  const { typed: baseProfile } = resolveProfile(projectRoot, opts.profile);
   const persisted = loadState(projectRoot);
   // land_as_you_go auto-recovery (also on the `next`-driven path, since the
   // workflow drives `next` directly without `start`). Rewinds persisted
@@ -3581,7 +3870,9 @@ function cmdNext(opts) {
   // runtime, so this emission finishes that story instead of skipping ahead.
   // The rewound state is persisted by cmdNext's own persistRuntimeState call
   // below (it derives from the mutated `persisted` via composeRuntimeState).
-  const landRecovery = recoverUnlandedPredecessor({ persisted, profile, projectRoot });
+  // Uses the base profile: recovery is a git/landing concern, independent of
+  // the per-story fast-lane flow.
+  const landRecovery = recoverUnlandedPredecessor({ persisted, profile: baseProfile, projectRoot });
   if (landRecovery) {
     ledger.append(
       {
@@ -3605,6 +3896,13 @@ function cmdNext(opts) {
         `(${landRecovery.reason}) before starting the next story.\n`,
     );
   }
+  // Per-story fast-lane routing (no-op unless autopilot.fast_lane.enabled).
+  // Derived AFTER land recovery so the decision + audit entry key on the
+  // (possibly rewound) story, not the one we were about to skip to. cmdNext
+  // owns the audit entry (emitLedger) — recorded ~once per story-start.
+  const profile = deriveEffectiveProfile(persisted, baseProfile, projectRoot, {
+    emitLedger: true,
+  });
   const runtime = composeRuntimeState(persisted, profile, projectRoot);
   // --test-scope override (one-shot, this emission only). Accepted values
   // match profile.testing_scope. Threaded into the runtime so
@@ -3680,8 +3978,12 @@ function cmdNext(opts) {
 
 function cmdRecord(opts) {
   const projectRoot = resolveProjectRoot(opts);
-  const { typed: profile } = resolveProfile(projectRoot, opts.profile);
+  const { typed: baseProfile } = resolveProfile(projectRoot, opts.profile);
   const persisted = loadState(projectRoot);
+  // Per-story fast-lane routing must match what cmdNext emitted so verify /
+  // escalation see the same effective flow (fast_lane_active). No ledger
+  // emission here — cmdNext already recorded the decision.
+  const profile = deriveEffectiveProfile(persisted, baseProfile, projectRoot);
   const runtime = composeRuntimeState(persisted, profile, projectRoot);
 
   let signalJson;
@@ -4088,6 +4390,19 @@ function cmdRecord(opts) {
 function cmdState(opts) {
   const projectRoot = resolveProjectRoot(opts);
   const persisted = loadState(projectRoot);
+  // Decorate the dumped state with the per-story fast-lane decision so the
+  // display reflects what the next emission will route to (no ledger emit —
+  // this is a read-only inspector). Only when the fast lane is enabled. The
+  // preview lives under a clearly-synthetic `_fast_lane_preview` key (leading
+  // underscore) so nothing mistakes it for a persisted state field.
+  const { typed: baseProfile } = resolveProfile(projectRoot, opts.profile);
+  if (baseProfile && baseProfile.fast_lane_enabled === true) {
+    const eff = deriveEffectiveProfile(persisted, baseProfile, projectRoot);
+    persisted._fast_lane_preview = {
+      effective_flow: eff.implementation_flow,
+      fast_lane_active: eff.fast_lane_active === true,
+    };
+  }
   process.stdout.write(`${JSON.stringify(persisted, null, 2)}\n`);
   return 0;
 }
@@ -4180,6 +4495,57 @@ function cmdResume(opts) {
     `${JSON.stringify({ action: finalAction, phase: runtime.phase, hint }, null, 2)}\n`,
   );
   return 0;
+}
+
+// `autopilot fast-lane <story|epic-key> <fast|full|auto> [--epic]` — set or
+// clear a durable fast|full override for a story or epic. `auto` clears the
+// mark (reverts to the automatic gate). Used by users directly and by the
+// /sprintpilot-plan-sprint skill. The mark lives in the clobber-resistant
+// fast-lane-overrides.json and is the highest-authority routing signal.
+function cmdFastLane(opts, args) {
+  const projectRoot = resolveProjectRoot(opts);
+  const key = args[0];
+  const decision = args[1];
+  if (!key || !decision) {
+    log.error('usage: autopilot fast-lane <story-key|epic-<id>> <fast|full|auto>');
+    return 2;
+  }
+  if (!['fast', 'full', 'auto'].includes(decision)) {
+    log.error(`invalid decision ${JSON.stringify(decision)} (expected fast | full | auto)`);
+    return 2;
+  }
+  // An epic target is the `epic-<id>` key form (unambiguous, no flag needed).
+  const isEpic = /^epic-/i.test(key);
+  const label = isEpic ? `epic ${fastLaneOverrides.normalizeEpicKey(key)}` : `story ${key}`;
+  try {
+    if (decision === 'auto') {
+      const cleared = fastLaneOverrides.clearOverride(projectRoot, key, { isEpic });
+      ledger.append(
+        { kind: 'fast_lane_override_set', target: isEpic ? 'epic' : 'story', key, decision: 'auto', cleared },
+        { projectRoot },
+      );
+      process.stdout.write(
+        cleared
+          ? `Cleared the fast-lane mark on ${label} — it reverts to the automatic gate.\n`
+          : `No fast-lane mark set on ${label}.\n`,
+      );
+      return 0;
+    }
+    const res = fastLaneOverrides.setOverride(projectRoot, key, decision, { isEpic });
+    if (!res.ok) {
+      log.error(`could not set fast-lane mark: ${res.reason || 'invalid'}`);
+      return 2;
+    }
+    ledger.append(
+      { kind: 'fast_lane_override_set', target: isEpic ? 'epic' : 'story', key: res.key, decision },
+      { projectRoot },
+    );
+    process.stdout.write(`Marked ${label} as ${decision}.\n`);
+    return 0;
+  } catch (e) {
+    log.error(`fast-lane: ${e.message}`);
+    return 1;
+  }
 }
 
 function cmdReport(opts) {
@@ -4323,6 +4689,42 @@ function buildRichStatus(projectRoot, persisted, opts) {
     profileName = null;
   }
 
+  // Fast-lane routing summary (null when the lane never fired this sprint —
+  // the ledger is append-only and sprint-lifetime, not reset per session):
+  // the current story's latest decision + sprint counts of fast-laned and
+  // escalated-back stories. Derived from the fast_lane_decision /
+  // profile_escalated ledger entries.
+  let fastLane = null;
+  const flDecisions = ledgerEntries.filter((e) => e.kind === 'fast_lane_decision');
+  if (flDecisions.length > 0) {
+    // "Fast-laned" = ever routed fast (ran quick-dev), not just the latest
+    // decision — an escalated story still ran quick-dev. `current_decision`
+    // is the current story's LATEST decision.
+    const everFast = new Set();
+    const latestByStory = new Map();
+    for (const e of flDecisions) {
+      const k = e.story_key || '(unknown)';
+      latestByStory.set(k, e.decision);
+      if (e.decision === 'fast') everFast.add(k);
+    }
+    const escalated = new Set(
+      ledgerEntries
+        .filter((e) => e.kind === 'profile_escalated' && e.from === 'fast_lane')
+        .map((e) => e.story_key || '(unknown)'),
+    );
+    const curKey = persisted.current_story || null;
+    // Current story's decision: show `fast→full` while it's running the
+    // escalated full cycle (it was fast-laned then bounced), rather than the
+    // stale `fast` its last fast_lane_decision entry still reads.
+    let currentDecision = curKey && latestByStory.has(curKey) ? latestByStory.get(curKey) : null;
+    if (curKey && escalated.has(curKey)) currentDecision = 'fast→full';
+    fastLane = {
+      current_decision: currentDecision,
+      fast_laned: everFast.size,
+      escalated: escalated.size,
+    };
+  }
+
   // Single authoritative "what runs next" line — same composer the
   // start/next envelopes use, so `autopilot progress` agrees with them
   // byte-for-byte. Built from a minimal runtime view of persisted state.
@@ -4358,6 +4760,7 @@ function buildRichStatus(projectRoot, persisted, opts) {
     recent_events: recent,
     background_full_suite: backgroundFullSuite,
     quarantined_test_count: quarantinedCount,
+    fast_lane: fastLane,
   };
 }
 
@@ -4381,6 +4784,14 @@ function renderStatusHuman(s) {
   }
   if (s.session_stories_completed > 0) {
     lines.push(`session stories done: ${s.session_stories_completed}`);
+  }
+  if (s.fast_lane) {
+    const cur = s.fast_lane.current_decision
+      ? `  (this story: ${s.fast_lane.current_decision})`
+      : '';
+    lines.push(
+      `fast-lane: ${s.fast_lane.fast_laned} fast-laned, ${s.fast_lane.escalated} escalated back${cur}`,
+    );
   }
   if (s.halt_active) {
     lines.push(`HALT: ${s.halt_reason || 'unknown'}`);
@@ -5241,6 +5652,8 @@ function main(argv) {
         return cmdTasks(opts);
       case 'quarantine':
         return cmdQuarantine(opts, positional.slice(1));
+      case 'fast-lane':
+        return cmdFastLane(opts, positional.slice(1));
       case 'watch':
         return cmdWatch(opts);
       case 'resume':
@@ -5277,6 +5690,8 @@ module.exports = {
   decorateGitOp,
   decorateRunScript,
   composeRuntimeState,
+  // Per-story fast-lane routing seam (exposed for unit/integration tests).
+  deriveEffectiveProfile,
   acquireAutopilotLock,
   runWorktreeHealthCheck,
   // v2.5.0 observability helpers (exposed for unit tests).

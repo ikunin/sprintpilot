@@ -35,6 +35,11 @@ Edit `_Sprintpilot/modules/autopilot/config.yaml`:
 | `autopilot.retrospective_mode` | `auto` | `auto` / `stop` / `skip` | How epic-end retrospectives are handled (see below). |
 | `autopilot.auto_infer_dependencies` | `false` (was `true` pre-v2.3.0) | bool | **Legacy flag — superseded by `auto_plan_on_start` in v2.3.0.** See "Sprint Planning + DAG-Aware Execution" below. |
 | `autopilot.auto_plan_on_start` | `false` | bool | **v2.3.0.** When `true`, `autopilot start` emits `invoke_skill: sprintpilot-plan-sprint` on greenfield projects (no `sprint-plan.yaml`). Default `false`: missing plan → fall back to sprint-status order. Once a plan exists, staleness triggers auto-derive regardless of this knob. |
+| `autopilot.fast_lane.enabled` | `false` | bool | **Fast lane.** When `true`, a full profile (`small`/`medium`/`large`) may route *individual* low-risk stories through one-shot `bmad-quick-dev` instead of the 7-step cycle. A conservative pre-story gate decides `fast\|full` (defaults `full` on doubt); any failure bounces the story back to the full cycle and remembers it. Prompted at install. See "Fast lane" below. |
+| `autopilot.fast_lane.max_ac` | `3` | integer ≥ 0 | Stories with more Acceptance Criteria than this never fast-lane (a size gate that beats an explicit fast tag). |
+| `autopilot.fast_lane.allow_globs` | `"docs/**,**/*.md"` | comma-sep globs | A story only *infers* `fast` when every path it declares is allow-listed here. |
+| `autopilot.fast_lane.deny_globs` | `"**/auth/**,**/migrations/**,**/*secret*,**/*secret*/**"` | comma-sep globs | Any declared path matching these forces `full` — hard safety, beats a fast tag. |
+| `autopilot.fast_lane.require_story_tag` | `false` | bool | When `true`, only stories explicitly tagged `fast_lane: true` / `risk: low` fast-lane. |
 | `git.lock.stale_timeout_minutes` | `30` | integer ≥ 0 | `.autopilot.lock` older than this is auto-taken-over by the next session. `0` disables auto-takeover (locks held until released manually). |
 | `git.worktree.health_check_on_boot` | `true` | bool | At session start, scan `.worktrees/` for orphans from crashed sessions and halt with a prune hint when any are found. |
 | `git.worktree.cleanup_on_merge` | `true` | bool | After an epic merges, prune worktree metadata and remove `.worktrees/<key>/` directories whose branches no longer exist locally or on origin. |
@@ -54,6 +59,21 @@ Edit `_Sprintpilot/modules/autopilot/config.yaml`:
 - **`skip`** — no retrospective artifact is written. **Not recommended** — you lose the epic-level learning record.
 
 Both settings are prompted during `sprintpilot install` (interactive mode) with existing values as defaults, so reinstalls preserve your choices.
+
+#### Fast lane (per-story quick-dev under full profiles)
+
+**Default OFF.** When `autopilot.fast_lane.enabled` is true, a deterministic pre-story gate routes **individual low-risk stories** through `bmad-quick-dev` (one-shot) under a full profile, while substantial stories keep the mandatory 7-step cycle. This is a sanctioned, opt-in relaxation of the RED-first rule — the same kind of exception as `nano`, not a silent skip. The installer asks whether to enable it.
+
+How a story is routed (the gate is conservative — **any uncertainty → `full`**):
+
+- more Acceptance Criteria than `max_ac` → `full` (beats a fast tag);
+- any declared path matching `deny_globs` (auth / migrations / secrets) → `full`, even against an explicit fast tag;
+- inference routes `fast` only when **every** path the story declares is covered by `allow_globs`;
+- an explicit tag forces the decision — in the story file (`fast_lane: true` / `risk: low|high`) or on the story's **epic entry** in `sprint-plan.yaml` (story-file tag wins). A `full`-forcing tag always beats a `fast` one.
+
+**Guardrails.** Tests are still required (`verifyNanoQuickDev` needs `tests_run > 0`, a commit SHA, and sprint-status `done`). If a fast-laned quick-dev run **fails, reports failing tests, or flags a high-severity finding**, the autopilot bounces that story back to the full 7-step cycle (re-running `bmad-create-story` → the 7 steps) and records it in `fast_lane_forced_full` so it never re-fast-lanes. The re-run carries an escalation note telling the dev step it's hardening existing committed code, not doing greenfield RED.
+
+**Auditing.** Every routing choice is a `fast_lane_decision` ledger entry; `autopilot progress` and the session report show fast-laned and escalated counts.
 
 ### Sprint Planning + DAG-Aware Execution (v2.3.0)
 

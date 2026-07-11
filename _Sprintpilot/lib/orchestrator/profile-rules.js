@@ -64,6 +64,9 @@ const PHASE_TIMEOUT_DEFAULTS_BY_PROFILE = {
     code_review: 10,
     patch_apply: 10,
     patch_retest: 10,
+    // Fast lane: a low-risk story may run quick-dev (one-shot) under a full
+    // profile. Budget it like dev_green so a hung fast-lane run still halts.
+    nano_quick_dev: 20,
   },
   medium: {
     create_story: 5,
@@ -73,6 +76,7 @@ const PHASE_TIMEOUT_DEFAULTS_BY_PROFILE = {
     code_review: 15,
     patch_apply: 15,
     patch_retest: 15,
+    nano_quick_dev: 30,
   },
   large: {
     create_story: 10,
@@ -82,6 +86,7 @@ const PHASE_TIMEOUT_DEFAULTS_BY_PROFILE = {
     code_review: 30,
     patch_apply: 30,
     patch_retest: 30,
+    nano_quick_dev: 60,
   },
   legacy: null,
 };
@@ -113,6 +118,16 @@ function coerceInt(v, fallback) {
 function coerceEnum(v, allowed, fallback) {
   if (typeof v === 'string' && allowed.includes(v)) return v;
   return fallback;
+}
+
+// Coerce a glob list. resolve-profile.js's narrow YAML parser can't emit
+// arrays, so the portable representation is a comma-separated string
+// (`"docs/**,**/*.md"`). Also tolerate a real array (when parsed by js-yaml
+// in tests / a richer host). Returns a trimmed string[] with empties dropped.
+function coerceGlobList(v) {
+  if (Array.isArray(v)) return v.filter((g) => typeof g === 'string' && g.trim().length > 0).map((g) => g.trim());
+  if (typeof v === 'string') return v.split(',').map((g) => g.trim()).filter((g) => g.length > 0);
+  return [];
 }
 
 // Coerce a per-phase timeout map. Accepts:
@@ -392,26 +407,86 @@ function flatToProfile(resolved, profileName) {
       typeof get(resolved, 'testing.commands.full') === 'string'
         ? get(resolved, 'testing.commands.full')
         : null,
+
+    // autopilot.fast_lane.* — per-story quick-dev fast lane (default OFF).
+    //
+    // When enabled, a deterministic pre-story gate (fast-lane-gate.js) may
+    // route LOW-RISK stories through bmad-quick-dev (one-shot) under a FULL
+    // profile, while substantial stories keep the mandatory 7-step cycle.
+    // This is a sanctioned, opt-in relaxation of the RED-first rule — see
+    // AGENTS.md and docs/quick-dev-fast-lane-plan.md. Every knob is inert
+    // while `enabled` is false, so full profiles behave exactly as before.
+    //
+    //   enabled           — master switch (installer prompts; default false)
+    //   max_ac            — stories with more Acceptance Criteria never
+    //                       fast-lane (a size proxy)
+    //   allow_globs       — a story only infers `fast` when EVERY path it
+    //                       declares is allow-listed here
+    //   deny_globs        — any declared path matching these forces `full`
+    //                       even against an explicit fast tag (hard safety)
+    //   require_story_tag — when true, only stories explicitly tagged
+    //                       `fast_lane: true` / `risk: low` fast-lane
+    fast_lane_enabled: coerceBool(get(resolved, 'autopilot.fast_lane.enabled'), false),
+    fast_lane_max_ac: coerceInt(get(resolved, 'autopilot.fast_lane.max_ac'), 3),
+    fast_lane_allow_globs: coerceGlobList(get(resolved, 'autopilot.fast_lane.allow_globs')),
+    fast_lane_deny_globs: coerceGlobList(get(resolved, 'autopilot.fast_lane.deny_globs')),
+    fast_lane_require_story_tag: coerceBool(
+      get(resolved, 'autopilot.fast_lane.require_story_tag'),
+      false,
+    ),
   };
 }
 
-// Session-scoped mid-sprint escalation. Called when a nano `bmad-quick-dev`
-// returns failure indicators. Returns a NEW Profile object — never mutates.
-// Returns the original profile unchanged when escalation conditions are not met
-// or the profile is not nano.
+// Session-scoped mid-sprint escalation. Called when a `bmad-quick-dev`
+// success signal carries failure indicators (failing tests or a high-severity
+// Classify verdict). Returns a NEW Profile object — never mutates. Returns the
+// original profile unchanged when escalation conditions are not met.
+//
+// Two escalation origins share this trigger:
+//   - nano profile        → the whole session escalates to `fallback_target`
+//                           (full flow) so REMAINING stories run the 7-step
+//                           cycle (AGENTS.md nano safety net).
+//   - fast_lane_active     → a single story that was fast-laned under a FULL
+//                           profile bounces to `full` flow. The profile name
+//                           is preserved (it's already a full profile); the
+//                           caller re-runs THAT story through the 7-step cycle
+//                           and records it in `fast_lane_forced_full` so the
+//                           pre-story gate keeps it full on re-derivation.
 function escalateOnFailure(profile, signalOutput) {
-  if (!profile || profile.name !== 'nano') return profile;
+  if (!profile) return profile;
   if (!signalOutput || typeof signalOutput !== 'object') return profile;
+
+  const isNano = profile.name === 'nano';
+  const isFastLane = profile.fast_lane_active === true;
+  if (!isNano && !isFastLane) return profile;
 
   const testsFailed =
     typeof signalOutput.tests_failed === 'number' && signalOutput.tests_failed > 0;
   const highSeverity = signalOutput.severity === 'high';
 
-  const shouldEscalate =
-    (testsFailed && profile.fallback_on_tests_fail) ||
-    (highSeverity && profile.fallback_on_quick_dev_high_severity);
+  // The fast lane's safety net is core to the design (not an optional knob),
+  // so a fast-laned story always escalates on these triggers. Nano keeps its
+  // documented, per-knob gating.
+  const shouldEscalate = isFastLane
+    ? testsFailed || highSeverity
+    : (testsFailed && profile.fallback_on_tests_fail) ||
+      (highSeverity && profile.fallback_on_quick_dev_high_severity);
 
   if (!shouldEscalate) return profile;
+
+  const escalationReason = testsFailed ? 'tests_failed' : 'high_severity';
+
+  if (isFastLane) {
+    // Keep the profile's own name + budgets; just drop back to the full
+    // flow for this story and clear the fast-lane marker so we don't loop.
+    return {
+      ...profile,
+      implementation_flow: 'full',
+      fast_lane_active: false,
+      escalated_from: 'fast_lane',
+      escalation_reason: escalationReason,
+    };
+  }
 
   const targetName = profile.fallback_target || 'small';
   const targetDefaults =
@@ -426,7 +501,7 @@ function escalateOnFailure(profile, signalOutput) {
     fallback_on_tests_fail: false,
     fallback_on_quick_dev_high_severity: false,
     escalated_from: 'nano',
-    escalation_reason: testsFailed ? 'tests_failed' : 'high_severity',
+    escalation_reason: escalationReason,
   };
 }
 

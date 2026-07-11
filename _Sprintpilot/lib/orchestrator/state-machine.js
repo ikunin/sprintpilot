@@ -87,7 +87,11 @@ const TERMINAL_STATES = new Set([STATES.SPRINT_FINALIZE_PENDING]);
 // enforced in `nextStateAfterSuccess`.
 const FULL_FLOW_SUCCESSORS = {
   [STATES.PREPARE_STORY_BRANCH]: [STATES.CREATE_STORY],
-  [STATES.CREATE_STORY]: [STATES.CHECK_READINESS],
+  // NANO_QUICK_DEV is a valid successor when the per-story fast lane is active:
+  // a fast-laned story runs create-story FIRST (so the gate has a real story
+  // file), then routes to quick-dev instead of the 7-step cycle.
+  [STATES.CREATE_STORY]: [STATES.CHECK_READINESS, STATES.NANO_QUICK_DEV], // NANO_QUICK_DEV only when fast_lane_active
+  [STATES.NANO_QUICK_DEV]: [STATES.STORY_DONE],
   [STATES.CHECK_READINESS]: [STATES.DEV_RED],
   [STATES.DEV_RED]: [STATES.DEV_GREEN],
   [STATES.DEV_GREEN]: [STATES.CODE_REVIEW],
@@ -152,7 +156,7 @@ function buildTemplateSlots(state, profile, extra = {}) {
     patch_findings: state.patch_findings || null,
     tests_to_rerun: state.tests_to_rerun || null,
     profile_name: profile.name,
-    profile_specific_notes: state.escalation_note || profileNotes(profile),
+    profile_specific_notes: joinNotes(state.escalation_note, profileNotes(profile)),
     // Filled by autopilot.js#decorateTestScope for test-running phases.
     test_scope: null,
     recommended_test_command: null,
@@ -192,6 +196,16 @@ function profileNotes(profile) {
     return 'nano: bmad-quick-dev one-shot; escalate to full flow on test fail or high severity.';
   }
   return null;
+}
+
+// joinNotes(a, b) → combine two note strings without letting one suppress the
+// other. Used so a transient escalation_note (e.g. the fast-lane re-run
+// notice) is surfaced ALONGSIDE the normal profile guidance rather than
+// overriding it. Drops empties; returns null when both are empty.
+function joinNotes(a, b) {
+  const parts = [a, b].filter((n) => typeof n === 'string' && n.trim().length > 0);
+  if (parts.length === 0) return null;
+  return parts.join('\n\n');
 }
 
 // Compute elapsed minutes between two ISO timestamps. Returns null on
@@ -490,7 +504,12 @@ function nextStateAfterSuccess(currentState, profile, signal) {
   const output = (signal && signal.output) || {};
 
   // First: hint tiebreaker. If the LLM provided a structurally-valid hint, prefer it.
-  const successors = (profile.implementation_flow === 'quick' ? NANO_FLOW_SUCCESSORS : FULL_FLOW_SUCCESSORS)[phase] || [];
+  // Only nano (whole-profile quick) uses the compressed NANO successor table.
+  // A per-story fast-laned story (fast_lane_active) travels through FULL-flow
+  // phases (create_story → nano_quick_dev), so it validates against
+  // FULL_FLOW_SUCCESSORS (which lists NANO_QUICK_DEV as a create_story edge).
+  const useNanoTable = profile.implementation_flow === 'quick' && !profile.fast_lane_active;
+  const successors = (useNanoTable ? NANO_FLOW_SUCCESSORS : FULL_FLOW_SUCCESSORS)[phase] || [];
   const hint = signal && signal.next_skill_hint;
   // We only consult the hint when the deterministic decision below has more
   // than one valid successor. Compute the deterministic answer first.
@@ -508,13 +527,36 @@ function deterministicNext(state, profile, output) {
   switch (phase) {
     case STATES.PREPARE_STORY_BRANCH: {
       // Branch is on disk → enter the actual story work (flow-dependent).
-      const next = profile.implementation_flow === 'quick'
-        ? STATES.NANO_QUICK_DEV
-        : STATES.CREATE_STORY;
+      // nano (whole-profile quick) goes straight to quick-dev, skipping
+      // create-story per AGENTS.md. The per-story FAST LANE (fast_lane_active
+      // under a full profile) instead runs create-story FIRST — the pre-story
+      // gate needs a real story file to enforce deny-globs / max_ac / tags —
+      // and only THEN routes to quick-dev (see the CREATE_STORY case).
+      const next =
+        profile.implementation_flow === 'quick' && !profile.fast_lane_active
+          ? STATES.NANO_QUICK_DEV
+          : STATES.CREATE_STORY;
       return { chosen: next, allValid: [next] };
     }
-    case STATES.CREATE_STORY:
-      return { chosen: STATES.CHECK_READINESS, allValid: [STATES.CHECK_READINESS] };
+    case STATES.CREATE_STORY: {
+      // Fast lane: with the story file now written, a story the gate routes
+      // `fast` (profile flipped to quick + fast_lane_active) goes to quick-dev
+      // one-shot instead of the 7-step cycle. Everything else runs readiness.
+      //
+      // allValid is flow-scoped: NANO_QUICK_DEV is a structurally-valid
+      // successor ONLY when fast-laned. Otherwise CHECK_READINESS is the sole
+      // valid successor, so the LLM's next_skill_hint tiebreaker cannot push a
+      // NON-fast-laned story (incl. a deny-glob'd or sticky-forced-full one)
+      // into quick-dev via a stray `bmad-quick-dev` hint.
+      const fastLane = profile.implementation_flow === 'quick' && profile.fast_lane_active;
+      const chosen = fastLane ? STATES.NANO_QUICK_DEV : STATES.CHECK_READINESS;
+      return {
+        chosen,
+        allValid: fastLane
+          ? [STATES.NANO_QUICK_DEV, STATES.CHECK_READINESS]
+          : [STATES.CHECK_READINESS],
+      };
+    }
     case STATES.CHECK_READINESS:
       return { chosen: STATES.DEV_RED, allValid: [STATES.DEV_RED] };
     case STATES.DEV_RED:
@@ -655,7 +697,11 @@ function nextStoryStart(profile) {
     !profile.reuse_user_branch &&
     (profile.granularity === 'story' || profile.granularity === 'epic');
   if (needsBranchPrep) return STATES.PREPARE_STORY_BRANCH;
-  return profile.implementation_flow === 'quick' ? STATES.NANO_QUICK_DEV : STATES.CREATE_STORY;
+  // nano skips create-story; the per-story fast lane runs it first (see the
+  // PREPARE_STORY_BRANCH / CREATE_STORY cases).
+  return profile.implementation_flow === 'quick' && !profile.fast_lane_active
+    ? STATES.NANO_QUICK_DEV
+    : STATES.CREATE_STORY;
 }
 
 // Best-effort mapping from a next_skill_hint string (e.g. "bmad-code-review")

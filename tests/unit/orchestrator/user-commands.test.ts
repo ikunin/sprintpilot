@@ -18,6 +18,29 @@ describe('validateOne', () => {
     expect(r.ok).toBe(true);
   });
 
+  it('accepts set_fast_lane with a story_key or epic + decision', () => {
+    expect(validateOne({ kind: 'set_fast_lane', story_key: '4-1', decision: 'fast' }).ok).toBe(
+      true,
+    );
+    expect(validateOne({ kind: 'set_fast_lane', story_key: '4-1', decision: 'full' }).ok).toBe(
+      true,
+    );
+    expect(validateOne({ kind: 'set_fast_lane', story_key: '4-1', decision: 'auto' }).ok).toBe(
+      true,
+    );
+    expect(validateOne({ kind: 'set_fast_lane', epic: 'epic-5', decision: 'fast' }).ok).toBe(true);
+  });
+
+  it('rejects set_fast_lane without a target, with both, or with a bad decision', () => {
+    expect(validateOne({ kind: 'set_fast_lane', decision: 'fast' }).ok).toBe(false);
+    expect(
+      validateOne({ kind: 'set_fast_lane', story_key: '4-1', epic: '5', decision: 'fast' }).ok,
+    ).toBe(false);
+    expect(validateOne({ kind: 'set_fast_lane', story_key: '4-1', decision: 'maybe' }).ok).toBe(
+      false,
+    );
+  });
+
   it('rejects skip_story without story_key', () => {
     const r = validateOne({ kind: 'skip_story' });
     expect(r.ok).toBe(false);
